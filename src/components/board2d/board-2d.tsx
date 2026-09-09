@@ -1,0 +1,190 @@
+"use client";
+// src/components/board2d/board-2d.tsx  [P3]
+// The 2D board: one of the two implementations of `BoardViewProps` (the other is
+// P4's Board3D). It owns no chess logic, calls no Convex function and reads no
+// game state from a store — everything comes in as props from useGameController.
+import { useCallback, useMemo, useState } from "react";
+import { FILES, RANKS, gridPosition, isLightSquare, squareIndices } from "@/lib/constants";
+import { resolveRoom } from "@/lib/rooms";
+import { useUiStore } from "@/lib/stores/ui-store";
+import { cn } from "@/lib/utils";
+import type { BoardViewProps, Colour, SquareId } from "@/lib/types";
+import { Piece2D } from "./piece-2d";
+import { Square2D } from "./square-2d";
+import { pieceName } from "./pieces-svg";
+
+/** Inverse of `gridPosition`: the square drawn at visual row/col. */
+function squareAt(row: number, col: number, orientation: Colour): SquareId {
+  const rank = orientation === "w" ? 7 - row : row;
+  const file = orientation === "w" ? col : 7 - col;
+  return `${FILES[file]}${RANKS[rank]}` as SquareId;
+}
+
+const ROWS = [0, 1, 2, 3, 4, 5, 6, 7];
+
+export function Board2D(props: BoardViewProps) {
+  const {
+    position,
+    orientation,
+    turn,
+    interactive,
+    animate,
+    selectedSquare,
+    legalTargets,
+    lastMove,
+    checkSquare,
+    onSquareSelect,
+    onDeselect,
+  } = props;
+
+  // Room colours are a per-viewer setting, not game state (FR-21l), so reading
+  // them here does not violate the "boards never read a store for game state" rule.
+  const roomPreset = useUiStore((s) => s.roomPreset);
+  const roomColors = useUiStore((s) => s.roomColors);
+  const customBoard = useMemo(() => {
+    if (roomPreset !== "custom") return null;
+    return resolveRoom("custom", roomColors).board;
+  }, [roomPreset, roomColors]);
+
+  const [cursor, setCursor] = useState<SquareId>("e1");
+
+  const targets = useMemo(() => {
+    const map = new Map<SquareId, boolean>();
+    for (const t of legalTargets) map.set(t.to, t.isCapture || t.isEnPassant);
+    return map;
+  }, [legalTargets]);
+
+  const occupied = useMemo(() => {
+    const map = new Map<SquareId, (typeof position)[number]>();
+    for (const piece of position) map.set(piece.square, piece);
+    return map;
+  }, [position]);
+
+  const focusSquare = useCallback((square: SquareId, container: HTMLElement | null) => {
+    const cell = container?.querySelector<HTMLElement>(`[data-square="${square}"]`);
+    cell?.focus();
+  }, []);
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const { row, col } = gridPosition(cursor, orientation);
+      let nextRow = row;
+      let nextCol = col;
+      switch (event.key) {
+        case "ArrowUp":
+          nextRow = Math.max(0, row - 1);
+          break;
+        case "ArrowDown":
+          nextRow = Math.min(7, row + 1);
+          break;
+        case "ArrowLeft":
+          nextCol = Math.max(0, col - 1);
+          break;
+        case "ArrowRight":
+          nextCol = Math.min(7, col + 1);
+          break;
+        case "Home":
+          nextCol = 0;
+          break;
+        case "End":
+          nextCol = 7;
+          break;
+        case "Enter":
+        case " ":
+          event.preventDefault();
+          onSquareSelect(cursor);
+          return;
+        case "Escape":
+          onDeselect();
+          return;
+        default:
+          return;
+      }
+      event.preventDefault();
+      const next = squareAt(nextRow, nextCol, orientation);
+      setCursor(next);
+      focusSquare(next, event.currentTarget);
+    },
+    [cursor, orientation, onSquareSelect, onDeselect, focusSquare],
+  );
+
+  return (
+    <div className="relative aspect-square w-full max-w-[min(100%,80vh)] overflow-hidden rounded-xl ring-1 ring-border select-none">
+      <div
+        role="grid"
+        aria-label={`Chess board, ${orientation === "w" ? "white" : "black"} at the bottom`}
+        aria-readonly={!interactive}
+        className="grid h-full w-full grid-cols-8 grid-rows-8"
+        onKeyDown={onKeyDown}
+      >
+        {ROWS.map((row) => (
+          // `display: contents` keeps the 8x8 grid while giving screen readers rows.
+          <div key={row} role="row" className="contents">
+            {ROWS.map((col) => {
+              const square = squareAt(row, col, orientation);
+              const light = isLightSquare(square);
+              const piece = occupied.get(square);
+              const isTarget = targets.has(square);
+              const { file } = squareIndices(square);
+              return (
+                <Square2D
+                  key={square}
+                  square={square}
+                  light={light}
+                  colour={
+                    customBoard === null
+                      ? null
+                      : light
+                        ? customBoard.lightSquare
+                        : customBoard.darkSquare
+                  }
+                  selected={selectedSquare === square}
+                  legal={isTarget}
+                  capture={targets.get(square) === true || (isTarget && piece !== undefined)}
+                  lastMove={lastMove?.from === square || lastMove?.to === square}
+                  check={checkSquare === square}
+                  cursor={cursor === square}
+                  disabled={!interactive}
+                  label={
+                    piece
+                      ? `${square}, ${pieceName(piece.type, piece.colour)}${isTarget ? ", capture" : ""}`
+                      : `${square}, empty${isTarget ? ", legal move" : ""}`
+                  }
+                  fileLabel={row === 7 ? FILES[file] : null}
+                  rankLabel={col === 0 ? square[1] : null}
+                  onSelect={onSquareSelect}
+                  onFocusSquare={setCursor}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Pieces float above the grid; clicks fall through to the squares. */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        {position.map((piece) => (
+          <Piece2D
+            key={piece.id}
+            piece={piece}
+            orientation={orientation}
+            animate={animate}
+            selected={selectedSquare === piece.square}
+          />
+        ))}
+      </div>
+
+      {/* Turn tint on the edge, so the board itself shows whose move it is. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-0 h-1 transition-opacity",
+          turn === "w" ? "bottom-0" : "top-0",
+          interactive ? "bg-primary/70" : "bg-muted-foreground/30",
+        )}
+      />
+    </div>
+  );
+}
+
+export default Board2D;

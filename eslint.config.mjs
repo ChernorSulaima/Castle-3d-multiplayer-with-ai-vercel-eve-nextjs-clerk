@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // INTEGRATION: `pnpm lint` runs bare `eslint`, which walks the whole repo. These
+    // paths are vendored or tool-generated and are not ours to lint or fix.
+    ".eve/**", // eve dev-runtime snapshots of our own compiled agent
+    ".output/**",
+    "convex/_generated/**", // written by `convex dev`, never hand-edited (§A.1)
+    "public/stockfish/**", // vendored stockfish@11.0.0 emscripten glue (GPL-3.0)
+    "public/models/**",
   ]),
 ]);
 

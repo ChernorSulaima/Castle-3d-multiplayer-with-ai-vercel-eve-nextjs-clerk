@@ -1,0 +1,502 @@
+"use client";
+// src/hooks/use-game-controller.ts  [P3]
+// THE controller contract (§D.11). It is the only place that calls `api.games.*`
+// mutations for a game; both boards receive `BoardViewProps` and nothing else.
+// There is deliberately NO optimistic update for moves — Convex is authoritative
+// (§E.3, NFR-4, §I-12).
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Chess } from "chess.js";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
+import {
+  buildPgn,
+  capturedFromMoves,
+  checkSquareOf,
+  fenAtPly,
+  lastMoveAtPly,
+  legalTargetsFor,
+  needsPromotion,
+  toHistoryRows,
+} from "@/lib/chess";
+import { CAMERA_FLIP_MS, DEFAULT_FEN } from "@/lib/constants";
+import { seatPresetFor } from "@/lib/camera";
+import { pgnFilename, pgnResult } from "@/lib/format";
+import { PieceTracker } from "@/lib/piece-tracker";
+import { useUiStore } from "@/lib/stores/ui-store";
+import type {
+  BoardPiece,
+  BoardView,
+  BoardViewProps,
+  CapturedPieces,
+  Colour,
+  GameActions,
+  GameController,
+  GameId,
+  GameView,
+  LastMove,
+  LegalTarget,
+  MoveHistoryRow,
+  PieceSymbol,
+  PromotionPiece,
+  PromotionPrompt,
+  SquareId,
+  ViewerRole,
+} from "@/lib/types";
+import { useReview } from "./use-review";
+import { api } from "../../convex/_generated/api";
+
+/* ------------------------------------------------------------------ helpers */
+
+const NO_MOVES: string[] = [];
+const NO_TARGETS: LegalTarget[] = [];
+const EMPTY_CAPTURES: CapturedPieces = { w: [], b: [] };
+
+/** Machine codes thrown by the Convex mutations mapped to user copy. */
+const ERROR_COPY: Record<string, string> = {
+  "illegal-move": "That move is not legal.",
+  "not-your-turn": "It is not your turn.",
+  "not-a-participant": "You are not playing in this game.",
+  "promotion-required": "Choose a promotion piece first.",
+  "game-not-active": "This game has already finished.",
+  "game-not-found": "That game no longer exists.",
+  "undo-not-allowed": "Take-backs are disabled in online matches.",
+  "invalid-ply": "That position is no longer part of this game.",
+  "stale-ai-move": "The position moved on — nothing was applied.",
+  "not-ai-turn": "It is not the AI's turn.",
+  "not-an-ai-game": "This is not a game against the AI.",
+  "no-draw-offer": "There is no draw offer to answer.",
+  "cannot-answer-own-offer": "You cannot answer your own draw offer.",
+  "hint-limit": "No hints left in this game.",
+  "hints-unavailable": "Hints are only available at Beginner and Casual.",
+  "Not authenticated": "Please sign in again.",
+  "Player not provisioned": "Your player profile is still being created.",
+};
+
+function messageFor(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  for (const [code, copy] of Object.entries(ERROR_COPY)) {
+    if (raw.includes(code)) return copy;
+  }
+  return "Something went wrong. Please try again.";
+}
+
+/** `games.lastMove` is stored with widened string fields; narrow it for the boards. */
+function toLastMove(stored: GameView["game"]["lastMove"]): LastMove | null {
+  if (!stored) return null;
+  return {
+    from: stored.from as SquareId,
+    to: stored.to as SquareId,
+    san: stored.san,
+    colour: stored.colour,
+    captured: stored.captured as PieceSymbol | undefined,
+    promotion: stored.promotion as PromotionPiece | undefined,
+  };
+}
+
+function seatFor(role: ViewerRole): Colour | "both" | null {
+  if (role === "white") return "w";
+  if (role === "black") return "b";
+  if (role === "local") return "both";
+  return null;
+}
+
+/* -------------------------------------------------------------- the hook */
+
+/**
+ * @param gameId  the game to subscribe to.
+ * @param initialView  the server-preloaded `api.games.get` result, used for the
+ *   first render only so SSR markup and the first client render agree.
+ */
+export function useGameController(
+  gameId: GameId,
+  initialView?: GameView | null,
+): GameController {
+  // `games.get` requires an identity, so hold the subscription until Convex has
+  // validated the Clerk token; the server-preloaded value covers the gap.
+  const { isAuthenticated } = useConvexAuth();
+  const live = useQuery(api.games.get, isAuthenticated ? { gameId } : "skip");
+  const view = live === undefined ? (initialView ?? null) : live;
+  const loaded = live !== undefined || initialView !== undefined;
+
+  const makeMove = useMutation(api.games.makeMove);
+  const undoMove = useMutation(api.games.undo);
+  const resignGame = useMutation(api.games.resign);
+  const offerDrawMutation = useMutation(api.games.offerDraw);
+  const respondDrawMutation = useMutation(api.games.respondDraw);
+
+  const [selectedSquare, setSelectedSquare] = useState<SquareId | null>(null);
+  const [promotion, setPromotion] = useState<PromotionPrompt | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [orientationOverride, setOrientationOverride] = useState<Colour | null>(null);
+  const [flipping, setFlipping] = useState(false);
+
+  const reducedMotion = useUiStore((s) => s.reducedMotion);
+  const boardFlipEnabled = useUiStore((s) => s.boardFlipEnabled);
+
+  const game = view?.game ?? null;
+  const moves = game?.moves ?? NO_MOVES;
+  const totalPlies = moves.length;
+  const mode = game?.mode ?? "online";
+  const status = game?.status ?? "active";
+  const role: ViewerRole = view?.viewerRole ?? "spectator";
+  const seat = seatFor(role);
+
+  const review = useReview(totalPlies);
+  const { reviewPly, isLive, autoplay, stepped, goToPly, stepReview, setAutoplay } = review;
+
+  /* ------------------------------------------------------------ position */
+
+  const liveFen = game?.fen ?? DEFAULT_FEN;
+  const fen = useMemo(
+    () => (reviewPly === null ? liveFen : fenAtPly(moves, reviewPly)),
+    [reviewPly, liveFen, moves],
+  );
+
+  const storedLastMove = game?.lastMove;
+  const lastMove = useMemo(
+    () => (reviewPly === null ? toLastMove(storedLastMove) : lastMoveAtPly(moves, reviewPly)),
+    [reviewPly, storedLastMove, moves],
+  );
+
+  // One tracker per mounted game. It lives in state (not a ref) so it can be read
+  // during render without tripping `react-hooks/refs`; `sync` is idempotent.
+  const [tracker] = useState(() => new PieceTracker());
+  const position: BoardPiece[] = useMemo(
+    () => tracker.sync(fen, lastMove),
+    [tracker, fen, lastMove],
+  );
+
+  const turn: Colour = useMemo(() => {
+    if (reviewPly === null) return game?.turn ?? "w";
+    return reviewPly % 2 === 0 ? "w" : "b";
+  }, [reviewPly, game?.turn]);
+
+  const captured = useMemo(() => {
+    if (totalPlies === 0) return EMPTY_CAPTURES;
+    return capturedFromMoves(reviewPly === null ? moves : moves.slice(0, reviewPly));
+  }, [moves, reviewPly, totalPlies]);
+
+  const checkSquare = useMemo(() => checkSquareOf(fen), [fen]);
+  const history: MoveHistoryRow[] = useMemo(() => toHistoryRows(moves), [moves]);
+
+  /* --------------------------------------------------------- permissions */
+
+  const active = status === "active";
+  const isMyTurn = seat === "both" || (seat !== null && seat === (game?.turn ?? "w"));
+  const canMove = Boolean(game) && active && seat !== null && isMyTurn && isLive;
+  const canUndo =
+    Boolean(game) && seat !== null && mode !== "online" && totalPlies > 0 && !pending;
+  const canResign = Boolean(game) && active && seat !== null;
+  const drawOfferFrom: Colour | null = game?.drawOffer ?? null;
+  const canOfferDraw =
+    Boolean(game) && active && seat !== null && mode !== "ai" && drawOfferFrom === null;
+
+  const interactive = canMove && !pending && !flipping;
+
+  /* -------------------------------------------------------- orientation */
+
+  const orientation: Colour = useMemo(() => {
+    if (orientationOverride !== null) return orientationOverride;
+    if (role === "white") return "w";
+    if (role === "black") return "b";
+    if (role === "local") return boardFlipEnabled ? (game?.turn ?? "w") : "w";
+    return "w";
+  }, [orientationOverride, role, boardFlipEnabled, game?.turn]);
+
+  // Mirror the seat into the ui-store so P4's rig and P2's UI can read it.
+  useEffect(() => {
+    useUiStore.getState().setOrientation(orientation);
+  }, [orientation]);
+
+  // §E.6: local two-player flip. Only fires on an actual ply change, never on mount
+  // and never when an unrelated dependency changes.
+  const flippedPlyRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (mode !== "local") return;
+    const previous = flippedPlyRef.current;
+    flippedPlyRef.current = totalPlies;
+    if (previous === null || previous === totalPlies) return;
+    if (!boardFlipEnabled) return;
+
+    const nextSeat = totalPlies % 2 === 0 ? "w" : "b";
+    useUiStore.getState().setCameraPreset(seatPresetFor(nextSeat));
+
+    // A manual flip is a one-off; the automatic hand-over takes the seat back.
+    const raf = requestAnimationFrame(() => {
+      setOrientationOverride(null);
+      // FR-21g: reduced motion snaps — no input lock-out and no overlay.
+      if (!reducedMotion) setFlipping(true);
+    });
+    const timer = reducedMotion
+      ? undefined
+      : setTimeout(() => setFlipping(false), CAMERA_FLIP_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timer !== undefined) clearTimeout(timer);
+      setFlipping(false);
+    };
+  }, [mode, totalPlies, boardFlipEnabled, reducedMotion]);
+
+  /* ------------------------------------------------------------- targets */
+
+  const legalTargets = useMemo(() => {
+    if (selectedSquare === null || !interactive) return NO_TARGETS;
+    return legalTargetsFor(fen, selectedSquare);
+  }, [selectedSquare, interactive, fen]);
+
+  /* ------------------------------------------------------------- actions */
+
+  const run = useCallback(async (fn: () => Promise<unknown>): Promise<boolean> => {
+    setPending(true);
+    setError(null);
+    try {
+      await fn();
+      return true;
+    } catch (caught) {
+      const message = messageFor(caught);
+      setError(message);
+      setSelectedSquare(null);
+      toast.error(message);
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }, []);
+
+  const deselect = useCallback(() => {
+    setSelectedSquare(null);
+    setPromotion(null);
+  }, []);
+
+  const move = useCallback(
+    async (from: SquareId, to: SquareId, promotionPiece?: PromotionPiece) => {
+      if (!canMove || pending) return;
+      if (promotionPiece === undefined && needsPromotion(fen, from, to)) {
+        setPromotion({ from, to, colour: turn }); // FR-11: nothing is sent yet.
+        return;
+      }
+      setPromotion(null);
+      setSelectedSquare(null);
+      await run(() =>
+        makeMove({ gameId, from, to, promotion: promotionPiece }),
+      );
+    },
+    [canMove, pending, fen, turn, run, makeMove, gameId],
+  );
+
+  const selectSquare = useCallback(
+    (square: SquareId) => {
+      if (!interactive) return;
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        return;
+      }
+      if (selectedSquare !== null) {
+        const target = legalTargets.find((t) => t.to === square);
+        if (target) {
+          void move(selectedSquare, square);
+          return;
+        }
+      }
+      const piece = position.find((p) => p.square === square);
+      setSelectedSquare(piece && piece.colour === turn ? square : null);
+    },
+    [interactive, selectedSquare, legalTargets, position, turn, move],
+  );
+
+  const choosePromotion = useCallback(
+    (piece: PromotionPiece | null) => {
+      const prompt = promotion;
+      setPromotion(null);
+      if (piece === null || prompt === null) return;
+      void move(prompt.from, prompt.to, piece);
+    },
+    [promotion, move],
+  );
+
+  const submitSan = useCallback(
+    async (san: string) => {
+      const text = san.trim();
+      if (text.length === 0) return;
+      if (!canMove) {
+        const message = isLive ? "It is not your turn." : "Return to live play first.";
+        setError(message);
+        toast.error(message);
+        return;
+      }
+      let parsed;
+      try {
+        // Permissive parser: accepts SAN and LAN ("e2e4"), rejects everything else.
+        parsed = new Chess(fen).move(text);
+      } catch {
+        const message = `"${text}" is not a legal move here.`;
+        setError(message);
+        toast.error(message);
+        return;
+      }
+      await move(
+        parsed.from as SquareId,
+        parsed.to as SquareId,
+        parsed.promotion as PromotionPiece | undefined,
+      );
+    },
+    [canMove, isLive, fen, move],
+  );
+
+  const undo = useCallback(
+    async (toPly?: number) => {
+      if (!canUndo) return;
+      // FR-43: AI games rewind a full turn, local games a single half-move (FR-21f).
+      const fallback = mode === "local" ? totalPlies - 1 : Math.max(0, totalPlies - 2);
+      const target = Math.max(0, Math.min(toPly ?? fallback, totalPlies - 1));
+      const ok = await run(() => undoMove({ gameId, toPly: target }));
+      if (ok) {
+        goToPly(null);
+        setSelectedSquare(null);
+        tracker.reset(); // §E.5.7: the position jumps, ids are re-derived.
+      }
+    },
+    [canUndo, mode, totalPlies, run, undoMove, gameId, goToPly, tracker],
+  );
+
+  const resign = useCallback(async () => {
+    if (!canResign) return;
+    await run(() => resignGame({ gameId }));
+  }, [canResign, run, resignGame, gameId]);
+
+  const offerDraw = useCallback(async () => {
+    if (!canOfferDraw) return;
+    await run(() => offerDrawMutation({ gameId }));
+  }, [canOfferDraw, run, offerDrawMutation, gameId]);
+
+  const respondDraw = useCallback(
+    async (accept: boolean) => {
+      if (drawOfferFrom === null) return;
+      await run(() => respondDrawMutation({ gameId, accept }));
+    },
+    [drawOfferFrom, run, respondDrawMutation, gameId],
+  );
+
+  const setBoardView = useCallback((next: BoardView) => {
+    useUiStore.getState().setBoardView(next);
+  }, []);
+
+  const setOrientation = useCallback((colour: Colour) => {
+    setOrientationOverride(colour);
+    useUiStore.getState().setCameraPreset(seatPresetFor(colour));
+  }, []);
+
+  /* ----------------------------------------------------------------- PGN */
+
+  const whiteName = view?.whiteName ?? "White";
+  const blackName = view?.blackName ?? "Black";
+  const createdAt = game?.createdAt ?? 0;
+  const winner = game?.winner;
+  // Built on demand: a PGN is a full SAN replay and nothing renders it.
+  const toPgn = useCallback(
+    () =>
+      buildPgn(moves, {
+        white: whiteName,
+        black: blackName,
+        result: pgnResult(status, winner),
+        date: new Date(createdAt),
+      }),
+    [moves, whiteName, blackName, status, winner, createdAt],
+  );
+
+  const copyPgn = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(toPgn());
+      toast.success("PGN copied to clipboard");
+    } catch {
+      toast.error("Could not copy the PGN — your browser blocked clipboard access.");
+    }
+  }, [toPgn]);
+
+  const downloadPgn = useCallback(() => {
+    const blob = new Blob([toPgn()], { type: "application/x-chess-pgn" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = pgnFilename(whiteName, blackName, createdAt);
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, [toPgn, whiteName, blackName, createdAt]);
+
+  /* -------------------------------------------------------------- output */
+
+  const turnLabel = useMemo(() => {
+    if (!game) return "";
+    if (!active) return "Game over";
+    const sideName = game.turn === "w" ? whiteName : blackName;
+    if (seat !== null && seat !== "both" && seat === game.turn) return "You";
+    return sideName;
+  }, [game, active, whiteName, blackName, seat]);
+
+  const board: BoardViewProps = {
+    fen,
+    position,
+    orientation,
+    turn,
+    interactive,
+    // §E.8.6: a review jump of more than one ply is not animated. Live play always
+    // is — `stepped` describes the last review navigation, not the last move.
+    animate: !reducedMotion && !flipping && (reviewPly === null || stepped),
+    selectedSquare,
+    legalTargets,
+    lastMove,
+    checkSquare,
+    captured,
+    promotion,
+    reviewPly,
+    onSquareSelect: selectSquare,
+    onMove: (from, to) => {
+      void move(from, to);
+    },
+    onPromotionChoice: choosePromotion,
+    onDeselect: deselect,
+  };
+
+  const actions: GameActions = {
+    selectSquare,
+    deselect,
+    move,
+    choosePromotion,
+    submitSan,
+    undo,
+    resign,
+    offerDraw,
+    respondDraw,
+    goToPly,
+    stepReview,
+    setAutoplay,
+    setBoardView,
+    setOrientation,
+    copyPgn,
+    downloadPgn,
+  };
+
+  return {
+    ready: loaded && view !== null,
+    error: loaded && view === null ? ERROR_COPY["game-not-found"] : error,
+    view,
+    role,
+    board,
+    history,
+    reviewPly,
+    isLive,
+    autoplay,
+    pending,
+    canMove,
+    canUndo,
+    canResign,
+    canOfferDraw,
+    drawOfferFrom,
+    flipping,
+    turnLabel,
+    actions,
+  };
+}
