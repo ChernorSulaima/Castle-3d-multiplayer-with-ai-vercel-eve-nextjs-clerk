@@ -63,10 +63,10 @@ export function HeroActions() {
   if (isLoaded && isSignedIn) {
     return (
       <>
-        <Link href="/play" className={buttonVariants({ size: "lg" })}>
+        <Link prefetch={false} href="/play" className={buttonVariants({ size: "lg" })}>
           Play now
         </Link>
-        <Link href="/leaderboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
+        <Link prefetch={false} href="/leaderboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
           Leaderboard
         </Link>
       </>

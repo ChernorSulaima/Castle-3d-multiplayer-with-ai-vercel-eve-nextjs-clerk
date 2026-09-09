@@ -70,7 +70,7 @@ export function SpectateList() {
             <TableCell className="text-right tabular-nums">{game.moveCount}</TableCell>
             <TableCell className="text-right tabular-nums">{game.spectatorCount}</TableCell>
             <TableCell className="text-right">
-              <Link
+              <Link prefetch={false}
                 href={`/game/${game._id}`}
                 className={buttonVariants({ variant: "outline", size: "sm" })}
               >

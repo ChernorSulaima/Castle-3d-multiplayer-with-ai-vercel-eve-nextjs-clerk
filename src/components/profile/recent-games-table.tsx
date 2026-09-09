@@ -105,7 +105,7 @@ export function RecentGamesTable({ username }: { username: string }) {
                     {formatDate(game.createdAt)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link
+                    <Link prefetch={false}
                       href={`/game/${game._id}`}
                       className={buttonVariants({ variant: "outline", size: "sm" })}
                     >

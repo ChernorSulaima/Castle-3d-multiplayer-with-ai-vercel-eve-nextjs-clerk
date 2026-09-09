@@ -23,7 +23,7 @@ export default function GameError({
       </p>
       <div className="flex gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Link href="/play" className={buttonVariants({ variant: "outline" })}>
+        <Link prefetch={false} href="/play" className={buttonVariants({ variant: "outline" })}>
           Back to play
         </Link>
       </div>

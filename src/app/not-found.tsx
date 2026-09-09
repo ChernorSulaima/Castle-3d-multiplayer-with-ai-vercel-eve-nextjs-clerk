@@ -12,10 +12,10 @@ export default function NotFound() {
         The page you were looking for does not exist, or the game has been cleared away.
       </p>
       <div className="mt-2 flex flex-wrap justify-center gap-2">
-        <Link href="/" className={buttonVariants({ variant: "outline" })}>
+        <Link prefetch={false} href="/" className={buttonVariants({ variant: "outline" })}>
           Home
         </Link>
-        <Link href="/play" className={buttonVariants()}>
+        <Link prefetch={false} href="/play" className={buttonVariants()}>
           Find a game
         </Link>
       </div>

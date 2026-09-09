@@ -68,7 +68,7 @@ export function LiveTicker() {
               {games.map((game) =>
                 isAuthenticated ? (
                   <li key={game._id}>
-                    <Link
+                    <Link prefetch={false}
                       href={`/game/${game._id}`}
                       className="rounded-sm transition-opacity hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                     >

@@ -35,7 +35,7 @@ export default function RootError({
       ) : null}
       <div className="mt-2 flex flex-wrap justify-center gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Link href="/" className={buttonVariants({ variant: "outline" })}>
+        <Link prefetch={false} href="/" className={buttonVariants({ variant: "outline" })}>
           Home
         </Link>
       </div>

@@ -66,7 +66,7 @@ export function LeaderboardTable() {
                   {row.rank}
                 </TableCell>
                 <TableCell>
-                  <Link
+                  <Link prefetch={false}
                     href={`/profile/${encodeURIComponent(row.username)}`}
                     className="flex items-center gap-2.5 rounded-md font-medium transition-opacity hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                   >

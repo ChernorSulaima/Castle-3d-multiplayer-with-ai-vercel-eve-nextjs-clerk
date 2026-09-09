@@ -96,7 +96,7 @@ export function ModePicker() {
           <p className="text-sm">
             You have a game in progress. Finish or resign it before starting another.
           </p>
-          <Link href={`/game/${activeGameId}`} className={buttonVariants({ size: "sm" })}>
+          <Link prefetch={false} href={`/game/${activeGameId}`} className={buttonVariants({ size: "sm" })}>
             Resume game
           </Link>
         </div>

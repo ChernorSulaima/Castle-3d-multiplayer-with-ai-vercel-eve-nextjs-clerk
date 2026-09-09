@@ -153,7 +153,7 @@ export function GameResultDialog({ view, seat, viewerUsername }: GameResultDialo
             Review the game
           </Button>
           {seat === null ? (
-            <Link href="/play" className={buttonVariants()}>
+            <Link prefetch={false} href="/play" className={buttonVariants()}>
               Back to play
             </Link>
           ) : (
