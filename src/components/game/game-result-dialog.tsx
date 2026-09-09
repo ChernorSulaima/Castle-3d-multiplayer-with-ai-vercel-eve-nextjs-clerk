@@ -42,7 +42,11 @@ export function GameResultDialog({ view, seat, viewerUsername }: GameResultDialo
   const { game } = view;
   const finished = game.status !== "active" && game.status !== "waiting";
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
-  const open = finished && dismissedFor !== `${game._id}:${game.status}`;
+  // `games.undo` resurrects a finished game (FR-43), so the SAME game can finish the
+  // same way twice. `endedAt` is cleared by the take-back and rewritten by the next
+  // finalize, which is what makes this key distinguish the two endings.
+  const dismissKey = `${game._id}:${game.status}:${game.endedAt ?? 0}`;
+  const open = finished && dismissedFor !== dismissKey;
 
   const createAiGame = useMutation(api.games.createAiGame);
   const createLocalGame = useMutation(api.games.createLocalGame);
@@ -96,7 +100,7 @@ export function GameResultDialog({ view, seat, viewerUsername }: GameResultDialo
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setDismissedFor(`${game._id}:${game.status}`);
+        if (!next) setDismissedFor(dismissKey);
       }}
     >
       <DialogContent>
@@ -145,10 +149,7 @@ export function GameResultDialog({ view, seat, viewerUsername }: GameResultDialo
         ) : null}
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setDismissedFor(`${game._id}:${game.status}`)}
-          >
+          <Button variant="outline" onClick={() => setDismissedFor(dismissKey)}>
             Review the game
           </Button>
           {seat === null ? (

@@ -4,7 +4,9 @@
 // swap (§D.11.8) so switching views never unmounts the game state, and it owns
 // the responsive layout: side panel on desktop, drawer on mobile (NFR-6).
 import { useCallback, useEffect, useState } from "react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { ListIcon, SettingsIcon } from "lucide-react";
+import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -73,6 +75,8 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
 
   // FR-15: the in-game 2D/3D toggle is a PLAYER SETTING, so it has to survive a reload.
   // The controller may only touch `api.games.*`, so the write-back is wired here.
+  // This is the ONE writer for the whole shell — the settings drawer's <SettingsForm/>
+  // shares it, so a change never queues two debounced `players.updateSettings` calls.
   const saveSettings = useSettingsWriter();
   const setControllerBoardView = actions.setBoardView;
   const setBoardViewPersisted = useCallback(
@@ -89,6 +93,15 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
   // must never drive it — `games.makeAiMove` requires a participant.
   const isSpectator = view?.viewerRole === "spectator";
   const aiTurn = useAiTurn(game?.mode === "ai" && !isSpectator ? gameId : null);
+
+  // FR-32: the exact source for "your opponent may have disconnected" is the
+  // opponent's last heartbeat. `games.presenceFor` carries no wall clock, so the
+  // comparison happens here, on the same interval that drives the hint.
+  const { isAuthenticated } = useConvexAuth();
+  const presence = useQuery(
+    api.games.presenceFor,
+    isAuthenticated && active && game?.mode === "online" ? { gameId } : "skip",
+  );
 
   // A clock for the "opponent may have disconnected" hint. Never read during
   // render from `Date.now()` directly — that is a purity error under the compiler.
@@ -129,8 +142,18 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
       : seat === "b"
         ? (view.black?.username ?? null)
         : null;
+  // The opponent's heartbeat when we have one; `lastMoveAt` stays the fallback for
+  // spectators and for the moment before the presence subscription lands.
+  const opponentSeen =
+    presence === undefined || seat === null || seat === "both"
+      ? null
+      : presence[seat === "w" ? "b" : "w"];
   const opponentStale =
-    now > 0 && game.mode === "online" && now - game.lastMoveAt > ABANDON_TIMEOUT_MS;
+    now > 0 &&
+    game.mode === "online" &&
+    (opponentSeen === null
+      ? now - game.lastMoveAt > ABANDON_TIMEOUT_MS
+      : now - opponentSeen > ABANDON_TIMEOUT_MS);
 
   const historyPanel = (idPrefix: string, className?: string) => (
     <MoveHistoryPanel
@@ -151,7 +174,10 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
         <GameHeader
           view={view}
           captured={board.captured}
-          turn={board.turn}
+          // NOT `board.turn`: that follows the reviewed ply, while `turnLabel` is
+          // derived from the live game, and the two would contradict each other
+          // while a past position is on the board.
+          turn={game.turn}
           turnLabel={controller.turnLabel}
           orientation={board.orientation}
           boardView={boardView}
@@ -227,7 +253,7 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
                   </DrawerDescription>
                 </DrawerHeader>
                 <div className="overflow-y-auto px-4 pb-6">
-                  <SettingsForm />
+                  <SettingsForm save={saveSettings} />
                 </div>
               </DrawerContent>
             </Drawer>

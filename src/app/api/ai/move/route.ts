@@ -10,9 +10,9 @@
 // which are themselves re-validated against the server's own FEN.
 import { Chess } from "chess.js";
 import { z } from "zod";
-import { EVE_BUDGET_MS, MAX_COMMENTARY_LENGTH } from "@/lib/constants";
+import { AI_DIRECT_MIN_BUDGET_MS, EVE_BUDGET_MS, MAX_COMMENTARY_LENGTH } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
-import { normaliseMove, selectCandidate } from "@/lib/engine/candidates";
+import { normaliseMove } from "@/lib/engine/candidates";
 import {
   AI_NDJSON_CONTENT_TYPE,
   AI_STATUS_HEARTBEAT_MS,
@@ -88,7 +88,12 @@ export async function POST(request: Request): Promise<Response> {
   if (candidates.length === 0) {
     return Response.json({ error: "no-legal-candidates" }, { status: 400 });
   }
-  const fallbackMove = selectCandidate(difficulty, candidates)?.san ?? candidates[0].san;
+  // FR-36 ("if invalid, fall back to Stockfish's best move directly") and NFR-5
+  // ("automatic fallback to raw Stockfish best move"): both name the ENGINE's move,
+  // not the difficulty policy. `candidates` arrives best-first from a Skill Level 20
+  // MultiPV search and is re-validated above, so rank 1 is that move. The difficulty
+  // policy still applies on the client's own engine-only path (§E.4 failure modes).
+  const fallbackMove = candidates[0].san;
 
   const host = resolveEveHost(request.url);
   const encoder = new TextEncoder();
@@ -122,6 +127,9 @@ export async function POST(request: Request): Promise<Response> {
           userKey: guard.userKey,
           signal: request.signal,
           fallbackMove,
+          // NFR-5: one 10 s ceiling for the agent phase, shared by the eve call and
+          // the §F.6 direct-model retry.
+          deadline: Date.now() + EVE_BUDGET_MS,
         });
         write({ t: "result", d: outcome });
       } catch {
@@ -170,6 +178,8 @@ interface ResolveMoveInput {
   userKey: string;
   signal: AbortSignal;
   fallbackMove: string;
+  /** `Date.now()` past which the whole agent phase must be done (NFR-5). */
+  deadline: number;
 }
 
 async function resolveMove(input: ResolveMoveInput): Promise<AiMoveResult> {
@@ -192,19 +202,22 @@ async function resolveMove(input: ResolveMoveInput): Promise<AiMoveResult> {
     clientContext,
     sessionId: input.sessionId,
     userKey: input.userKey,
-    budgetMs: EVE_BUDGET_MS,
+    budgetMs: Math.max(0, input.deadline - Date.now()),
     signal: input.signal,
   });
 
   let data: MoveOutput | null = turn.data;
   let source: AiMoveResult["source"] = data === null ? "fallback" : "eve";
 
-  if (data === null && turn.unreachable && !input.signal.aborted) {
-    // §F.6: eve itself is down — one direct AI SDK 7 attempt with the remaining budget.
+  const remainingMs = input.deadline - Date.now();
+  if (data === null && turn.unreachable && !input.signal.aborted && remainingMs >= AI_DIRECT_MIN_BUDGET_MS) {
+    // §F.6: eve itself is down — one direct AI SDK 7 attempt with what is left of
+    // the ONE NFR-5 budget. Giving it a fresh 8 s here is how a single move used to
+    // occupy ~18 s of "Still thinking…" after a slow eve failure.
     const direct = await runDirectTurn(moveOutputSchema, {
       system: directSystemPrompt(input.difficulty, input.personaName),
       prompt: JSON.stringify(clientContext),
-      budgetMs: Math.min(EVE_BUDGET_MS, 8_000),
+      budgetMs: remainingMs,
       signal: input.signal,
     });
     if (direct.data !== null) {

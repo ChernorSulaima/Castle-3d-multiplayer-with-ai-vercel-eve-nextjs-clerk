@@ -19,12 +19,13 @@ export const forPlayer = query({
   returns: v.array(vRatingHistoryRow),
   handler: async (ctx, args) => {
     const limit = clampLimit(args.limit, MAX_RATING_HISTORY);
+    // `.first()` — a duplicate `usernameLower` must not 500 the profile page.
     const player = await ctx.db
       .query("players")
       .withIndex("by_usernameLower", (q) =>
         q.eq("usernameLower", args.username.toLowerCase()),
       )
-      .unique();
+      .first();
     if (player === null) return [];
 
     // The pool filter is applied after the index scan, so read a wider window

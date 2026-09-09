@@ -48,7 +48,15 @@ export function gridPosition(square: SquareId, orientation: Colour) {
 /* ------------------------------------------------------------------ timings */
 export const MOVE_ANIMATION_MS = 250; // FR-17
 export const CAMERA_FLIP_MS = 800; // FR-21c
-export const CAMERA_FLIP_SMOOTH_TIME = 0.4; // camera-controls smoothTime for the flip
+/**
+ * camera-controls damps with Unity-style `smoothDamp` (omega = 2 / smoothTime) and only
+ * dispatches `rest` — which resolves the `setLookAt` promise and releases the rig's input
+ * lock — once the remaining delta drops under `restThreshold` (0.01). For the half-turn
+ * between the two seats (delta theta = PI) that happens at omega*t ~= 7.95, i.e.
+ * t ~= 3.98 * smoothTime. Derive it from CAMERA_FLIP_MS so the rig's lock and the
+ * controller's `flipping` timer can never drift apart (FR-21c).
+ */
+export const CAMERA_FLIP_SMOOTH_TIME = CAMERA_FLIP_MS / 4000; // 0.2 s
 export const TURN_OVERLAY_MS = 900; // FR-21d hand-over card
 export const HEARTBEAT_INTERVAL_MS = 15_000; // FR-32
 export const ABANDON_TIMEOUT_MS = 60_000; // FR-32
@@ -80,6 +88,13 @@ export function queueRangeAt(joinedAt: number, now: number): number {
 
 /* ---------------------------------------------------------------------- AI */
 export const EVE_BUDGET_MS = 10_000; // NFR-5 hard ceiling for the Eve call
+/** NFR-5: the agent phase (eve + the §F.6 direct-model retry) shares ONE deadline,
+ *  so a slow eve failure can never buy the fallback a second full budget. */
+export const AI_DIRECT_MIN_BUDGET_MS = 1_500; // below this, skip the direct attempt
+/** Browser-side ceiling for one POST /api/ai/move. The route holds itself to
+ *  EVE_BUDGET_MS; this is the backstop for a wedged route, so a turn can never
+ *  hang until `maxDuration` with the panel stuck on "Calculating…". */
+export const AI_ROUTE_TIMEOUT_MS = EVE_BUDGET_MS + 5_000;
 export const AI_TARGET_LATENCY_MS = 3_000; // FR-38 target; UI shows "still thinking" past this
 export const AI_ROUTE_MAX_DURATION = 30; // seconds; `export const maxDuration` on the route
 export const STOCKFISH_WORKER_URL = "/stockfish/sf11/stockfish.js"; // stockfish@11.0.0 (stockfish.md §11): Skill Level 0-20, MultiPV 1-500, NO UCI_Elo/UCI_LimitStrength

@@ -131,7 +131,8 @@ export function CapturedTray3D({ captured, lastMove, materials, animate }: Captu
           key={`${flight.from}${flight.to}-${flightSlot}`}
           type={flight.captured}
           colour={victimColour(flightCapturer)}
-          fromSquare={flight.to}
+          // En passant is the one capture whose victim is not on `to` (FR-17).
+          fromSquare={flight.capturedSquare ?? flight.to}
           to={traySlot(flightCapturer, flightSlot)}
           materials={materials}
         />

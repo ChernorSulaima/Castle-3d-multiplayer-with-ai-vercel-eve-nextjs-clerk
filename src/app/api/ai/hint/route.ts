@@ -6,15 +6,25 @@
 //     durable opponent session is never polluted with coaching turns;
 //   * plain JSON, no streaming (a hint is one short sentence).
 //
-// The 3-per-game limit is enforced in Convex: the client MUST call
-// `api.games.useHint` first, and this handler re-checks `hintsUsed` as a backstop.
+// FR-40's 3-per-game limit is CHARGED HERE, by this handler, through
+// `api.games.useHint` with the caller's own Clerk token — the browser no longer
+// pre-charges it. A direct POST that skips the client is therefore capped like any
+// other caller; charging client-side left the cap enforceable only by cooperation.
 import { Chess } from "chess.js";
+import { fetchMutation } from "convex/nextjs";
 import { z } from "zod";
-import { EVE_BUDGET_MS, MAX_COMMENTARY_LENGTH, MAX_HINTS_PER_GAME } from "@/lib/constants";
+import {
+  AI_DIRECT_MIN_BUDGET_MS,
+  EVE_BUDGET_MS,
+  MAX_COMMENTARY_LENGTH,
+  MAX_HINTS_PER_GAME,
+} from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { normaliseMove } from "@/lib/engine/candidates";
 import type { Candidate, Difficulty, HintResult } from "@/lib/types";
 import { auth } from "@clerk/nextjs/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getAuthToken } from "@/lib/convex-server";
 import { guardAiGame, jsonError } from "../_lib/game-guard";
 import { resolveEveHost, runAgentTurn, runDirectTurn } from "../_lib/eve-agent";
 
@@ -67,11 +77,26 @@ export async function POST(request: Request): Promise<Response> {
   if (!DIFFICULTIES[difficulty].hintsAllowed) {
     return Response.json({ error: "hints-unavailable" }, { status: 403 });
   }
-  if (game.hintsUsed > MAX_HINTS_PER_GAME) {
+  // `useHint` never lets `hintsUsed` exceed MAX, so the old `>` could not fire.
+  if (game.hintsUsed >= MAX_HINTS_PER_GAME) {
     return Response.json({ error: "hint-limit" }, { status: 429 });
   }
   if (game.aiColor !== undefined && game.turn === game.aiColor) {
     return Response.json({ error: "not-your-turn" }, { status: 409 });
+  }
+
+  // Charge FIRST, with the caller's token: Convex re-checks the seat, the mode, the
+  // difficulty and the limit, and the increment is atomic. A hint that then fails
+  // still costs one, exactly as it did when the browser charged it.
+  try {
+    await fetchMutation(api.games.useHint, { gameId: game._id }, { token: await getAuthToken() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("hint-limit")) return Response.json({ error: "hint-limit" }, { status: 429 });
+    if (message.includes("hints-unavailable")) {
+      return Response.json({ error: "hints-unavailable" }, { status: 403 });
+    }
+    return Response.json({ error: "hint-unavailable" }, { status: 409 });
   }
 
   const fen = game.fen;
@@ -91,6 +116,9 @@ export async function POST(request: Request): Promise<Response> {
     legalMoves,
   };
 
+  // NFR-5: one budget for the whole agent phase, shared by the eve call and the
+  // §F.6 direct-model retry — not one each.
+  const deadline = Date.now() + EVE_BUDGET_MS;
   const turn = await runAgentTurn(hintOutputSchema, {
     host: resolveEveHost(request.url),
     message: HINT_MESSAGE,
@@ -103,11 +131,17 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   let data = turn.data;
-  if (data === null && turn.unreachable && !request.signal.aborted) {
+  const remainingMs = deadline - Date.now();
+  if (
+    data === null &&
+    turn.unreachable &&
+    !request.signal.aborted &&
+    remainingMs >= AI_DIRECT_MIN_BUDGET_MS
+  ) {
     const direct = await runDirectTurn(hintOutputSchema, {
       system: HINT_SYSTEM_PROMPT,
       prompt: JSON.stringify(clientContext),
-      budgetMs: Math.min(EVE_BUDGET_MS, 8_000),
+      budgetMs: remainingMs,
       signal: request.signal,
     });
     data = direct.data;

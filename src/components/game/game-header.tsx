@@ -22,6 +22,8 @@ import { CapturedTray } from "./captured-tray";
 export interface GameHeaderProps {
   view: GameView;
   captured: CapturedPieces;
+  /** The side to move in the LIVE game, not in the reviewed position — the to-move
+   *  dot and `turnLabel` describe the same thing and must never disagree. */
   turn: Colour;
   turnLabel: string;
   orientation: Colour;

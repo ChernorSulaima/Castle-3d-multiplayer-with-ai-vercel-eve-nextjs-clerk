@@ -71,10 +71,11 @@ export async function postAiMove(
 }
 
 /**
- * FR-40. One-shot JSON, no streaming. `api.games.useHint` must be called FIRST so
- * the 3-per-game limit is charged server-side even if this request never lands.
- * The position and history come from the server's own game document — only the
- * engine candidates travel from the browser.
+ * FR-40. One-shot JSON, no streaming. The route charges the 3-per-game limit
+ * itself (`api.games.useHint`) before it does any model work, so the caller must
+ * NOT pre-charge it — that would spend two hints per press. The position and
+ * history come from the server's own game document; only the engine candidates
+ * travel from the browser.
  */
 export async function postAiHint(
   request: { gameId: string; candidates: Candidate[] },

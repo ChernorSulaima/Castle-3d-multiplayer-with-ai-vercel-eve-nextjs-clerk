@@ -29,7 +29,7 @@ import {
 } from "@/lib/engine/candidates";
 import { useStockfish } from "@/lib/engine/use-stockfish";
 import type { SearchRequest, SearchResult } from "@/lib/engine/stockfish-client";
-import { STOCKFISH_CANDIDATE_SKILL_LEVEL } from "@/lib/constants";
+import { AI_ROUTE_TIMEOUT_MS, STOCKFISH_CANDIDATE_SKILL_LEVEL } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { useAiStore } from "@/lib/stores/ai-store";
 import type { Candidate, Difficulty, GameId } from "@/lib/types";
@@ -60,7 +60,7 @@ export function useAiTurn(gameId: GameId | null | undefined): AiTurnState {
   // their machine would be pure waste.
   const isParticipant = view?.viewerRole === "white" || view?.viewerRole === "black";
   const isAiGame = game !== null && game.mode === "ai" && isParticipant;
-  const { search, retry: retryEngine } = useStockfish(isAiGame);
+  const { search, newGame, retry: retryEngine } = useStockfish(isAiGame);
 
   const makeAiMove = useMutation(api.games.makeAiMove);
   const appendCommentary = useMutation(api.commentary.append);
@@ -91,6 +91,14 @@ export function useAiTurn(gameId: GameId | null | undefined): AiTurnState {
     searchRef.current = search;
   });
 
+  // The Stockfish worker is shared and deliberately outlives a route change, so a
+  // second AI game would otherwise search with the previous game's transposition
+  // table still populated (stockfish.md §9 rule 4). `ucinewgame` clears it.
+  useEffect(() => {
+    if (!isAiGame) return;
+    void newGame();
+  }, [isAiGame, gameId, newGame]);
+
   useEffect(() => {
     if (turnKey === null) return;
     if (startedRef.current === turnKey) return;
@@ -99,11 +107,15 @@ export function useAiTurn(gameId: GameId | null | undefined): AiTurnState {
     const snapshot = gameRef.current;
     if (snapshot === null) return;
 
-    const attempts = (attemptsRef.current.get(turnKey) ?? 0) + 1;
-    attemptsRef.current.set(turnKey, attempts);
+    // Captured for the cleanup below: the Map identity is stable for the life of
+    // the hook, but reading `.current` from a cleanup trips react-hooks.
+    const attemptCounts = attemptsRef.current;
+    const attempts = (attemptCounts.get(turnKey) ?? 0) + 1;
+    attemptCounts.set(turnKey, attempts);
 
     const controller = new AbortController();
     let cancelled = false;
+    let settled = false;
 
     void runAiTurn({
       game: snapshot,
@@ -131,10 +143,11 @@ export function useAiTurn(gameId: GameId | null | undefined): AiTurnState {
         }
       })
       .finally(() => {
+        settled = true;
         // Keep the map small: only the ply in flight and its retry counter matter.
-        if (attemptsRef.current.size > 4) {
-          for (const key of attemptsRef.current.keys()) {
-            if (key !== turnKey) attemptsRef.current.delete(key);
+        if (attemptCounts.size > 4) {
+          for (const key of attemptCounts.keys()) {
+            if (key !== turnKey) attemptCounts.delete(key);
           }
         }
       });
@@ -142,12 +155,27 @@ export function useAiTurn(gameId: GameId | null | undefined): AiTurnState {
     return () => {
       cancelled = true;
       controller.abort();
+      if (settled) return;
+      // The ply was abandoned mid-flight (StrictMode's double invoke, a Fast
+      // Refresh edit, an unmount). An aborted `runAiTurn` RESOLVES rather than
+      // rejecting, so nothing else would re-arm this key and the panel would sit
+      // on "Calculating…" forever. Clear the guard, refund the attempt, and drop
+      // the half-finished phase so a re-setup starts the ply cleanly.
+      if (startedRef.current === turnKey) startedRef.current = null;
+      attemptCounts.set(turnKey, Math.max(0, attempts - 1));
+      if (useAiStore.getState().phase !== "idle") useAiStore.getState().resetTurn();
     };
   }, [turnKey, retryTick, makeAiMove, appendCommentary, setEveSession]);
 
   // A finished / abandoned / rewound game must not leave the panel "thinking".
   useEffect(() => {
     if (turnKey !== null) return;
+    // A take-back REPLAYS ply numbers (FR-43), so the next turn key can be one
+    // this hook has already consumed — with the marker left in place the effect
+    // above would short-circuit and the AI would never move again. Clearing it
+    // whenever the AI is not to move is what makes a rewound game restart.
+    startedRef.current = null;
+    attemptsRef.current.clear();
     if (useAiStore.getState().phase === "idle") return;
     useAiStore.getState().resetTurn();
   }, [turnKey]);
@@ -246,7 +274,7 @@ async function runAiTurn(input: RunAiTurnInput): Promise<void> {
         eveSessionId: game.eveSessionId,
       },
       {
-        signal,
+        signal: withTimeout(signal, AI_ROUTE_TIMEOUT_MS),
         onDelta: (delta) => {
           useAiStore.getState().appendCommentary(delta);
         },
@@ -307,6 +335,20 @@ async function runAiTurn(input: RunAiTurnInput): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/**
+ * The effect's own controller has no timer, so a wedged route (or a response body
+ * that never ends) would hang the turn until `maxDuration` with the panel stuck on
+ * "Calculating…". This caps one POST at `ms`; on timeout the fetch rejects and the
+ * local difficulty policy plays the move (NFR-5). Degrades to the plain signal on a
+ * browser without `AbortSignal.any` rather than failing the turn outright.
+ */
+function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
+  if (typeof AbortSignal.any !== "function" || typeof AbortSignal.timeout !== "function") {
+    return signal;
+  }
+  return AbortSignal.any([signal, AbortSignal.timeout(ms)]);
+}
 
 function aiTurnKey(game: Doc<"games"> | null): string | null {
   if (game === null) return null;

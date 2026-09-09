@@ -62,6 +62,29 @@ describe("games.makeMove", () => {
     expect(game.pgn).toContain("1. e4");
   });
 
+  test("records the square an en-passant victim actually stood on", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
+    const gameId = await onlineGame(t, alice, bob);
+
+    // 1. e4 a6 2. e5 d5 3. exd6 e.p.
+    await as(t, alice).mutation(api.games.makeMove, { gameId, from: "e2", to: "e4" });
+    await as(t, bob).mutation(api.games.makeMove, { gameId, from: "a7", to: "a6" });
+    await as(t, alice).mutation(api.games.makeMove, { gameId, from: "e4", to: "e5" });
+    await as(t, bob).mutation(api.games.makeMove, { gameId, from: "d7", to: "d5" });
+    await as(t, alice).mutation(api.games.makeMove, { gameId, from: "e5", to: "d6" });
+
+    const game = await readGame(t, gameId);
+    // The pawn taken is on d5; the board's capture flight must not start from d6.
+    expect(game.lastMove).toMatchObject({
+      from: "e5",
+      to: "d6",
+      captured: "p",
+      capturedSquare: "d5",
+    });
+  });
+
   test("rejects an illegal move without writing anything", async () => {
     const t = makeTest();
     const alice = await signUp(t, "alice");
@@ -311,6 +334,42 @@ describe("draw offers", () => {
     expect((await readGame(t, gameId)).status).toBe("draw");
   });
 
+  test("is refused in an AI game — nobody could ever answer the offer", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const gameId = await seedGame(t, {
+      mode: "ai",
+      whiteId: alice.id,
+      blackId: null,
+      aiColor: "b",
+      difficulty: "casual",
+    });
+
+    await expect(
+      as(t, alice).mutation(api.games.offerDraw, { gameId }),
+    ).rejects.toThrow(/draw-not-available/);
+    await expect(
+      as(t, alice).mutation(api.games.respondDraw, { gameId, accept: true }),
+    ).rejects.toThrow(/draw-not-available/);
+    expect((await readGame(t, gameId)).drawOffer).toBeUndefined();
+  });
+
+  test("a local owner can still agree a draw with themselves (FR-21a)", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const gameId = await seedGame(t, {
+      mode: "local",
+      whiteId: alice.id,
+      blackId: null,
+    });
+
+    await as(t, alice).mutation(api.games.offerDraw, { gameId });
+    await as(t, alice).mutation(api.games.respondDraw, { gameId, accept: true });
+    const game = await readGame(t, gameId);
+    expect(game.status).toBe("draw");
+    expect(game.endReason).toBe("agreement");
+  });
+
   test("a move clears a standing draw offer", async () => {
     const t = makeTest();
     const alice = await signUp(t, "alice");
@@ -553,7 +612,7 @@ describe("games.undo", () => {
     ).rejects.toThrow(/undo-not-allowed/);
   });
 
-  test("reopens a finished game and skips ratings on the replayed finish", async () => {
+  test("refuses to reopen a finished game (FR-49: the Elo cannot be taken back)", async () => {
     const t = makeTest();
     const alice = await signUp(t, "alice");
     const gameId = await seedGame(t, {
@@ -566,19 +625,56 @@ describe("games.undo", () => {
     });
     await as(t, alice).mutation(api.games.makeMove, { gameId, from: "h5", to: "f7" });
     expect((await readGame(t, gameId)).status).toBe("checkmate");
-    const ratedAfterWin = (await readPlayer(t, alice.id)).ratingAi;
+    const won = await readPlayer(t, alice.id);
 
-    await as(t, alice).mutation(api.games.undo, { gameId, toPly: 6 });
-    const reopened = await readGame(t, gameId);
-    expect(reopened.status).toBe("active");
-    expect(reopened.winner).toBeUndefined();
-    expect(reopened.endReason).toBeUndefined();
-    expect(reopened.endedAt).toBeUndefined();
-    expect(reopened.rated).toBe(false);
+    await expect(
+      as(t, alice).mutation(api.games.undo, { gameId, toPly: 6 }),
+    ).rejects.toThrow(/game-not-active/);
 
-    // Re-deliver the mate: the game is unrated now, so no further Elo movement.
+    // The finished game, its result and the rating it awarded are all untouched.
+    const after = await readGame(t, gameId);
+    expect(after.status).toBe("checkmate");
+    expect(after.winner).toBe("w");
+    expect(after.rated).toBe(true);
+    const player = await readPlayer(t, alice.id);
+    expect(player.ratingAi).toBe(won.ratingAi);
+    expect(player.wins).toBe(1);
+    const history = await t.run(async (ctx) =>
+      ctx.db
+        .query("ratingHistory")
+        .withIndex("by_gameId", (q) => q.eq("gameId", gameId))
+        .take(10),
+    );
+    expect(history).toHaveLength(1);
+  });
+
+  test("a take-back before the end still unrates the game (FR-49)", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const gameId = await seedGame(t, {
+      mode: "ai",
+      whiteId: alice.id,
+      blackId: null,
+      aiColor: "b",
+      difficulty: "beginner",
+      sans: ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6"],
+    });
+    await as(t, alice).mutation(api.games.undo, { gameId, toPly: 4 });
+    expect((await readGame(t, gameId)).rated).toBe(false);
+
+    // Replay to mate through the real paths: the game is unrated now, so the win
+    // moves no Elo and is not counted in the W/L/D record.
+    await as(t, alice).mutation(api.games.makeMove, { gameId, from: "f1", to: "c4" });
+    await as(t, alice).mutation(api.games.makeAiMove, {
+      gameId,
+      san: "Nf6",
+      expectedPly: 5,
+    });
     await as(t, alice).mutation(api.games.makeMove, { gameId, from: "h5", to: "f7" });
-    expect((await readPlayer(t, alice.id)).ratingAi).toBe(ratedAfterWin);
+    expect((await readGame(t, gameId)).status).toBe("checkmate");
+    const player = await readPlayer(t, alice.id);
+    expect(player.ratingAi).toBe(1200);
+    expect(player.wins).toBe(0);
   });
 
   test("rejects an out-of-range ply", async () => {
@@ -671,14 +767,64 @@ describe("local games", () => {
 
   test("defaults the second player's name and caps its length", async () => {
     const t = makeTest();
+    // One game per player: FR-26 now refuses a second active game (see below).
     const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
     const blank = await as(t, alice).mutation(api.games.createLocalGame, {});
     expect((await readGame(t, blank)).localPlayerTwoName).toBe("Player 2");
 
-    const long = await as(t, alice).mutation(api.games.createLocalGame, {
+    const long = await as(t, bob).mutation(api.games.createLocalGame, {
       playerTwoName: "x".repeat(80),
     });
     expect((await readGame(t, long)).localPlayerTwoName).toHaveLength(24);
+  });
+});
+
+describe("FR-26: one active game per player", () => {
+  test("createAiGame refuses a second game and leaves the queue first", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    await as(t, alice).mutation(api.queue.join, {});
+
+    const gameId = await as(t, alice).mutation(api.games.createAiGame, {
+      difficulty: "casual",
+      playerColor: "w",
+    });
+
+    // Starting a game dequeues, so `queue.pair` can never seat this player into a
+    // second, rated online game they would silently forfeit.
+    expect(await as(t, alice).query(api.queue.myStatus, {})).toEqual({
+      inQueue: false,
+      joinedAt: null,
+    });
+    const queued = await t.run(async (ctx) => ctx.db.query("queue").take(5));
+    expect(queued).toHaveLength(0);
+
+    await expect(
+      as(t, alice).mutation(api.games.createAiGame, {
+        difficulty: "casual",
+        playerColor: "w",
+      }),
+    ).rejects.toThrow(/already-in-game/);
+    await expect(
+      as(t, alice).mutation(api.games.createLocalGame, {}),
+    ).rejects.toThrow(/already-in-game/);
+
+    // Finishing the game frees the player again.
+    await as(t, alice).mutation(api.games.resign, { gameId });
+    await as(t, alice).mutation(api.games.createLocalGame, {});
+  });
+
+  test("createLocalGame refuses a second game while an AI game is running", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    await as(t, alice).mutation(api.games.createLocalGame, {});
+    await expect(
+      as(t, alice).mutation(api.games.createAiGame, {
+        difficulty: "beginner",
+        playerColor: "b",
+      }),
+    ).rejects.toThrow(/already-in-game/);
   });
 });
 
@@ -738,6 +884,30 @@ describe("games.createAiGame and views", () => {
 
     expect(await as(t, alice).query(api.games.myActiveGame, {})).toBe(online);
     expect(await as(t, bob).query(api.games.myActiveGame, {})).toBe(online);
+  });
+
+  test("a wall of active AI games cannot crowd online games out of listLive", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
+    const mallory = await signUp(t, "mallory");
+    const online = await onlineGame(t, alice, bob);
+    // `lastMoveAt` is bumped by every mode, so these all sort ABOVE the online
+    // game; before the mode-scoped index they filled the whole scan window.
+    for (let i = 0; i < 60; i++) {
+      await seedGame(t, {
+        mode: "ai",
+        whiteId: mallory.id,
+        blackId: null,
+        aiColor: "b",
+        difficulty: "casual",
+      });
+    }
+    await seedGame(t, { mode: "local", whiteId: mallory.id, blackId: null });
+
+    const live = await t.query(api.games.listLive, { limit: 10 });
+    expect(live).toHaveLength(1);
+    expect(live[0]._id).toBe(online);
   });
 
   test("myRecentGames summarises both colours with the opponent resolved", async () => {

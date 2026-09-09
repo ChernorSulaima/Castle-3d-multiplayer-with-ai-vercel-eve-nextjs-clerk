@@ -20,10 +20,24 @@ export function PlayerSync() {
   useSettingsSync();
 
   useEffect(() => {
+    // `persist` is TYPED as always present but is not always THERE: zustand only
+    // assigns `api.persist` once it has a storage object, and `createJSONStorage`
+    // returns undefined when reading `localStorage` throws (Safari private mode,
+    // embedded webviews, blocked site data — middleware.mjs:279-284, 345-356).
+    // Dereferencing it there would throw synchronously inside this effect — before
+    // any promise exists to catch it — and take every route to the root error
+    // boundary. Nothing can be rehydrated in that case, so just open the gates.
+    const persistApi: typeof useUiStore.persist | undefined = useUiStore.persist;
+    if (persistApi === undefined) {
+      useUiStore.getState().markHydrated();
+      return;
+    }
     // Returns `Promise<void> | void` — localStorage is synchronous, so this
     // resolves through persist's thenable shim. `onRehydrateStorage` already logs
     // a read failure; catching here stops a rejection escaping unhandled.
-    Promise.resolve(useUiStore.persist.rehydrate()).catch(() => {});
+    Promise.resolve(persistApi.rehydrate()).catch(() => {
+      useUiStore.getState().markHydrated();
+    });
   }, []);
 
   return null;

@@ -22,6 +22,24 @@ const TARGET_BOUNDS = new Box3(
   new Vector3(...CAMERA_LIMITS.boundaryMax),
 );
 
+/**
+ * `fromJSON` (FR-25 session restore) assigns EVERY serialised field, including
+ * `enabled`, `smoothTime`, the distance range and the polar clamp — so a snapshot taken
+ * mid-transition would restore `enabled: false` and permanently kill orbit/pan/zoom, and
+ * R3F's prop diffing would not put the JSX values back (they never changed). Re-assert
+ * everything the rig owns after every restore.
+ */
+function applyRigLimits(controls: CameraControlsImpl): void {
+  controls.enabled = true;
+  controls.smoothTime = CAMERA_LIMITS.smoothTime;
+  controls.draggingSmoothTime = CAMERA_LIMITS.draggingSmoothTime;
+  controls.minDistance = CAMERA_LIMITS.minDistance;
+  controls.maxDistance = CAMERA_LIMITS.maxDistance;
+  controls.minPolarAngle = CAMERA_LIMITS.minPolarAngle;
+  controls.maxPolarAngle = CAMERA_LIMITS.maxPolarAngle;
+  controls.setBoundary(TARGET_BOUNDS);
+}
+
 function readSession(): string | null {
   try {
     return window.sessionStorage.getItem(CAMERA_SESSION_KEY);
@@ -59,6 +77,10 @@ export function CameraRig({
 }: CameraRigProps) {
   const interacting = useRef(false);
   const skipNextPreset = useRef(false);
+  // True while a preset transition owns the controls. camera-controls resolves the
+  // `setLookAt` promise from a `rest` listener registered AFTER ours, so without this
+  // gate the snapshot written at the end of every flip would carry `enabled: false`.
+  const locked = useRef(false);
   // Frozen at mount so the setup effect below stays a genuine one-shot.
   const [initialPreset] = useState(preset);
 
@@ -67,9 +89,11 @@ export function CameraRig({
     const controls = controlsRef.current;
     if (!controls) return;
 
-    controls.setBoundary(TARGET_BOUNDS);
+    applyRigLimits(controls);
     const pose = poseForPreset(initialPreset);
     void controls.setLookAt(...pose.position, ...pose.target, false);
+    // FR-23: "Reset" returns to the player's seat, so the saved state is the preset
+    // pose — never the restored session pose.
     controls.saveState();
 
     const saved = readSession();
@@ -79,13 +103,19 @@ export function CameraRig({
         skipNextPreset.current = true;
       } catch {
         skipNextPreset.current = false;
+      } finally {
+        applyRigLimits(controls);
       }
     }
 
-    const persist = () => writeSession(controls.toJSON());
+    const persist = () => {
+      if (locked.current) return;
+      writeSession(controls.toJSON());
+    };
     controls.addEventListener("rest", persist);
     return () => {
       controls.removeEventListener("rest", persist);
+      locked.current = false;
       controls.enabled = true;
     };
   }, [controlsRef, initialPreset]);
@@ -103,6 +133,13 @@ export function CameraRig({
     const previousSmoothTime = controls.smoothTime;
     const pose = poseForPreset(preset);
 
+    const release = () => {
+      controls.smoothTime = previousSmoothTime;
+      controls.enabled = true;
+      locked.current = false;
+    };
+
+    locked.current = true;
     controls.enabled = false;
     controls.smoothTime = CAMERA_FLIP_SMOOTH_TIME;
     void controls
@@ -110,19 +147,22 @@ export function CameraRig({
       .setLookAt(...pose.position, ...pose.target, !reducedMotion)
       .then(() => {
         if (cancelled) return;
-        controls.smoothTime = previousSmoothTime;
-        controls.enabled = true;
+        release();
+        // FR-23: Reset follows the ACTIVE preset, not whichever one happened to be
+        // selected when the 3D chunk mounted.
+        controls.saveState();
+        // The `rest` that ended this transition was swallowed by `locked`, so persist
+        // the settled pose here or FR-25 would restore the pre-flip seat.
+        writeSession(controls.toJSON());
       })
       .catch(() => {
         if (cancelled) return;
-        controls.smoothTime = previousSmoothTime;
-        controls.enabled = true;
+        release();
       });
 
     return () => {
       cancelled = true;
-      controls.smoothTime = previousSmoothTime;
-      controls.enabled = true;
+      release();
     };
   }, [controlsRef, preset, reducedMotion]);
 

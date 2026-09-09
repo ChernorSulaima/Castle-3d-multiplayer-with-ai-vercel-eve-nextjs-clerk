@@ -43,10 +43,15 @@ export function AiSetupDialog({
   onOpenChange,
   /** Rendered above the form when the caller is leaving the matchmaking queue. */
   notice,
+  /** True the moment the create mutation is sent, false again if it rejects. Lets
+   *  `/play` tell this self-started game apart from a `queue.pair` match, which it
+   *  otherwise cannot: both simply make an id appear in `games.myActiveGame`. */
+  onStartingChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   notice?: string;
+  onStartingChange?: (starting: boolean) => void;
 }) {
   const router = useRouter();
   const createAiGame = useMutation(api.games.createAiGame);
@@ -59,6 +64,7 @@ export function AiSetupDialog({
   async function start() {
     if (starting) return;
     setStarting(true);
+    onStartingChange?.(true);
     // Math.random() in an event handler, never during render (react-hooks/purity).
     const playerColor: Colour = colour === "random" ? (Math.random() < 0.5 ? "w" : "b") : colour;
     try {
@@ -66,6 +72,7 @@ export function AiSetupDialog({
       router.push(`/game/${gameId}`);
     } catch (error) {
       setStarting(false);
+      onStartingChange?.(false);
       toast.error(describeConvexError(error, "Could not start the game. Try again."));
     }
   }

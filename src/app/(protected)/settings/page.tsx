@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { SettingsForm } from "@/components/settings/settings-form";
+import { StandaloneSettingsForm } from "@/components/settings/settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -12,7 +12,7 @@ export default function SettingsPage() {
           Changes save themselves and follow you to every device.
         </p>
       </header>
-      <SettingsForm />
+      <StandaloneSettingsForm />
     </div>
   );
 }

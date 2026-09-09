@@ -23,6 +23,9 @@ import {
 export interface UseStockfish {
   /** Run one search. Rejects with {@link EngineUnavailableError} when disabled/broken. */
   search(request: SearchRequest): Promise<SearchResult>;
+  /** `ucinewgame`: clear the transposition table before a NEW game reuses the
+   *  shared worker (stockfish.md §9 rule 4). Resolves even when disabled. */
+  newGame(): Promise<void>;
   /** Ask a running search to finish now. */
   stop(): void;
   /** Re-run the UCI handshake after a failed load (the retry button). */
@@ -66,6 +69,14 @@ export function useStockfish(enabled: boolean): UseStockfish {
     return await engine.search(request);
   }, []);
 
+  const newGame = useCallback(async (): Promise<void> => {
+    const engine = engineRef.current;
+    if (engine === null) return;
+    // A failed handshake already surfaces through the status subscription, and a
+    // game must never fail to start because the TT could not be cleared.
+    await engine.newGame().catch(() => undefined);
+  }, []);
+
   const stop = useCallback(() => {
     engineRef.current?.stop();
   }, []);
@@ -76,5 +87,5 @@ export function useStockfish(enabled: boolean): UseStockfish {
     void engine.init().catch(() => undefined);
   }, []);
 
-  return { search, stop, retry, engineRef };
+  return { search, newGame, stop, retry, engineRef };
 }

@@ -104,6 +104,10 @@ export function lastMoveAtPly(moves: string[], ply: number): LastMove | null {
       san: m.san,
       colour: m.color,
       captured: m.captured,
+      // En passant is the one capture whose victim is not on the destination square.
+      capturedSquare: m.isEnPassant()
+        ? (`${m.to[0]}${m.from[1]}` as SquareId)
+        : undefined,
       promotion: m.promotion as PromotionPiece | undefined,
     };
   }

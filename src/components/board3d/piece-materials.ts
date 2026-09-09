@@ -10,9 +10,12 @@ export interface PieceMaterialSet {
   b: MeshPhysicalMaterial;
 }
 
+/**
+ * Only the plinth needs a standalone material: the playing surface is one plane whose
+ * checker comes from a canvas map, and its material is declared in JSX because it swaps
+ * between `MeshReflectorMaterial` and `meshStandardMaterial` by tier.
+ */
 export interface BoardMaterialSet {
-  light: MeshStandardMaterial;
-  dark: MeshStandardMaterial;
   frame: MeshStandardMaterial;
 }
 
@@ -53,13 +56,7 @@ export function disposePieceMaterials(set: PieceMaterialSet): void {
 }
 
 export function createBoardMaterials(preset: BoardMaterialPreset): BoardMaterialSet {
-  const square = {
-    metalness: preset.squareMetalness,
-    roughness: preset.squareRoughness,
-  };
   return {
-    light: new MeshStandardMaterial({ color: new Color(preset.lightSquare), ...square }),
-    dark: new MeshStandardMaterial({ color: new Color(preset.darkSquare), ...square }),
     frame: new MeshStandardMaterial({
       color: new Color(preset.frameColor),
       metalness: Math.min(1, preset.squareMetalness + 0.05),
@@ -69,7 +66,5 @@ export function createBoardMaterials(preset: BoardMaterialPreset): BoardMaterial
 }
 
 export function disposeBoardMaterials(set: BoardMaterialSet): void {
-  set.light.dispose();
-  set.dark.dispose();
   set.frame.dispose();
 }

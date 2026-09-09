@@ -5,7 +5,7 @@
 // There is deliberately NO optimistic update for moves — Convex is authoritative
 // (§E.3, NFR-4, §I-12).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Chess } from "chess.js";
+import { Chess, type Move } from "chess.js";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import {
@@ -66,6 +66,7 @@ const ERROR_COPY: Record<string, string> = {
   "not-an-ai-game": "This is not a game against the AI.",
   "no-draw-offer": "There is no draw offer to answer.",
   "cannot-answer-own-offer": "You cannot answer your own draw offer.",
+  "draw-not-available": "Draws can only be agreed against another player.",
   "hint-limit": "No hints left in this game.",
   "hints-unavailable": "Hints are only available at Beginner and Casual.",
   "Not authenticated": "Please sign in again.",
@@ -89,8 +90,38 @@ function toLastMove(stored: GameView["game"]["lastMove"]): LastMove | null {
     san: stored.san,
     colour: stored.colour,
     captured: stored.captured as PieceSymbol | undefined,
+    capturedSquare: stored.capturedSquare as SquareId | undefined,
     promotion: stored.promotion as PromotionPiece | undefined,
   };
+}
+
+/**
+ * chess.js SAN parsing is case-sensitive even in permissive mode (chessjs.md §4), but
+ * the move box sets `autoCapitalize="off"`, so a phone or screen-reader user types
+ * "nf3", "o-o" or "e8=q" (NFR-7). Try the text verbatim first, then the one obvious
+ * normalisation — never a broad search, so a typo can never become a different move.
+ */
+function sanCandidates(text: string): string[] {
+  const castle = text.replace(/0/g, "O").replace(/[\s-]/g, "").toUpperCase();
+  if (castle === "OO") return [text, "O-O"];
+  if (castle === "OOO") return [text, "O-O-O"];
+  // "e8=q" -> "e8=Q": chess.js rejects a lower-case promotion piece.
+  const promoted = text.replace(/=([qrbn])/, (match) => match.toUpperCase());
+  // "nf3" -> "Nf3". A leading file letter followed by a RANK is a pawn move ("b4",
+  // "b8=Q") and must be left alone; "bb5" and "bxc6" are tried as a pawn move first.
+  const capitalised = /^[nbrqk][^1-8]/.test(promoted)
+    ? promoted[0].toUpperCase() + promoted.slice(1)
+    : promoted;
+  return [...new Set([text, promoted, capitalised])];
+}
+
+/**
+ * True when the typed text NAMED the promotion piece ("b8=Q", "b8Q", "b7b8q").
+ * Bare LAN ("b7b8") does not: chess.js answers it with the first generated
+ * promotion — a knight — so that move has to go through the picker (FR-11).
+ */
+function namesPromotionPiece(text: string): boolean {
+  return /[1-8][qrbnQRBN]$/.test(text.replace(/[=+#!?\s]/g, ""));
 }
 
 function seatFor(role: ViewerRole): Colour | "both" | null {
@@ -154,17 +185,32 @@ export function useGameController(
   );
 
   const storedLastMove = game?.lastMove;
-  const lastMove = useMemo(
-    () => (reviewPly === null ? toLastMove(storedLastMove) : lastMoveAtPly(moves, reviewPly)),
-    [reviewPly, storedLastMove, moves],
+  // The move that ENDS at `ply`, or null when there is none (ply 0, or a ply that a
+  // take-back has already dropped off the end of `moves`).
+  const moveEndingAt = useCallback(
+    (ply: number): LastMove | null => {
+      if (ply <= 0 || ply > totalPlies) return null;
+      if (ply === totalPlies) {
+        const stored = toLastMove(storedLastMove);
+        if (stored) return stored;
+      }
+      return lastMoveAtPly(moves, ply);
+    },
+    [totalPlies, storedLastMove, moves],
   );
+
+  const renderedPly = reviewPly ?? totalPlies;
+  const lastMove = useMemo(() => moveEndingAt(renderedPly), [moveEndingAt, renderedPly]);
 
   // One tracker per mounted game. It lives in state (not a ref) so it can be read
   // during render without tripping `react-hooks/refs`; `sync` is idempotent.
+  // It is given the rendered PLY, not just `lastMove`: stepping backwards through the
+  // history is the transition P_k -> P_{k-1}, which `lastMove` does not describe, and
+  // feeding it that move popped the piece instead of sliding it (FR-17, FR-54).
   const [tracker] = useState(() => new PieceTracker());
   const position: BoardPiece[] = useMemo(
-    () => tracker.sync(fen, lastMove),
-    [tracker, fen, lastMove],
+    () => tracker.sync(fen, renderedPly, moveEndingAt),
+    [tracker, fen, renderedPly, moveEndingAt],
   );
 
   const turn: Colour = useMemo(() => {
@@ -185,8 +231,15 @@ export function useGameController(
   const active = status === "active";
   const isMyTurn = seat === "both" || (seat !== null && seat === (game?.turn ?? "w"));
   const canMove = Boolean(game) && active && seat !== null && isMyTurn && isLive;
+  // `active` is part of the test: `games.undo` refuses a finished game, because the
+  // Elo, W/L/D and ratingHistory it already awarded cannot be taken back (FR-49).
   const canUndo =
-    Boolean(game) && seat !== null && mode !== "online" && totalPlies > 0 && !pending;
+    Boolean(game) &&
+    active &&
+    seat !== null &&
+    mode !== "online" &&
+    totalPlies > 0 &&
+    !pending;
   const canResign = Boolean(game) && active && seat !== null;
   const drawOfferFrom: Colour | null = game?.drawOffer ?? null;
   const canOfferDraw =
@@ -325,20 +378,31 @@ export function useGameController(
         toast.error(message);
         return;
       }
-      let parsed;
-      try {
-        // Permissive parser: accepts SAN and LAN ("e2e4"), rejects everything else.
-        parsed = new Chess(fen).move(text);
-      } catch {
+      let parsed: Move | undefined;
+      for (const candidate of sanCandidates(text)) {
+        try {
+          // Permissive parser: accepts SAN and LAN ("e2e4"), rejects everything else.
+          parsed = new Chess(fen).move(candidate);
+          break;
+        } catch {
+          // Not this spelling — fall through to the next candidate.
+        }
+      }
+      if (parsed === undefined) {
         const message = `"${text}" is not a legal move here.`;
         setError(message);
         toast.error(message);
         return;
       }
+      // FR-11: only forward a promotion the player actually asked for. Bare LAN
+      // ("b7b8") parses as a KNIGHT promotion, so drop it and let `move()` open the
+      // picker instead of silently under-promoting.
       await move(
         parsed.from as SquareId,
         parsed.to as SquareId,
-        parsed.promotion as PromotionPiece | undefined,
+        namesPromotionPiece(text)
+          ? (parsed.promotion as PromotionPiece | undefined)
+          : undefined,
       );
     },
     [canMove, isLive, fen, move],

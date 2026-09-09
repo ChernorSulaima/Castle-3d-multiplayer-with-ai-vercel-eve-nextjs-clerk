@@ -33,6 +33,9 @@ export interface UiState {
   orientation: Colour;
   historyDrawerOpen: boolean;
   settingsDrawerOpen: boolean;
+  /** FR-21k: signed Convex storage URL for the player's uploaded backdrop, mirrored from
+   *  `players.me`. Session-only — the URL expires, so it never goes to localStorage. */
+  roomImageUrl: string | null;
 
   hydrateFromServer(settings: PlayerSettings): void;
   markHydrated(): void;
@@ -47,6 +50,7 @@ export interface UiState {
   setCinematic(on: boolean): void;
   setReducedMotion(on: boolean): void;
   setOrientation(colour: Colour): void;
+  setRoomImageUrl(url: string | null): void;
   autoDetectTier(input: Parameters<typeof autoQualityTier>[0]): void;
   degradeTier(): void;
   setHistoryDrawerOpen(open: boolean): void;
@@ -74,6 +78,7 @@ export const useUiStore = create<UiState>()(
         orientation: "w",
         historyDrawerOpen: false,
         settingsDrawerOpen: false,
+        roomImageUrl: null,
 
         // Convex wins over anything rehydrated from localStorage.
         hydrateFromServer: (s) =>
@@ -99,6 +104,7 @@ export const useUiStore = create<UiState>()(
         setCinematic: (cinematic) => set({ cinematic }),
         setReducedMotion: (reducedMotion) => set({ reducedMotion }),
         setOrientation: (orientation) => set({ orientation }),
+        setRoomImageUrl: (roomImageUrl) => set({ roomImageUrl }),
         autoDetectTier: (input) => {
           if (get().qualityTier !== "auto") return;
           set({ resolvedTier: autoQualityTier(input) });
@@ -123,7 +129,12 @@ export const useUiStore = create<UiState>()(
         // NOT a React setState — safe under react-hooks/set-state-in-effect.
         onRehydrateStorage: () => (state, error) => {
           if (error) console.error("[ui-store] rehydrate failed", error);
-          state?.markHydrated();
+          // On failure zustand calls back as `(undefined, error)` — e.g. the stored
+          // JSON is malformed — so `state?.` would skip the flag and leave /settings
+          // (and the 3D mount) stuck on their skeletons forever. The flag means
+          // "storage has been consulted", not "storage had something", so set it
+          // through the store itself, which is always there by the time this runs.
+          (state ?? useUiStore.getState()).markHydrated();
         },
       },
     ),

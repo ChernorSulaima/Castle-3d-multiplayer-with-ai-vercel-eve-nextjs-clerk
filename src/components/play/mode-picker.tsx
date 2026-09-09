@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
@@ -40,10 +40,24 @@ export function ModePicker() {
   const [aiNotice, setAiNotice] = useState<string | undefined>(undefined);
   const [localOpen, setLocalOpen] = useState(false);
 
+  // FR-26: the server refuses a second game (`already-in-game`), so the buttons
+  // that would start one are disabled rather than left to fail in the dialog.
+  const hasActiveGame = Boolean(activeGameId);
+
   // "unset" until the first subscription value lands. A game that already exists
   // when the page opens is offered as "Resume", never force-navigated — only a
   // NEW id (i.e. a pairing that happened while we were watching) redirects.
   const baseline = useRef<"unset" | GameId | null>("unset");
+
+  // An AI or local game created from this page ALSO makes a new id appear in
+  // `myActiveGame`, and its dialog is already navigating. Set before the create
+  // mutation is awaited — Convex resolves that promise having already pushed the
+  // new query value, so a flag set afterwards can lose the race. The dialogs clear
+  // it again when the mutation rejects, so a later real pairing still redirects.
+  const selfStarting = useRef(false);
+  const noteSelfStart = useCallback((starting: boolean) => {
+    selfStarting.current = starting;
+  }, []);
 
   useEffect(() => {
     if (activeGameId === undefined) return;
@@ -53,6 +67,7 @@ export function ModePicker() {
     }
     if (activeGameId !== null && activeGameId !== baseline.current) {
       baseline.current = activeGameId;
+      if (selfStarting.current) return;
       toast.success("Match found — good luck.");
       router.push(`/game/${activeGameId}`);
     }
@@ -112,7 +127,11 @@ export function ModePicker() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={playAi} className="w-full sm:w-fit">
+            <Button
+              onClick={playAi}
+              disabled={hasActiveGame}
+              className="w-full sm:w-fit"
+            >
               Choose an opponent
             </Button>
           </CardContent>
@@ -129,6 +148,7 @@ export function ModePicker() {
             <Button
               variant="secondary"
               onClick={() => setLocalOpen(true)}
+              disabled={hasActiveGame}
               className="w-full sm:w-fit"
             >
               Set up a local game
@@ -149,8 +169,17 @@ export function ModePicker() {
         </CardContent>
       </Card>
 
-      <AiSetupDialog open={aiOpen} onOpenChange={setAiOpen} notice={aiNotice} />
-      <LocalSetupDialog open={localOpen} onOpenChange={setLocalOpen} />
+      <AiSetupDialog
+        open={aiOpen}
+        onOpenChange={setAiOpen}
+        notice={aiNotice}
+        onStartingChange={noteSelfStart}
+      />
+      <LocalSetupDialog
+        open={localOpen}
+        onOpenChange={setLocalOpen}
+        onStartingChange={noteSelfStart}
+      />
     </div>
   );
 }

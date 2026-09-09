@@ -11,17 +11,25 @@ export interface DifficultyConfig {
   id: Difficulty;
   label: string;
   description: string;
-  /** UCI `Skill Level` used ONLY for the raw-Stockfish fallback search.
-   *  Candidate generation always runs at Skill Level 20 (stockfish.md §6:
-   *  Skill Level < 20 randomises `bestmove` and forces internal MultiPV >= 4). */
-  skillLevel: number;
   /** UCI `go depth`. */
   depth: number;
   /** UCI `MultiPV` for the candidate list handed to the agent. */
   multiPv: number;
   /** Hard `stop` timeout for the search; bestmove arrives ~50 ms later. */
   searchTimeoutMs: number;
-  /** Human-readable policy. The agent enforces it (agent/instructions.md). */
+  /**
+   * PRD §3.8's selection policy, word for word, in both places it is applied:
+   * pushed to the agent as `clientContext.selectionPolicy` (the primary chooser)
+   * and implemented in `selectCandidate` (the fallback). The two MUST agree —
+   * `difficulty.test.ts` asserts each string is also the matching row of
+   * `agent/instructions.md`, so edit all three together.
+   *
+   * There is no engine-side handicap: candidate generation always runs at Skill
+   * Level 20 (stockfish.md §6 — below 20 Stockfish randomises `bestmove` and
+   * forces internal MultiPV >= 4, so the ranking would not match the move it
+   * plays). PRD §3.8's "Stockfish Skill Level" column is therefore deliberately
+   * unimplemented; depth alone shapes how far ahead the candidates look.
+   */
   selectionPolicy: string;
   persona: Persona;
   /** Fixed Elo used when rating an AI game (FR-49). */
@@ -34,9 +42,9 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "beginner",
     label: "Beginner",
     description: "Learning the ropes. Explains what you could have done better.",
-    skillLevel: 1, depth: 2, multiPv: 5, searchTimeoutMs: 800,
+    depth: 2, multiPv: 5, searchTimeoutMs: 800,
     selectionPolicy:
-      "Pick a random candidate from ranks 2-4 unless rank 1 delivers mate or avoids being mated.",
+      "Pick a random candidate from the top 5; about half the time prefer a quiet (non-capturing) move.",
     persona: { key: "pip", name: "Pip", blurb: "Cheerful club newcomer; encouraging, a bit nervous." },
     aiRating: 800,
     hintsAllowed: true,
@@ -45,8 +53,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "casual",
     label: "Casual",
     description: "A friendly game with a chatty café player.",
-    skillLevel: 5, depth: 6, multiPv: 3, searchTimeoutMs: 1200,
-    selectionPolicy: "Pick rank 1 or 2, preferring natural developing or capturing moves.",
+    depth: 6, multiPv: 3, searchTimeoutMs: 1200,
+    selectionPolicy: "Pick a random candidate from the top 3.",
     persona: { key: "marco", name: "Marco", blurb: "Friendly café player; chatty, light jokes." },
     aiRating: 1100,
     hintsAllowed: true,
@@ -55,8 +63,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "intermediate",
     label: "Intermediate",
     description: "A patient coach who names the idea behind each move.",
-    skillLevel: 10, depth: 10, multiPv: 3, searchTimeoutMs: 1800,
-    selectionPolicy: "Pick rank 1 unless rank 2 is within 30 centipawns and more thematic.",
+    depth: 10, multiPv: 3, searchTimeoutMs: 1800,
+    selectionPolicy: "Pick rank 1 about 70% of the time, otherwise rank 2.",
     persona: { key: "ada", name: "Ada", blurb: "Patient coach; names the idea (pin, outpost, tempo)." },
     aiRating: 1400,
     hintsAllowed: false,
@@ -65,8 +73,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "advanced",
     label: "Advanced",
     description: "A serious tournament player. Terse and accurate.",
-    skillLevel: 15, depth: 14, multiPv: 2, searchTimeoutMs: 2400,
-    selectionPolicy: "Always pick rank 1.",
+    depth: 14, multiPv: 2, searchTimeoutMs: 2400,
+    selectionPolicy: "Always pick rank 1 (the best move).",
     persona: { key: "viktor", name: "Viktor", blurb: "Dry, confident tournament player; terse." },
     aiRating: 1800,
     hintsAllowed: false,
@@ -75,8 +83,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "grandmaster",
     label: "Grandmaster",
     description: "No mercy, and she will tell you about it.",
-    skillLevel: 20, depth: 18, multiPv: 2, searchTimeoutMs: 2600,
-    selectionPolicy: "Always pick rank 1.",
+    depth: 18, multiPv: 2, searchTimeoutMs: 2600,
+    selectionPolicy: "Always pick rank 1 (the best move).",
     persona: { key: "kasparova", name: "Kasparova", blurb: "Imperious grandmaster; cutting one-liners." },
     aiRating: 2300,
     hintsAllowed: false,

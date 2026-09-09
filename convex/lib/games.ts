@@ -8,7 +8,6 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Colour, EndReason, Winner } from "./chess";
 import {
-  ACTIVE_GAME_SCAN_LIMIT,
   AI_DISPLAY_NAME,
   AI_RATING,
   DEFAULT_LOCAL_PLAYER_TWO_NAME,
@@ -97,10 +96,8 @@ export function sideName(
  * The player's most recent `active` game, or null. Backs both the post-pairing
  * redirect (FR-24) and the "you cannot queue while playing" guard (FR-26).
  *
- * There is no (owner, status) index in the schema, so both owner indexes are read
- * newest-first with a hard cap and filtered in memory. The cap is generous enough
- * that an active game can only be missed by a player who created 100 games after
- * the one they are still playing.
+ * Both (owner, status) indexes are read newest-first and only the head row of each
+ * is needed, so the cost is independent of how many games the player has finished.
  */
 export async function findActiveGame(
   ctx: QueryCtx | MutationCtx,
@@ -108,21 +105,44 @@ export async function findActiveGame(
 ): Promise<Doc<"games"> | null> {
   const asWhite = await ctx.db
     .query("games")
-    .withIndex("by_whiteId_and_createdAt", (q) => q.eq("whiteId", playerId))
+    .withIndex("by_whiteId_and_status", (q) =>
+      q.eq("whiteId", playerId).eq("status", "active"),
+    )
     .order("desc")
-    .take(ACTIVE_GAME_SCAN_LIMIT);
+    .first();
   const asBlack = await ctx.db
     .query("games")
-    .withIndex("by_blackId_and_createdAt", (q) => q.eq("blackId", playerId))
+    .withIndex("by_blackId_and_status", (q) =>
+      q.eq("blackId", playerId).eq("status", "active"),
+    )
     .order("desc")
-    .take(ACTIVE_GAME_SCAN_LIMIT);
+    .first();
 
   let best: Doc<"games"> | null = null;
-  for (const game of [...asWhite, ...asBlack]) {
-    if (game.status !== "active") continue;
+  for (const game of [asWhite, asBlack]) {
+    if (game === null) continue;
     if (best === null || game.createdAt > best.createdAt) best = game;
   }
   return best;
+}
+
+/**
+ * FR-26 in both directions: a player may never start a second game, and starting
+ * one always takes them out of the matchmaking queue. Every game creator (AI,
+ * local) calls this; `queue.join` performs the mirror-image check.
+ */
+export async function requireFreeToStart(
+  ctx: MutationCtx,
+  playerId: Id<"players">,
+): Promise<void> {
+  const active = await findActiveGame(ctx, playerId);
+  if (active !== null) throw new Error("already-in-game");
+
+  const queued = await ctx.db
+    .query("queue")
+    .withIndex("by_playerId", (q) => q.eq("playerId", playerId))
+    .unique();
+  if (queued !== null) await ctx.db.delete("queue", queued._id);
 }
 
 /* -------------------------------------------------------------- finalising */

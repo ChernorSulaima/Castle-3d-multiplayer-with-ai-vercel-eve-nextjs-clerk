@@ -11,7 +11,12 @@ import { Button } from "@/components/ui/button";
 import { CAMERA_LIMITS, QUALITY_TIERS, poseForPreset } from "@/lib/camera";
 import { resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
-import type { BoardViewProps, CameraPresetId, RenderFailureReason } from "@/lib/types";
+import type {
+  BoardViewProps,
+  CameraPresetId,
+  RenderFailureReason,
+  ResolvedQualityTier,
+} from "@/lib/types";
 import { useQualityWatchdog } from "@/hooks/use-quality-watchdog";
 import { AutoTierProbe, QualityWatchdog } from "./quality";
 import { PostFx } from "./post-fx";
@@ -48,6 +53,7 @@ export default function Board3D(props: BoardViewProps) {
     cinematic,
     reducedMotion,
     webglAvailable,
+    roomImageUrl,
   } = useBoardSettings(props);
 
   const room = useMemo(() => resolveRoom(roomPreset, roomColors), [roomPreset, roomColors]);
@@ -67,6 +73,16 @@ export default function Board3D(props: BoardViewProps) {
   const meshOutline = !quality.post.composer || !quality.post.outline.enabled;
   const watchdog = useQualityWatchdog();
   const controlsRef = useRef<CameraControlsImpl | null>(null);
+
+  // FR-32 resolution scaling. It has to live in the `dpr` PROP rather than a bare
+  // `setDpr()` call: fiber re-applies this prop from `configure()` on every render, so an
+  // imperative override would be undone by the next move. Storing the tier it applies to
+  // (instead of a boolean) resets it on a tier change without a set-state-in-effect.
+  const [regressedTier, setRegressedTier] = useState<ResolvedQualityTier | null>(null);
+  const onRegressDpr = useCallback(() => setRegressedTier(tier), [tier]);
+  const onRestoreDpr = useCallback(() => setRegressedTier(null), []);
+  const canvasDpr: [number, number] | number =
+    regressedTier === tier ? Math.min(quality.dpr[1], quality.maxPixelRatioOnRegress) : quality.dpr;
 
   // The selected piece mesh reaches the post-processing Outline through a ref callback,
   // never a setState-in-effect (which `react-hooks/set-state-in-effect` forbids here).
@@ -187,7 +203,7 @@ export default function Board3D(props: BoardViewProps) {
         <Canvas
           className="h-full w-full touch-none"
           shadows={canvasShadows}
-          dpr={quality.dpr}
+          dpr={canvasDpr}
           camera={initialCamera}
           gl={{
             antialias: !quality.post.composer,
@@ -203,6 +219,7 @@ export default function Board3D(props: BoardViewProps) {
             <Scene
               board={props}
               room={room}
+              roomImageUrl={roomImageUrl}
               quality={quality}
               cameraPreset={cameraPreset}
               cinematic={cinematic}
@@ -220,7 +237,11 @@ export default function Board3D(props: BoardViewProps) {
             outlineColor={room.highlight.select}
           />
 
-          <QualityWatchdog watchdog={watchdog} />
+          <QualityWatchdog
+            watchdog={watchdog}
+            onRegressDpr={onRegressDpr}
+            onRestoreDpr={onRestoreDpr}
+          />
         </Canvas>
       )}
 
@@ -272,6 +293,8 @@ function useBoardSettings(props: BoardViewProps) {
   const cinematic = useUiStore((state) => state.cinematic);
   const reducedMotion = useUiStore((state) => state.reducedMotion);
   const webglAvailable = useUiStore((state) => state.webglAvailable);
+  // FR-21k: mirrored from `players.me` by use-settings-sync; null for signed-out players.
+  const roomImageUrl = useUiStore((state) => state.roomImageUrl);
 
   return {
     boardOrientation: props.orientation,
@@ -283,5 +306,6 @@ function useBoardSettings(props: BoardViewProps) {
     cinematic,
     reducedMotion,
     webglAvailable,
+    roomImageUrl: roomImageUrl ?? undefined,
   };
 }

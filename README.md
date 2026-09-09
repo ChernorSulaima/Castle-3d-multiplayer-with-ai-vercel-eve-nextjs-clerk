@@ -34,6 +34,23 @@ NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/play
 NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/play
 ```
 
+`EVE_SERVER_SECRET` is the last one, and it is the one `vercel env pull` cannot give you on a
+fresh clone — nobody has invented it yet. It is the shared secret between `/api/ai/*` and
+`agent/channels/eve.ts`, so generate one, put it in `.env.local`, and add it to the Vercel
+project:
+
+```bash
+openssl rand -hex 32                # paste as EVE_SERVER_SECRET=… in .env.local
+vercel env add EVE_SERVER_SECRET    # same value, so deployments match
+```
+
+**Without it the AI opponent still plays, and that is exactly the problem.** `eveConfigured()`
+is false, so the route never contacts the agent and silently falls back to the direct AI SDK
+path: moves and commentary appear, but the Eve agent, its personas and its durable per-game
+session are never exercised. The only signal is a `console.warn` from the agent process.
+`.env.local` is read once at startup and the agent channel binds the secret at module load, so
+adding or rotating it means restarting `pnpm dev`.
+
 ### 2. Convex
 
 ```bash

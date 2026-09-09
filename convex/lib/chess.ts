@@ -38,6 +38,8 @@ export interface StoredLastMove {
   san: string;
   colour: Colour;
   captured?: string;
+  /** Only set when the captured piece did NOT stand on `to` — i.e. en passant. */
+  capturedSquare?: string;
   promotion?: string;
 }
 
@@ -148,6 +150,9 @@ export function toStoredLastMove(move: Move): StoredLastMove {
     colour: move.color,
   };
   if (move.captured !== undefined) stored.captured = move.captured;
+  // The board animates the captured piece flying off `capturedSquare`; for en passant
+  // that is one rank behind the destination, never `to` itself.
+  if (move.isEnPassant()) stored.capturedSquare = `${move.to[0]}${move.from[1]}`;
   if (move.promotion !== undefined) stored.promotion = move.promotion;
   return stored;
 }

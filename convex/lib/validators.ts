@@ -62,6 +62,8 @@ export const vLastMove = v.object({
   san: v.string(),
   colour: vColour,
   captured: v.optional(v.string()),
+  /** Only set when the captured piece did NOT stand on `to` — i.e. en passant. */
+  capturedSquare: v.optional(v.string()),
   promotion: v.optional(v.string()),
 });
 export const vCommentarySource = v.union(

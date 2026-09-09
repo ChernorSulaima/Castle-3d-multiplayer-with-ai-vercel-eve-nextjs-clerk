@@ -84,6 +84,26 @@ export function resolveEveHost(requestUrl: string): string {
   return "http://localhost:3000";
 }
 
+/**
+ * Vercel Deployment Protection headers (eve-agent.md §7).
+ *
+ * `resolveEveHost` targets the deployment's PUBLIC origin, so on a protected
+ * deployment (team previews are protected by default) this server-to-server POST
+ * is answered with a 401 challenge before it ever reaches `/eve/v1/*`. The bypass
+ * secret is Vercel's own escape hatch for exactly this call. Resolved per request
+ * so a rotated secret is picked up without a restart; empty when the project has
+ * no protection configured, which is the normal production case.
+ */
+function protectionBypassHeaders(): Record<string, string> {
+  const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (typeof secret !== "string" || secret.length === 0) return {};
+  return {
+    "x-vercel-protection-bypass": secret,
+    // Never let the bypass be pinned as a cookie: this client is not a browser.
+    "x-vercel-set-bypass-cookie": "false",
+  };
+}
+
 function eveClient(host: string): Client {
   return new Client({
     host,
@@ -94,9 +114,21 @@ function eveClient(host: string): Client {
         password: () => process.env.EVE_SERVER_SECRET ?? "",
       },
     },
+    headers: () => protectionBypassHeaders(),
     // Credential-bearing clients must not follow redirects (ClientRedirectPolicy).
     redirect: "manual",
   });
+}
+
+/**
+ * True when a failed eve call means "eve did not answer" rather than "eve answered
+ * badly" — the §F.6 direct-model fallback is worth a try only in the first case.
+ * 401/403 belong here: a Deployment Protection or basic-auth challenge is indis-
+ * tinguishable from eve being down as far as this request is concerned, and
+ * without it every move would silently degrade to the Stockfish fallback.
+ */
+function isUnreachableStatus(status: number): boolean {
+  return status >= 500 || status === 404 || status === 401 || status === 403;
 }
 
 /**
@@ -138,13 +170,22 @@ export async function runAgentTurn<T>(
           // back the PREVIOUS turn's result (measured: 13 ms, identical payload).
           // Attach at the current tail + 1 so the stream begins with our own turn.
           const tail = await readTailIndex(client, reuse, controller.signal);
-          if (tail === null) {
+          if (tail.kind === "gone") {
+            // The session really is not there any more — a fresh one is correct.
             sessionId = undefined;
-            failure = "session-index-unavailable";
+            failure = "session-restarted";
             continue;
           }
+          if (tail.kind === "unavailable") {
+            // Transport/auth failure, not a missing session: KEEP the stored id
+            // (a new session per hiccup would reset the persona every ply, FR-37)
+            // and let this one turn fall back to the Stockfish candidates.
+            failure = tail.status === null ? "session-index-unavailable" : `eve-${tail.status}`;
+            unreachable = tail.status === null || isUnreachableStatus(tail.status);
+            break;
+          }
           response = await client.sessions
-            .attach(reuse, { streamIndex: tail + 1 })
+            .attach(reuse, { streamIndex: tail.index + 1 })
             .send<T>(input.message, {
               clientContext,
               outputSchema: schema,
@@ -192,7 +233,7 @@ export async function runAgentTurn<T>(
             continue;
           }
           failure = error.code ?? `eve-${error.status}`;
-          unreachable = error.status >= 500 || error.status === 404;
+          unreachable = isUnreachableStatus(error.status);
           break;
         }
         failure = "eve-unreachable";
@@ -241,26 +282,60 @@ export async function runDirectTurn<T>(
   }
 }
 
-/** Index of the newest durable event in a session, or null when unavailable. */
+/**
+ * Why this is a discriminated union: "the session is gone" and "the request
+ * failed" need OPPOSITE handling. Collapsing both to `null` made every transport
+ * hiccup (a 5xx, a protection 401) throw the game's durable session away and
+ * create a fresh one on the next ply, so the agent lost all cross-turn context
+ * and paid for a `sessions.create` every move.
+ */
+type TailIndex =
+  | { kind: "ok"; index: number }
+  /** 404 / no tail header on a 2xx: this session really is not there any more. */
+  | { kind: "gone" }
+  /** The request itself failed; `status` is null for a thrown fetch. */
+  | { kind: "unavailable"; status: number | null };
+
+/** Index of the newest durable event in a session. Retries a failed call once. */
 async function readTailIndex(
   client: Client,
   sessionId: string,
   signal: AbortSignal,
-): Promise<number | null> {
+): Promise<TailIndex> {
+  let last: TailIndex = { kind: "unavailable", status: null };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (signal.aborted) return last;
+    last = await readTailIndexOnce(client, sessionId, signal);
+    if (last.kind !== "unavailable") return last;
+  }
+  return last;
+}
+
+async function readTailIndexOnce(
+  client: Client,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<TailIndex> {
+  let response: Response;
   try {
-    const response = await client.fetch(
+    response = await client.fetch(
       `${EVE_SESSION_STREAM_PATH(sessionId)}?startIndex=-1&includeTailIndex=1`,
       { method: "GET", signal },
     );
-    const header = response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER);
-    // We only wanted the header; never drain a follow stream.
-    void response.body?.cancel().catch(() => undefined);
-    if (header === null) return null;
-    const parsed = Number.parseInt(header, 10);
-    return Number.isFinite(parsed) && parsed >= -1 ? parsed : null;
   } catch {
-    return null;
+    return { kind: "unavailable", status: null };
   }
+  const header = response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER);
+  // We only wanted the header; never drain a follow stream.
+  void response.body?.cancel().catch(() => undefined);
+  if (!response.ok) {
+    return response.status === 404 ? { kind: "gone" } : { kind: "unavailable", status: response.status };
+  }
+  if (header === null) return { kind: "gone" };
+  const parsed = Number.parseInt(header, 10);
+  return Number.isFinite(parsed) && parsed >= -1
+    ? { kind: "ok", index: parsed }
+    : { kind: "gone" };
 }
 
 const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";

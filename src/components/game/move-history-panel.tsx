@@ -2,6 +2,7 @@
 // src/components/game/move-history-panel.tsx  [P3]
 // FR-41 (SAN paired by move number, current highlighted), FR-42 (click to review)
 // and FR-47 (PGN copy + download).
+import { useEffect, useRef } from "react";
 import { CopyIcon, DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,8 +33,27 @@ export function MoveHistoryPanel({
 }: MoveHistoryPanelProps) {
   const currentPly = reviewPly ?? totalPlies;
 
+  // FR-41: highlighting the current move is no use once it has scrolled out of the
+  // viewport, which it has by move ~20 in both the side panel and the mobile drawer.
+  // Skipped while the focus is inside the panel so it never yanks the list away from
+  // someone who is deliberately reading (or tabbing through) an earlier move.
+  const sectionRef = useRef<HTMLElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const section = sectionRef.current;
+    const active = activeRef.current;
+    if (section === null || active === null) return;
+    const focused = section.ownerDocument.activeElement;
+    if (focused !== null && section.contains(focused)) return;
+    active.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [currentPly]);
+
   return (
-    <section className={cn("flex min-h-0 flex-col", className)} aria-label="Move history">
+    <section
+      ref={sectionRef}
+      className={cn("flex min-h-0 flex-col", className)}
+      aria-label="Move history"
+    >
       <ScrollArea className="min-h-0 flex-1">
         {history.length === 0 ? (
           <p className="p-3 text-sm text-muted-foreground">No moves yet.</p>
@@ -51,6 +71,7 @@ export function MoveHistoryPanel({
                   return (
                     <button
                       key={side}
+                      ref={active ? activeRef : undefined}
                       type="button"
                       id={`${idPrefix}-ply-${cell.ply}`}
                       aria-current={active ? "step" : undefined}

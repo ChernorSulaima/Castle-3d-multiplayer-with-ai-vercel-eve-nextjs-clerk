@@ -1,6 +1,8 @@
 // convex/players.ts — FR-1…FR-5, FR-15, FR-21e/j/k/l, FR-31
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import {
   optionalPlayer,
   playerForIdentity,
@@ -18,6 +20,33 @@ import {
 } from "./lib/validators";
 
 const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * `usernameLower` has to be collision-free: three public queries resolve a profile
+ * through `by_usernameLower`, and two rows sharing a name would make all of them
+ * throw. Clerk only guarantees uniqueness for the username claim — `name` (the
+ * display name we fall back to) is not unique, so the candidate is checked here
+ * and disambiguated with the Clerk subject before it is written.
+ */
+async function freeUsername(
+  ctx: MutationCtx,
+  candidate: string,
+  identity: { subject: string; tokenIdentifier: string },
+): Promise<string> {
+  const suffix = identity.subject.slice(-6);
+  const options = [candidate, `${candidate}-${suffix}`, `player${suffix}`];
+
+  for (const option of options) {
+    const taken: Doc<"players"> | null = await ctx.db
+      .query("players")
+      .withIndex("by_usernameLower", (q) => q.eq("usernameLower", option.toLowerCase()))
+      .first();
+    if (taken === null || taken.tokenIdentifier === identity.tokenIdentifier) {
+      return option;
+    }
+  }
+  return options[options.length - 1];
+}
 
 function assertHexColours(colors: {
   background: string;
@@ -43,11 +72,12 @@ export const ensurePlayer = mutation({
 
     // `nickname` is the Clerk username on this instance; the other claims are
     // usually null (clerk-setup.md §0, ARCHITECTURE §I-13).
-    const username =
+    const candidate =
       identity.nickname ??
       identity.preferredUsername ??
       identity.name ??
       `player${identity.subject.slice(-6)}`;
+    const username = await freeUsername(ctx, candidate, identity);
     const avatarUrl = identity.pictureUrl ?? "";
 
     const existing = await playerForIdentity(ctx, identity);
@@ -109,12 +139,14 @@ export const getByUsername = query({
   args: { username: v.string() },
   returns: v.union(vPlayerProfile, v.null()),
   handler: async (ctx, args) => {
+    // `.first()`, not `.unique()`: `ensurePlayer` keeps `usernameLower` unique, but
+    // a legacy duplicate must degrade to one profile, never to a 500 for both.
     const player = await ctx.db
       .query("players")
       .withIndex("by_usernameLower", (q) =>
         q.eq("usernameLower", args.username.toLowerCase()),
       )
-      .unique();
+      .first();
     if (player === null) return null;
     return {
       _id: player._id,

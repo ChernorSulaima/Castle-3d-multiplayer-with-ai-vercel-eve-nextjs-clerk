@@ -8,12 +8,25 @@ export interface CameraPose {
   target: [number, number, number];
 }
 
+/**
+ * The "Top" preset must sit INSIDE the FR-20 polar clamp. camera-controls only applies
+ * `minPolarAngle`/`maxPolarAngle` in `rotateTo()` and the pointer handlers — `setLookAt()`
+ * writes `_sphericalEnd` unclamped and `update()` only calls `makeSafe()` — so a
+ * near-vertical preset would be legal until the first orbit drag, which then snaps the
+ * camera to `minPolarAngle` in a single frame. 14 deg keeps a 4 deg margin over the 10 deg
+ * limit while still reading as a top-down view.
+ */
+const TOP_DISTANCE = 13;
+const TOP_POLAR = 14 * DEG;
+
 /** "cinematic" is not a pose — it is the white pose plus idle auto-orbit. */
 export const CAMERA_PRESETS: Record<Exclude<CameraPresetId, "cinematic">, CameraPose> = {
   white: { position: [0, 7.5, 9], target: [0, 0, 0] },
   black: { position: [0, 7.5, -9], target: [0, 0, 0] },
-  // tiny z avoids the polar==0 singularity; still clamped by minPolarAngle
-  top: { position: [0, 13, 0.001], target: [0, 0, 0] },
+  top: {
+    position: [0, TOP_DISTANCE * Math.cos(TOP_POLAR), TOP_DISTANCE * Math.sin(TOP_POLAR)],
+    target: [0, 0, 0],
+  },
 };
 
 export const CAMERA_LIMITS = {

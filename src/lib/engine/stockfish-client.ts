@@ -130,10 +130,15 @@ export class StockfishEngine {
     return promise;
   }
 
-  /** `ucinewgame` + `isready`. Clears the transposition table between games. */
-  async newGame(): Promise<void> {
-    await this.init();
-    await this.enqueue(async () => {
+  /**
+   * `ucinewgame` + `isready`. Clears the transposition table between games so
+   * evals from the previous game cannot leak into this one (stockfish.md §9
+   * rule 4). Enqueued synchronously — `init()` is awaited INSIDE the queued task
+   * so a `search()` issued in the same tick can never overtake it.
+   */
+  newGame(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.init();
       this.send("ucinewgame");
       await this.expect(isReadyOk, () => this.send("isready"), READY_TIMEOUT_MS);
       this.appliedMultiPv = null;

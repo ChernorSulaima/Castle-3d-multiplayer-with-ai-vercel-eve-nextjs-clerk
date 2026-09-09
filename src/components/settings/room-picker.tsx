@@ -104,10 +104,18 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
   const [uploading, setUploading] = useState(false);
 
   const colours = roomColors ?? DEFAULT_ROOM_COLORS;
+  // Resolved rather than hard-coded so the warmed file follows `resolveRoom`'s
+  // choice of base preset if that ever changes.
+  const customRoom = resolveRoom("custom", colours);
 
   function choose(preset: RoomPresetId) {
     setRoomPreset(preset);
     if (preset === "custom") {
+      // Custom is Minimal White's rig with the player's colours — `background:
+      // "colour"` only drops the skybox, the HDRI is still the IBL source
+      // (board3d/room.tsx). Warm it like any other preset or the first game after
+      // picking Custom mounts unlit until minimal.hdr downloads.
+      prefetchHdri(customRoom.hdri);
       // Make sure the server has something to store the first time custom is picked.
       const next = roomColors ?? DEFAULT_ROOM_COLORS;
       setRoomColors(next);
@@ -211,6 +219,8 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
           type="button"
           aria-pressed={roomPreset === "custom"}
           onClick={() => choose("custom")}
+          onPointerEnter={() => prefetchHdri(customRoom.hdri)}
+          onFocus={() => prefetchHdri(customRoom.hdri)}
           className={cn(
             "grid gap-2 rounded-lg border p-2 text-left transition-colors",
             "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -219,7 +229,7 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
               : "border-border hover:bg-muted/40",
           )}
         >
-          <RoomSwatch room={resolveRoom("custom", colours)} className="w-full" />
+          <RoomSwatch room={customRoom} className="w-full" />
           <span className="block text-sm font-medium">Custom</span>
           <span className="block text-xs text-muted-foreground">Your own colours.</span>
         </button>

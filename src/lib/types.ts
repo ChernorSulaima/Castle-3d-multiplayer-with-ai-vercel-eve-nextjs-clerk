@@ -150,6 +150,9 @@ export interface LastMove {
   san: string;
   colour: Colour;
   captured?: PieceSymbol;
+  /** Where the captured piece actually stood. Only set when it differs from `to`, i.e.
+   *  en passant — the pawn taken sits one rank behind the destination (FR-17). */
+  capturedSquare?: SquareId;
   promotion?: PromotionPiece;
 }
 

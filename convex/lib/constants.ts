@@ -23,6 +23,12 @@ export const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
 /* ------------------------------------------------------------- presence */
 export const ABANDON_TIMEOUT_MS = 60_000; // FR-32
 export const PRESENCE_TTL_MS = 10 * 60_000;
+/**
+ * `ai` / `local` games have no opponent to forfeit to, so they are never swept on
+ * the 60 s clock. They are still finalised (unrated) once nobody has touched them
+ * for a day, otherwise they stay `active` forever and block FR-26 for their owner.
+ */
+export const STALE_GAME_TTL_MS = 24 * 60 * 60_000;
 
 /* ---------------------------------------------------------- matchmaking */
 export const QUEUE_BASE_RANGE = 200; // FR-23
@@ -75,12 +81,14 @@ export const MAX_LIVE_GAMES = 50; // games.listLive
 export const MAX_RECENT_GAMES = 50; // games.myRecentGames / gamesForProfile
 export const MAX_RATING_HISTORY = 100; // ratingHistory.forPlayer
 export const MAX_COMMENTARY_ROWS = 400; // commentary.forGame
-/** Rows scanned when hunting for the caller's most recent active game. */
-export const ACTIVE_GAME_SCAN_LIMIT = 100;
-/** Rows scanned by games.listLive before the `mode === "online"` filter. */
-export const LIVE_SCAN_LIMIT = 200;
 /** Games considered per abandon sweep tick. */
 export const ABANDON_SWEEP_LIMIT = 50;
+/** `ai`/`local` games finalised per sweep tick, per mode. */
+export const STALE_GAME_SWEEP_LIMIT = 50;
+/** Live online games whose `spectatorCount` is refreshed on each sweep tick. */
+export const SPECTATOR_REFRESH_LIMIT = 100;
+/** Presence rows read when tallying one game's spectators (the tally saturates). */
+export const SPECTATOR_SCAN_LIMIT = 50;
 /** Presence rows deleted per gc tick. */
 export const PRESENCE_GC_LIMIT = 500;
 

@@ -9,6 +9,7 @@ import { QualityPicker } from "@/components/settings/quality-picker";
 import { RoomPicker } from "@/components/settings/room-picker";
 import { useSettingsWriter } from "@/hooks/use-settings-sync";
 import { useUiStore } from "@/lib/stores/ui-store";
+import type { PlayerSettings } from "@/lib/types";
 
 function Section({
   title,
@@ -40,6 +41,13 @@ function SettingsSkeleton() {
   );
 }
 
+export interface SettingsFormProps {
+  /** The ONE debounced `players.updateSettings` writer for this tree. The form does
+   *  not own it: the game shell persists the 2D/3D toggle through the same writer
+   *  (FR-15), and two writers would fire two mutations per change. */
+  save(patch: Partial<PlayerSettings>): void;
+}
+
 /**
  * Every control writes to the ui-store synchronously (so a 3D scene already on
  * screen updates on the same frame) and then queues a debounced
@@ -49,11 +57,10 @@ function SettingsSkeleton() {
  * localStorage and merged `players.me`, the store still holds SSR defaults, and
  * rendering those as "selected" would flash the wrong choices.
  */
-export function SettingsForm() {
+export function SettingsForm({ save }: SettingsFormProps) {
   const hydrated = useUiStore((s) => s.hydrated);
   const boardFlipEnabled = useUiStore((s) => s.boardFlipEnabled);
   const setBoardFlipEnabled = useUiStore((s) => s.setBoardFlipEnabled);
-  const save = useSettingsWriter();
 
   if (!hydrated) return <SettingsSkeleton />;
 
@@ -103,4 +110,10 @@ export function SettingsForm() {
       </Section>
     </div>
   );
+}
+
+/** The /settings page has no other settings writer to share, so it owns one here. */
+export function StandaloneSettingsForm() {
+  const save = useSettingsWriter();
+  return <SettingsForm save={save} />;
 }

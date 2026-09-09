@@ -5,24 +5,36 @@
 import { BOARD_EXTENT, CAPTURE_TRAY_X, PIECE_HEIGHTS, type PieceMeshName } from "@/lib/constants";
 import type { Colour } from "@/lib/types";
 
-/** Top face of the plinth — the reflective surface the tiles sit on. */
+/** Base plane the plinth rises from; the room floor/grid sits below it. */
 export const PLINTH_TOP_Y = 0;
 export const PLINTH_HEIGHT = 0.22;
-/** Thin tiles sit on the plinth; their top face is where pieces stand. */
+/** Height of the board slab above the plinth base; its top is where pieces stand. */
 export const SQUARE_THICKNESS = 0.06;
 export const SQUARE_TOP_Y = PLINTH_TOP_Y + SQUARE_THICKNESS;
 export const PIECE_Y = SQUARE_TOP_Y;
+
+/**
+ * FR-27 wants the pieces to reflect IN the board, so the reflective plane IS the
+ * checkerboard (its 8x8 pattern is painted into a canvas texture) rather than a mirror
+ * buried under 64 opaque tiles. It floats a hair above the plinth's top face — enough to
+ * beat the depth buffer at this near/far range, well under the 1 mm the click colliders
+ * and the highlight overlays sit at.
+ */
+export const BOARD_SURFACE_Y = SQUARE_TOP_Y + 0.0006;
+/** The plinth rises all the way to the playing surface, so the board is one solid body. */
+export const PLINTH_BODY_HEIGHT = PLINTH_HEIGHT + SQUARE_THICKNESS;
+export const PLINTH_CENTRE_Y = SQUARE_TOP_Y - PLINTH_BODY_HEIGHT / 2;
 /** Emissive overlays float just above the tiles so they never z-fight. */
 export const HIGHLIGHT_Y = SQUARE_TOP_Y + 0.004;
 export const COORD_Y = SQUARE_TOP_Y + 0.003;
 export const CONTACT_SHADOW_Y = SQUARE_TOP_Y + 0.008;
 
-/** Reflective rim left visible around the 8x8 playing area. */
+/** Frame left visible around the 8x8 playing area (the plinth's own top face). */
 export const FRAME_WIDTH = 0.55;
 export const BOARD_SIZE = BOARD_EXTENT; // 8 units across
 export const PLINTH_SIZE = BOARD_SIZE + FRAME_WIDTH * 2;
 
-/** Squares are drawn slightly inset so the tile grid reads as separate tiles. */
+/** Squares are drawn slightly inset so the checker reads as separate tiles. */
 export const TILE_SIZE = 0.98;
 /** Overlay disc/ring radii (base diameter of a piece is ~0.49 units). */
 export const LEGAL_DOT_RADIUS = 0.16;

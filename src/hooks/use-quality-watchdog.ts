@@ -2,8 +2,13 @@
 // FR-31 / §E.10 step 4. `<PerformanceMonitor ms={500} iterations={10} bounds={() => [30, 55]}>`
 // is exactly the required window: 10 samples x 500 ms = 5 s below 30 fps -> drop one tier.
 //
-// PerformanceMonitor stops sampling permanently after `onFallback`, so the caller must
-// re-mount it with the returned `key` whenever the tier changes.
+// `onFallback` is deliberately NOT wired: drei increments `api.flipped` on the INCLINE
+// branch as well as the decline one, so a machine holding a perfect 60 fps trips the
+// fallback after a handful of windows and would silently collapse High -> Low. The
+// monitor is left on its `flipflops = Infinity` default and only `onDecline` drops a tier.
+//
+// PerformanceMonitor keeps its sample state in a `useState` initialiser, so the caller
+// re-mounts it with the returned `key` whenever the tier changes.
 "use client";
 import { useCallback, useRef } from "react";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -17,7 +22,6 @@ export interface QualityWatchdog {
   key: ResolvedQualityTier;
   tier: ResolvedQualityTier;
   onDecline(): void;
-  onFallback(): void;
 }
 
 export function useQualityWatchdog(): QualityWatchdog {
@@ -33,5 +37,5 @@ export function useQualityWatchdog(): QualityWatchdog {
     store.degradeTier();
   }, []);
 
-  return { key: tier, tier, onDecline: drop, onFallback: drop };
+  return { key: tier, tier, onDecline: drop };
 }

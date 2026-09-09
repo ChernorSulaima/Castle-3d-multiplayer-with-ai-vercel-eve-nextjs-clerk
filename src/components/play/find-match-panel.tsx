@@ -77,10 +77,21 @@ export function FindMatchPanel({
     try {
       if (inQueue) {
         await leave({});
+        queuedRef.current = false;
       } else {
+        // Claim the slot BEFORE the round trip. `queuedRef` otherwise mirrors
+        // `queue.myStatus`, which lands a round trip later, so navigating away in
+        // that window skipped the FR-25 cleanup entirely: the row survived, got
+        // paired within 5 s, and the abandon sweep forfeited the game for someone
+        // who never saw a board. `queue.leave` is idempotent, so an unmount that
+        // beats the join costs nothing.
+        queuedRef.current = true;
         await join({});
       }
     } catch (error) {
+      // Nothing changed server-side — fall back to the last value the
+      // subscription gave us so the cleanup does not act on a phantom row.
+      queuedRef.current = inQueue;
       toast.error(describeConvexError(error, "Matchmaking is unavailable right now."));
     } finally {
       setPending(false);

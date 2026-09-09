@@ -47,6 +47,69 @@ describe("players.ensurePlayer", () => {
       /Not authenticated/,
     );
   });
+
+  test("disambiguates two identities that share a Clerk display name", async () => {
+    const t = makeTest();
+    // `name` is a display name and is NOT unique; only the username claim is. Two
+    // rows sharing `usernameLower` would break every `by_usernameLower` reader.
+    const first = { subject: "user_100001", name: "John Smith" };
+    const second = { subject: "user_200002", name: "John Smith" };
+    await t.withIdentity(first).mutation(api.players.ensurePlayer, {});
+    await t.withIdentity(second).mutation(api.players.ensurePlayer, {});
+
+    const rows = await t.run(async (ctx) => ctx.db.query("players").take(10));
+    expect(rows).toHaveLength(2);
+    const lowered = rows.map((row) => row.usernameLower);
+    expect(new Set(lowered).size).toBe(2);
+    expect(lowered).toContain("john smith");
+
+    // Both profiles resolve; neither query throws.
+    const profile = await t.query(api.players.getByUsername, { username: "john smith" });
+    expect(profile?.username).toBe("John Smith");
+    const other = rows.find((row) => row.usernameLower !== "john smith");
+    expect(other).toBeDefined();
+    expect(
+      await t.query(api.players.getByUsername, { username: other?.username ?? "" }),
+    ).not.toBeNull();
+
+    // Re-provisioning keeps each row on its own name.
+    await t.withIdentity(second).mutation(api.players.ensurePlayer, {});
+    const after = await t.run(async (ctx) => ctx.db.query("players").take(10));
+    expect(after).toHaveLength(2);
+    expect(new Set(after.map((row) => row.usernameLower)).size).toBe(2);
+  });
+
+  test("a duplicate usernameLower degrades to one profile instead of a 500", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    // Simulate a row written before the uniqueness guard existed.
+    await t.run(async (ctx) => {
+      const row = await ctx.db.get("players", alice.id);
+      if (row === null) return;
+      const { _id, _creationTime, ...rest } = row;
+      void _id;
+      void _creationTime;
+      await ctx.db.insert("players", {
+        ...rest,
+        clerkId: "user_duplicate",
+        tokenIdentifier: "duplicate",
+      });
+    });
+
+    expect(
+      (await t.query(api.players.getByUsername, { username: "alice" }))?.username,
+    ).toBe("alice");
+    expect(await t.query(api.games.gamesForProfile, { username: "alice", limit: 5 })).toEqual(
+      [],
+    );
+    expect(
+      await t.query(api.ratingHistory.forPlayer, {
+        username: "alice",
+        pool: "all",
+        limit: 5,
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("players queries", () => {

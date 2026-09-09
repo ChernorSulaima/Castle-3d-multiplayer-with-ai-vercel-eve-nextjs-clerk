@@ -57,7 +57,7 @@ function buildState(tracker: PieceTracker, moves: string[], jumped: boolean): De
   return {
     moves,
     fen,
-    position: tracker.sync(fen, lastMove),
+    position: tracker.sync(fen, moves.length, (ply) => lastMoveAtPly(moves, ply)),
     lastMove,
     turn: new Chess(fen).turn(),
     checkSquare: checkSquareOf(fen),

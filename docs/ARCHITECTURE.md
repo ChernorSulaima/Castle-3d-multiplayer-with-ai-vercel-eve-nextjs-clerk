@@ -178,7 +178,6 @@ chess-3d-ai-clerk-game/
     │   ├── use-review.ts               [P3]    review/replay ply navigation + autoplay
     │   ├── use-ai-turn.ts              [P5]    orchestrates stockfish → /api/ai/move → makeAiMove + commentary
     │   ├── use-quality-watchdog.ts     [P4]    PerformanceMonitor wiring → drops a tier (FR-31)
-    │   └── use-preload-3d.ts           [P4]    warms the Board3D chunk + HDRI once the game page mounts (NFR-2a)
     │
     ├── components/
     │   ├── ui/**                               (exists) 26 shadcn base-nova components — do not edit
@@ -248,7 +247,7 @@ chess-3d-ai-clerk-game/
     │   │   ├── board-3d.tsx                [P4]  default export; implements BoardViewProps; owns <Canvas>
     │   │   ├── scene.tsx                   [P4]  lights, environment, board, pieces, highlights, shadows
     │   │   ├── camera-rig.tsx              [P4]  CameraControls: clamps, boundary, presets, reset, session persist
-    │   │   ├── board-surface-3d.tsx        [P4]  MeshReflectorMaterial plane + 64 square meshes (Instances)
+    │   │   ├── board-surface-3d.tsx        [P4]  plinth + one MeshReflectorMaterial plane whose map IS the checker
     │   │   ├── squares.tsx                 [P4]  clickable square colliders (raycast targets) + coordinates
     │   │   ├── highlights.tsx              [P4]  legal/capture/last/check emissive pulsing overlays
     │   │   ├── pieces.tsx                  [P4]  32 pieces from the tracker, damped move tween, capture slide
@@ -258,7 +257,7 @@ chess-3d-ai-clerk-game/
     │   │   ├── room.tsx                    [P4]  Environment / colour background / Stars / floor per preset
     │   │   ├── captured-tray-3d.tsx        [P4]  off-board tray slots + arrival animation (FR-17)
     │   │   ├── post-fx.tsx                 [P4]  EffectComposer: N8AO → Outline → Bloom → SMAA → ToneMapping
-    │   │   ├── quality.tsx                 [P4]  PerformanceMonitor + AdaptiveDpr + Preload wiring
+    │   │   ├── quality.tsx                 [P4]  PerformanceMonitor: tier drop (FR-31) + dpr scaling (FR-32)
     │   │   └── webgl-fallback.tsx          [P4]  probe + toast + tells the shell to fall back to 2D (FR-19)
     │   │
     │   └── ai/                                 ── P5 ──
@@ -702,7 +701,7 @@ export default defineSchema({
     rated: v.boolean(), // false for local, and flipped to false by the first take-back (FR-49)
     undoCount: v.number(), // FR-45
     hintsUsed: v.number(), // FR-40, max 3
-    spectatorCount: v.optional(v.number()), // denormalised by the presence cron
+    spectatorCount: v.optional(v.number()), // denormalised by the presence cron (live games included)
 
     eveSessionId: v.optional(v.string()), // durable Eve session for this game (eve-agent.md §3.3)
 
@@ -710,9 +709,17 @@ export default defineSchema({
     lastMoveAt: v.number(),
     endedAt: v.optional(v.number()),
   })
-    .index("by_status_and_lastMoveAt", ["status", "lastMoveAt"]) // listLive + abandon sweep
+    // AMENDMENT: `mode` leads this index (it replaced `by_status_and_lastMoveAt`).
+    // `lastMoveAt` is bumped by every mode, so with `status` alone a wall of active
+    // ai/local games — which nothing ever moves out of `active` — filled both the
+    // listLive window and the abandon-sweep window and starved online games.
+    .index("by_mode_and_status_and_lastMoveAt", ["mode", "status", "lastMoveAt"])
     .index("by_whiteId_and_createdAt", ["whiteId", "createdAt"])
-    .index("by_blackId_and_createdAt", ["blackId", "createdAt"]),
+    .index("by_blackId_and_createdAt", ["blackId", "createdAt"])
+    // AMENDMENT: (owner, status) — `findActiveGame` (FR-24/FR-26) reads the head row
+    // of each instead of scanning 100 rows per owner index and filtering in memory.
+    .index("by_whiteId_and_status", ["whiteId", "status"])
+    .index("by_blackId_and_status", ["blackId", "status"]),
 
   // --------------------------------------------------------------- presence
   // Heartbeats and spectator tracking live here, NOT on `games`: patching the game
@@ -784,9 +791,9 @@ queries must never read the wall clock (Convex guidelines).
 
 | function | kind | args | returns | auth | behaviour |
 |---|---|---|---|---|---|
-| `players.ensurePlayer` | mutation | `{}` | `v.id("players")` | auth | Upsert from `ctx.auth.getUserIdentity()`. Lookup `by_tokenIdentifier`; if absent, insert `{ clerkId: identity.subject, tokenIdentifier, username: identity.nickname ?? identity.preferredUsername ?? identity.name ?? "player" + suffix, usernameLower, avatarUrl: identity.pictureUrl ?? "", rating/ratingHuman/ratingAi: 1200, wins/losses/draws: 0, roomPreset: "study", boardFlipEnabled: true, boardView: "3d", qualityTier: "auto", postFxEnabled: true, createdAt/updatedAt: Date.now() }` (FR-3). If present, patch `username`/`usernameLower`/`avatarUrl` when they changed and `updatedAt`. Idempotent; called on every sign-in. |
+| `players.ensurePlayer` | mutation | `{}` | `v.id("players")` | auth | Upsert from `ctx.auth.getUserIdentity()`. Lookup `by_tokenIdentifier`; if absent, insert `{ clerkId: identity.subject, tokenIdentifier, username: identity.nickname ?? identity.preferredUsername ?? identity.name ?? "player" + suffix, usernameLower, avatarUrl: identity.pictureUrl ?? "", rating/ratingHuman/ratingAi: 1200, wins/losses/draws: 0, roomPreset: "study", boardFlipEnabled: true, boardView: "3d", qualityTier: "auto", postFxEnabled: true, createdAt/updatedAt: Date.now() }` (FR-3). If present, patch `username`/`usernameLower`/`avatarUrl` when they changed and `updatedAt`. Idempotent; called on every sign-in. `usernameLower` is made collision-free before it is written (look it up `by_usernameLower`; if another `tokenIdentifier` holds it, fall back to `<name>-<subject suffix>` then `player<subject suffix>`): only the Clerk username claim is unique, and `identity.name` — the display-name fallback — is not, so two "John Smith"s would otherwise make every `by_usernameLower` reader throw. |
 | `players.me` | query | `{}` | `v.union(playerDoc, v.null())` | auth (returns `null` when unauthenticated instead of throwing, so it is safe outside `<Authenticated>`) | The caller's own row, plus resolved `roomImageUrl: string \| null` from `ctx.storage.getUrl`. |
-| `players.getByUsername` | query | `{ username: v.string() }` | `v.union(publicProfile, v.null())` | public | Lookup `by_usernameLower` on `username.toLowerCase()`. Public projection: `_id, username, avatarUrl, rating, ratingHuman, ratingAi, wins, losses, draws, createdAt`. Never leaks settings or `clerkId`. |
+| `players.getByUsername` | query | `{ username: v.string() }` | `v.union(publicProfile, v.null())` | public | Lookup `by_usernameLower` on `username.toLowerCase()` with `.first()`, not `.unique()` — a legacy duplicate must degrade to one profile, never to a 500 for both (same in `games.gamesForProfile` and `ratingHistory.forPlayer`). Public projection: `_id, username, avatarUrl, rating, ratingHuman, ratingAi, wins, losses, draws, createdAt`. Never leaks settings or `clerkId`. |
 | `players.updateSettings` | mutation | `{ boardView?: vBoardView, roomPreset?: vRoomPreset, roomColors?: v.union(vRoomColors, v.null()), boardFlipEnabled?: v.boolean(), qualityTier?: vQualityTier, postFxEnabled?: v.boolean() }` | `v.null()` | player | Patch only the supplied keys (FR-15, FR-21e, FR-21l, FR-31). Passing `roomColors: null` clears them. Validates hex colours with `/^#[0-9a-fA-F]{6}$/`. |
 | `players.generateUploadUrl` | mutation | `{}` | `v.string()` | player | `ctx.storage.generateUploadUrl()` (FR-21k). URL expires in 1 h. |
 | `players.setRoomImage` | mutation | `{ storageId: v.id("_storage") }` | `v.null()` | player | Reads `ctx.db.system.get("_storage", storageId)`; rejects `size > 5 MB` or a non-`image/*` `contentType` (deleting the blob first); deletes the previous `roomImageStorageId`; patches the new one and sets `roomPreset: "custom"`. |
@@ -796,7 +803,7 @@ queries must never read the wall clock (Convex guidelines).
 
 | function | kind | args | returns | auth | behaviour |
 |---|---|---|---|---|---|
-| `queue.join` | mutation | `{}` | `v.null()` | player | Throws `"already-in-game"` if the player has an `active` game (checked via both `by_whiteId_and_createdAt` and `by_blackId_and_createdAt`, FR-26). Idempotent: if a `queue` row already exists for the player, do nothing. Otherwise insert `{ playerId, rating: player.ratingHuman, joinedAt: Date.now() }` and `ctx.scheduler.runAfter(0, internal.queue.pair, {})` so a lone waiter is matched the instant a second player joins (the cron is only the safety net). |
+| `queue.join` | mutation | `{}` | `v.null()` | player | Throws `"already-in-game"` if the player has an `active` game (checked via both `by_whiteId_and_status` and `by_blackId_and_status`, FR-26; `games.createAiGame` / `games.createLocalGame` enforce the mirror image and delete the queue row). Idempotent: if a `queue` row already exists for the player, do nothing. Otherwise insert `{ playerId, rating: player.ratingHuman, joinedAt: Date.now() }` and `ctx.scheduler.runAfter(0, internal.queue.pair, {})` so a lone waiter is matched the instant a second player joins (the cron is only the safety net). |
 | `queue.leave` | mutation | `{}` | `v.null()` | player | Deletes the caller's queue row if present (FR-25). |
 | `queue.myStatus` | query | `{}` | `v.object({ inQueue: v.boolean(), joinedAt: v.union(v.number(), v.null()) })` | auth | No wall-clock read; the client computes elapsed time from `joinedAt` and derives the current widening window with `queueRangeAt()` from `src/lib/constants.ts`. |
 | `queue.pair` | **internalMutation** | `{}` | `v.null()` | internal | The pairing sweep (FR-23). Reads the queue ascending `by_joinedAt` with `.take(200)`. For each entry oldest-first (skipping already-paired ids): `range = 200 + 100 * floor((now - joinedAt) / 10_000)`; find the oldest other entry whose `abs(ratingA - ratingB) <= max(rangeA, rangeB)`; on a hit delete both rows, pick colours with `Math.random() < 0.5`, insert a `games` doc (`mode: "online"`, `status: "active"`, `fen: DEFAULT_POSITION`, `moves: []`, `pgn: startPgn`, `turn: "w"`, `rated: true`, `undoCount: 0`, `hintsUsed: 0`, `createdAt/lastMoveAt: now`) and insert two `presence` rows so the 60 s abandon clock starts immediately. Runs to completion over the batch. |
@@ -807,24 +814,25 @@ Called by `convex/crons.ts`: `crons.interval("pair queued players", { seconds: 5
 
 | function | kind | args | returns | auth | behaviour |
 |---|---|---|---|---|---|
-| `games.createAiGame` | mutation | `{ difficulty: vDifficulty, playerColor: vColour }` | `v.id("games")` | player | FR-7. Sets `mode:"ai"`, `aiColor` = opposite of `playerColor`, human id on their colour, `null` on the AI's, `rated: true`, `status: "active"`. Difficulty is immutable afterwards (FR-38 preamble). |
-| `games.createLocalGame` | mutation | `{ playerTwoName: v.optional(v.string()) }` | `v.id("games")` | player | FR-21a/b. `mode:"local"`, `whiteId` = caller, `blackId: null`, `localPlayerTwoName` (trimmed, ≤ 24 chars, default `"Player 2"`), `rated: false`. |
+| `games.createAiGame` | mutation | `{ difficulty: vDifficulty, playerColor: vColour }` | `v.id("games")` | player | FR-7. Sets `mode:"ai"`, `aiColor` = opposite of `playerColor`, human id on their colour, `null` on the AI's, `rated: true`, `status: "active"`. Difficulty is immutable afterwards (FR-38 preamble). **FR-26 both ways** (`requireFreeToStart`): throws `"already-in-game"` when `findActiveGame` returns a game, and deletes the caller's `queue` row — otherwise `queue.pair` could seat them into a second, rated game they never open and then forfeit. |
+| `games.createLocalGame` | mutation | `{ playerTwoName: v.optional(v.string()) }` | `v.id("games")` | player | FR-21a/b. `mode:"local"`, `whiteId` = caller, `blackId: null`, `localPlayerTwoName` (trimmed, ≤ 24 chars, default `"Player 2"`), `rated: false`. Same `requireFreeToStart` guard as `createAiGame`. |
 | `games.get` | query | `{ gameId: v.id("games") }` | `v.union(gameView, v.null())` | auth | Returns the game doc plus `white`/`black` public player summaries (`{ _id, username, avatarUrl, rating }` or `null`) and `viewerRole: "white" \| "black" \| "local" \| "spectator"`. `null` when the id does not resolve (`ctx.db.normalizeId` guard for route params). Never returns settings of other players. |
-| `games.listLive` | query | `{ limit: v.number() }` | `v.array(liveGameSummary)` | public | FR-8 spectate list and the landing ticker. `by_status_and_lastMoveAt` with `eq("status","active")`, `.order("desc")`, `.take(min(limit, 50))`, filtered to `mode === "online"`, hydrated with both usernames/avatars/ratings + `moves.length` + `spectatorCount`. |
+| `games.listLive` | query | `{ limit: v.number() }` | `v.array(liveGameSummary)` | public | FR-8 spectate list and the landing ticker. `by_mode_and_status_and_lastMoveAt` with `eq("mode","online").eq("status","active")`, `.order("desc")`, `.take(min(limit, 50))` — the mode is part of the index, so there is no in-memory filter and no oversized scan window. Hydrated with both usernames/avatars/ratings + `moves.length` + `spectatorCount`. |
 | `games.myActiveGame` | query | `{}` | `v.union(v.id("games"), v.null())` | auth | Most recent `active` game where the caller is white or black. Used by `/play` to auto-redirect after pairing (FR-24) and to block queueing (FR-26). |
 | `games.myRecentGames` | query | `{ limit: v.number() }` | `v.array(gameSummary)` | auth | FR-53. Union of the two owner indexes, `.order("desc").take(limit)` each, merged and re-sorted by `createdAt`, capped at `limit` (≤ 50). |
 | `games.gamesForProfile` | query | `{ username: v.string(), limit: v.number() }` | `v.array(gameSummary)` | public | Same as above for another player, resolved through `by_usernameLower`. |
 | `games.makeMove` | mutation | `{ gameId, from: v.string(), to: v.string(), promotion: v.optional(vPromotionPiece) }` | `v.object({ san: v.string(), status: vGameStatus, turn: vColour, winner: v.optional(vWinner) })` | participant | **The single authoritative move path** (FR-10, FR-29, NFR-4). Steps in §E.3. Rejects: game not `active`; wrong turn; caller not a participant of the colour to move (`local` mode: the owner may move both colours); illegal move (chess.js throws → rethrow as `"Illegal move"`); missing `promotion` when required (FR-11 — chess.js has no auto-queen). Clears any `drawOffer`. On terminal status calls the shared `finalizeGame()` helper. |
 | `games.makeAiMove` | mutation | `{ gameId, san: v.string(), expectedPly: v.number() }` | same as `makeMove` | participant | FR-36. Extra guards: `mode === "ai"`, `turn === game.aiColor`, `game.moves.length === expectedPly` (idempotency — a duplicate/late submission is a no-op error, never a double move). The SAN is validated by replaying `moves` and calling `chess.move(san)` in **permissive** mode (the model may emit LAN). Security reasoning in §I-6. |
 | `games.resign` | mutation | `{ gameId }` | `v.null()` | participant | FR-30. `status:"resigned"`, `winner` = the other colour, `endReason:"resignation"`, finalize + ratings. In `local` mode the caller resigns for the side to move. |
-| `games.offerDraw` | mutation | `{ gameId }` | `v.null()` | participant | FR-31. Sets `drawOffer` to the caller's colour; a repeat offer by the same colour is a no-op; offering while the opponent already has an offer standing is treated as an accept. |
-| `games.respondDraw` | mutation | `{ gameId, accept: v.boolean() }` | `v.null()` | participant | Only the colour that did **not** offer may respond. Accept → `status:"draw"`, `winner:"draw"`, `endReason:"agreement"`, finalize. Decline → unset `drawOffer`. |
-| `games.undo` | mutation | `{ gameId, toPly: v.number() }` | `v.object({ fen: v.string(), turn: vColour, undoCount: v.number() })` | participant | FR-43/44/46. **Rejected when `mode === "online"`.** `toPly` must satisfy `0 <= toPly < moves.length`. In `ai` mode `toPly` is snapped down so it is the human's turn again (rewinds a full turn). Rebuilds by replaying `moves.slice(0, toPly)` through chess.js and rewriting `fen/pgn/turn/lastMove/moves/status/winner/endReason` (an ended game returns to `active`). `undoCount += (previousLength - toPly)`, `rated = false` (FR-49), `drawOffer` cleared, `commentary` rows with `ply > toPly` deleted, and `eveSessionId` cleared so P5 starts a fresh Eve session (see §F.4). |
+| `games.offerDraw` | mutation | `{ gameId }` | `v.null()` | participant | FR-31. Sets `drawOffer` to the caller's colour; a repeat offer by the same colour is a no-op; offering while the opponent already has an offer standing is treated as an accept. **Rejected for `mode === "ai"`** (`"draw-not-available"`): the AI has no seat, so it can never answer and the human may not answer their own offer — the offer would sit on the document unanswerable. `local` mode is allowed: the owner drives both sides and the second call agrees the draw. |
+| `games.respondDraw` | mutation | `{ gameId, accept: v.boolean() }` | `v.null()` | participant | Only the colour that did **not** offer may respond. Rejected for `mode === "ai"` like `offerDraw`. Accept → `status:"draw"`, `winner:"draw"`, `endReason:"agreement"`, finalize. Decline → unset `drawOffer`. |
+| `games.undo` | mutation | `{ gameId, toPly: v.number() }` | `v.object({ fen: v.string(), turn: vColour, undoCount: v.number() })` | participant | FR-43/44/46. **Rejected when `mode === "online"`, and when `status !== "active"`** (`"game-not-active"`, like every other mutation): once `finalizeGame` has committed Elo, the W/L/D record and a `ratingHistory` row, reopening the game would leave all three describing a game that is live again (FR-49). `canUndo` in the controller carries the same `active` term. `toPly` must satisfy `0 <= toPly < moves.length`. In `ai` mode `toPly` is snapped down so it is the human's turn again (rewinds a full turn). Rebuilds by replaying `moves.slice(0, toPly)` through chess.js and rewriting `fen/pgn/turn/lastMove/moves`. `undoCount += (previousLength - toPly)`, `rated = false` (FR-49), `drawOffer` cleared, `commentary` rows with `ply > toPly` deleted, and `eveSessionId` cleared so P5 starts a fresh Eve session (see §F.4). |
+| `games.presenceFor` | query | `{ gameId: v.id("games") }` | `v.object({ w: v.union(v.number(), v.null()), b: v.union(v.number(), v.null()) })` | auth | FR-32. Both participants' `presence.lastSeen`, read by exact key on `by_gameId_and_playerId`; `null` for a seat with no row (the AI seat, or a player who has not sent a heartbeat yet). **No wall-clock read** (§I-14): the game page compares the stamps against `Date.now()` on its own 20 s interval, and falls back to `lastMoveAt` for spectators. |
 | `games.heartbeat` | mutation | `{ gameId }` | `v.null()` | player | FR-32. Upserts the caller's `presence` row (`role` from participation, else `"spectator"`) with `lastSeen: Date.now()`. Called every 15 s while the tab is visible. |
 | `games.useHint` | mutation | `{ gameId }` | `v.object({ hintsUsed: v.number(), remaining: v.number() })` | participant | FR-40. Only `mode:"ai"` and `difficulty` in `{beginner, casual}`; throws `"hint-limit"` when `hintsUsed >= 3`. Increments and returns. The hint text itself is written by `commentary.append` with `source:"hint"`. |
 | `games.setEveSession` | mutation | `{ gameId, eveSessionId: v.string() }` | `v.null()` | participant | Persists the durable Eve session id after the first AI turn (`eve-agent.md` §3.3). Only sets it when currently unset or different. |
-| `games.finalizeInternal` | **internalMutation** | `{ gameId, status, winner, endReason }` | `v.null()` | internal | Used by the abandon sweep; wraps the same `finalizeGame()` helper as the public paths. |
-| `games.sweepAbandoned` | **internalMutation** | `{}` | `v.null()` | internal | FR-32. Every 20 s: `by_status_and_lastMoveAt` `eq("status","active")`, `lt("lastMoveAt", now - 60_000)`, `.take(50)`; for each **online** game read the two participant `presence` rows; if exactly one side's `lastSeen` is older than 60 s, finalize as `abandoned` with `winner` = the present side; if both are stale, finalize as `abandoned` with `winner: "draw"` and no rating change. Also refreshes `spectatorCount` from `by_gameId_and_role`. |
+| `games.refreshSpectatorCounts` | **internalMutation** | `{}` | `v.null()` | internal | FR-8. Every 20 s: the 100 most recently active `online` games (`by_mode_and_status_and_lastMoveAt`, `.order("desc")`) get `spectatorCount` recomputed from `by_gameId_and_role` (spectator rows seen within 60 s, `.take(50)`), patched only when it changed. A game that is being played never goes idle, so the abandon sweep alone left the "N watching" badge at 0 for exactly the games people watch. Kept OUT of `sweepAbandoned` on purpose: it reads the hot end of the index and is therefore the pass that conflicts and gets retried, which must never delay abandonment. |
+| `games.sweepAbandoned` | **internalMutation** | `{}` | `v.null()` | internal | FR-32. Every 20 s, two bounded passes over `by_mode_and_status_and_lastMoveAt`. **(1)** the sweep proper: `eq("mode","online").eq("status","active")`, `lt("lastMoveAt", now - 60_000)`, `.take(50)`; both participant `presence` rows are read **by exact key** (`by_gameId_and_playerId` `.unique()`, never a bounded scan spectators could fill); if exactly one side's `lastSeen` is older than 60 s, finalize as `abandoned` with `winner` = the present side; if both are stale, finalize as `abandoned` with `winner: "draw"` and no rating change. Scoping the index range to `mode === "online"` is what stops never-ending ai/local games from filling the window and blocking FR-32 for the whole deployment. **(2)** `ai` and `local` games with `lt("lastMoveAt", now - 24 h)` are finalized `abandoned`/`draw` with `skipRatings`, so they cannot accumulate as permanently `active` rows (which would also block FR-26 for their owner forever). |
 | `games.gcPresence` | **internalMutation** | `{}` | `v.null()` | internal | Every 5 min: delete `presence` rows with `lastSeen < now - 10 min` (`by_lastSeen`, `.take(500)`, re-schedule itself while a full batch was deleted — Convex guidelines on batching). |
 
 `convex/crons.ts` (file name is mandatory; default-export the `cronJobs()` result):
@@ -836,6 +844,12 @@ import { internal } from "./_generated/api";
 const crons = cronJobs();
 crons.interval("pair queued players", { seconds: 5 }, internal.queue.pair, {});
 crons.interval("sweep abandoned games", { seconds: 20 }, internal.games.sweepAbandoned, {});
+crons.interval(
+  "refresh spectator counts",
+  { seconds: 20 },
+  internal.games.refreshSpectatorCounts,
+  {},
+);
 crons.interval("gc presence", { minutes: 5 }, internal.games.gcPresence, {});
 export default crons;
 ```
@@ -1671,17 +1685,16 @@ export interface DifficultyConfig {
   id: Difficulty;
   label: string;
   description: string;
-  /** UCI `Skill Level` used ONLY for the raw-Stockfish fallback search.
-   *  Candidate generation always runs at Skill Level 20 (stockfish.md §6:
-   *  Skill Level < 20 randomises `bestmove` and forces internal MultiPV >= 4). */
-  skillLevel: number;
-  /** UCI `go depth`. */
+  /** UCI `go depth`. There is no per-difficulty `Skill Level`: every search runs
+   *  at 20 (stockfish.md §6 — below 20 Stockfish randomises `bestmove` and forces
+   *  internal MultiPV >= 4), so the handicap lives in `selectionPolicy` (§I-17). */
   depth: number;
   /** UCI `MultiPV` for the candidate list handed to the agent. */
   multiPv: number;
   /** Hard `stop` timeout for the search; bestmove arrives ~50 ms later. */
   searchTimeoutMs: number;
-  /** Human-readable policy. The agent enforces it (agent/instructions.md). */
+  /** PRD §3.8's policy verbatim. Duplicated in agent/instructions.md and applied
+   *  by `selectCandidate`; `difficulty.test.ts` keeps the three in sync. */
   selectionPolicy: string;
   persona: Persona;
   /** Fixed Elo used when rating an AI game (FR-49). */
@@ -1694,9 +1707,9 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "beginner",
     label: "Beginner",
     description: "Learning the ropes. Explains what you could have done better.",
-    skillLevel: 1, depth: 2, multiPv: 5, searchTimeoutMs: 800,
+    depth: 2, multiPv: 5, searchTimeoutMs: 800,
     selectionPolicy:
-      "Pick a random candidate from ranks 2-4 unless rank 1 delivers mate or avoids being mated.",
+      "Pick a random candidate from the top 5; about half the time prefer a quiet (non-capturing) move.",
     persona: { key: "pip", name: "Pip", blurb: "Cheerful club newcomer; encouraging, a bit nervous." },
     aiRating: 800,
     hintsAllowed: true,
@@ -1705,8 +1718,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "casual",
     label: "Casual",
     description: "A friendly game with a chatty café player.",
-    skillLevel: 5, depth: 6, multiPv: 3, searchTimeoutMs: 1200,
-    selectionPolicy: "Pick rank 1 or 2, preferring natural developing or capturing moves.",
+    depth: 6, multiPv: 3, searchTimeoutMs: 1200,
+    selectionPolicy: "Pick a random candidate from the top 3.",
     persona: { key: "marco", name: "Marco", blurb: "Friendly café player; chatty, light jokes." },
     aiRating: 1100,
     hintsAllowed: true,
@@ -1715,8 +1728,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "intermediate",
     label: "Intermediate",
     description: "A patient coach who names the idea behind each move.",
-    skillLevel: 10, depth: 10, multiPv: 3, searchTimeoutMs: 1800,
-    selectionPolicy: "Pick rank 1 unless rank 2 is within 30 centipawns and more thematic.",
+    depth: 10, multiPv: 3, searchTimeoutMs: 1800,
+    selectionPolicy: "Pick rank 1 about 70% of the time, otherwise rank 2.",
     persona: { key: "ada", name: "Ada", blurb: "Patient coach; names the idea (pin, outpost, tempo)." },
     aiRating: 1400,
     hintsAllowed: false,
@@ -1725,8 +1738,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "advanced",
     label: "Advanced",
     description: "A serious tournament player. Terse and accurate.",
-    skillLevel: 15, depth: 14, multiPv: 2, searchTimeoutMs: 2400,
-    selectionPolicy: "Always pick rank 1.",
+    depth: 14, multiPv: 2, searchTimeoutMs: 2400,
+    selectionPolicy: "Always pick rank 1 (the best move).",
     persona: { key: "viktor", name: "Viktor", blurb: "Dry, confident tournament player; terse." },
     aiRating: 1800,
     hintsAllowed: false,
@@ -1735,8 +1748,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
     id: "grandmaster",
     label: "Grandmaster",
     description: "No mercy, and she will tell you about it.",
-    skillLevel: 20, depth: 18, multiPv: 2, searchTimeoutMs: 2600,
-    selectionPolicy: "Always pick rank 1.",
+    depth: 18, multiPv: 2, searchTimeoutMs: 2600,
+    selectionPolicy: "Always pick rank 1 (the best move).",
     persona: { key: "kasparova", name: "Kasparova", blurb: "Imperious grandmaster; cutting one-liners." },
     aiRating: 2300,
     hintsAllowed: false,
@@ -2616,7 +2629,8 @@ Owner: P5 (`use-ai-turn.ts`). Runs only when `game.mode === "ai"`.
    `isready`, `position fen <fen>`, `go depth <depth>` with a client-side `stop` timer at
    `searchTimeoutMs`. **Skill Level is 20 for candidate generation** — below 20 Stockfish randomises
    `bestmove` and forces internal MultiPV ≥ 4, so the reported ranking would not match the move
-   (`stockfish.md` §6). The difficulty's own `skillLevel` is used only for the raw fallback search.
+   (`stockfish.md` §6). There is no weakened engine search anywhere: the handicap is the
+   difficulty's `selectionPolicy`, applied by the agent and by `selectCandidate` (§I-17).
 5. `parse-uci` keeps a `Map<multipv, line>` (last line per rank wins), skipping
    `lowerbound`/`upperbound` and `info string` lines. `candidates.ts` converts each PV head from UCI
    to SAN with chess.js and yields `Candidate[]`, best first. `candidates[0].san` is the fallback move.
@@ -2696,8 +2710,8 @@ the position stays server-validated.
 2. Opening `/game/[id]` as a non-participant yields `viewerRole: "spectator"`:
    `board.interactive = false`, controls hidden, `spectator-banner` shown.
 3. The spectator's own room preset and quality tier are used — rooms are per-viewer (FR-21l).
-4. `use-heartbeat` still runs, writing a `presence` row with `role:"spectator"`; the sweep
-   recomputes `games.spectatorCount` from it.
+4. `use-heartbeat` still runs, writing a `presence` row with `role:"spectator"`; the sweep cron
+   recomputes `games.spectatorCount` from it for every live online game, not only idle ones.
 5. Everything else (history, review, PGN export) works unchanged.
 
 ### E.8 Replay / review (FR-42, FR-54)
@@ -2715,13 +2729,19 @@ the position stays server-validated.
    and `document.visibilityState === "visible"`, plus once on mount and once on visibility regain.
 2. `heartbeat` upserts the caller's `presence` row. **It never patches the `games` document** —
    doing so would push a new game doc to every subscriber every 15 s (see §I-2).
-3. `internal.games.sweepAbandoned` runs every 20 s over `active` games whose `lastMoveAt` is older
-   than 60 s. For online games it compares the two participants' `presence.lastSeen`:
+3. `internal.games.sweepAbandoned` runs every 20 s over `active` **online** games whose
+   `lastMoveAt` is older than 60 s (the mode is part of the index — see §B). It compares the two
+   participants' `presence.lastSeen`, read by exact key:
    one stale → `status:"abandoned"`, `winner` = the present side, ratings applied normally;
    both stale → `status:"abandoned"`, `winner:"draw"`, **no** rating change.
-4. The opponent's client sees the status change through the subscription and shows the result
+4. Before the game gets that far, `game-shell` subscribes to `api.games.presenceFor` and warns the
+   player as soon as the OPPONENT's heartbeat is older than 60 s — the query carries no wall clock,
+   so the comparison happens client-side on a 20 s interval. Spectators (and the first render, before
+   the subscription lands) fall back to `now - lastMoveAt`.
+5. The opponent's client sees the status change through the subscription and shows the result
    dialog ("Opponent disconnected").
-5. AI and local games are never swept.
+6. AI and local games are never forfeited on the 60 s clock; they are finalized unrated once nobody
+   has touched them for 24 h, so they cannot stay `active` forever (FR-26).
 
 ### E.10 Quality watchdog and 2D fallback (FR-19, FR-31, NFR-2)
 
@@ -2733,14 +2753,18 @@ the position stays server-validated.
    explains why (FR-19). The 3D toggle is disabled with a tooltip.
 3. Probe succeeds → `useUiStore.autoDetectTier({ hardwareConcurrency, devicePixelRatio, gpuTier: useDetectGPU().tier, isMobile })`
    when `qualityTier === "auto"`.
-4. Inside the Canvas, `<PerformanceMonitor ms={500} iterations={10} bounds={() => [30, 55]} onDecline={degradeTier} flipflops={3} onFallback={...} />`
-   gives exactly the FR-31 window (10 × 500 ms = 5 s below 30 fps → drop one tier). `PerformanceMonitor`
-   stops sampling permanently after `onFallback`; re-mount it with a changed `key` after a manual
-   tier change.
+4. Inside the Canvas, `<PerformanceMonitor ms={500} iterations={10} bounds={() => [30, 55]} onDecline={degradeTier} />`
+   gives exactly the FR-31 window (10 × 500 ms = 5 s below 30 fps → drop one tier). Leave `flipflops`
+   on its `Infinity` default and do NOT wire `onFallback` to the tier drop: drei increments
+   `api.flipped` on the **incline** branch too, so a machine holding a steady 60 fps trips the
+   fallback within ~20 s and would silently collapse High → Low. Re-mount it with a changed `key`
+   after a manual tier change. `onDecline`/`onIncline` also drive `setDpr` (FR-32 resolution
+   scaling, clamped by `maxPixelRatioOnRegress`) — `<AdaptiveDpr>` cannot, because nothing in the
+   app calls `performance.regress()`.
 5. `onCreated` registers `webglcontextlost` (preventDefault + `onRenderFailure("context-lost")`) so a
    lost context falls back to 2D instead of showing a black canvas.
 6. Switching 2D↔3D keeps `selectedSquare` and `reviewPly` because both live in the controller, not in
-   the board (FR-14). The 3D chunk and the active HDRI are preloaded by `use-preload-3d` as soon as
+   the board (FR-14). The 3D chunk and the active HDRI are preloaded by `board-surface.tsx` as soon as
    the game page mounts, so the switch is under 500 ms after first load (NFR-2a).
 
 ### E.11 Room change (FR-21h … FR-21n)
@@ -2842,11 +2866,14 @@ moves, best first, with `scoreCp`/`mateIn` from your point of view.
 
 | difficulty | choose | persona |
 | --- | --- | --- |
-| beginner | a random candidate from ranks 2-4 unless rank 1 mates or avoids mate | "Pip", cheerful club newcomer; encouraging; sometimes says what worried them |
-| casual | rank 1 or 2, preferring natural developing or capturing moves | "Marco", friendly cafe player; chatty, light jokes |
-| intermediate | rank 1 unless rank 2 is within 30 cp and more thematic | "Ada", patient coach; names the idea (pin, outpost, tempo) |
-| advanced | rank 1 | "Viktor", dry, confident tournament player; terse |
-| grandmaster | rank 1, always | "Kasparova", imperious grandmaster; cutting one-liners |
+| beginner | Pick a random candidate from the top 5; about half the time prefer a quiet (non-capturing) move. | "Pip", cheerful club newcomer; encouraging; sometimes says what worried them |
+| casual | Pick a random candidate from the top 3. | "Marco", friendly cafe player; chatty, light jokes |
+| intermediate | Pick rank 1 about 70% of the time, otherwise rank 2. | "Ada", patient coach; names the idea (pin, outpost, tempo) |
+| advanced | Always pick rank 1 (the best move). | "Viktor", dry, confident tournament player; terse |
+| grandmaster | Always pick rank 1 (the best move). | "Kasparova", imperious grandmaster; cutting one-liners |
+
+(PRD §3.8 verbatim; the `choose` cells must stay byte-identical to
+`DIFFICULTIES[*].selectionPolicy` — `src/lib/__tests__/difficulty.test.ts` asserts it.)
 
 Keep the persona consistent for the whole game. Never break character.
 ```
@@ -2914,8 +2941,15 @@ Contract (shapes are `AiMoveRequest` / `AiStreamEvent` from `src/lib/types.ts`):
 | session | new session → return `eveSessionId` so the client can persist it via `games.setEveSession`. `ClientError` with `code:"session_not_active"` → create a new session and return the new id. |
 
 `src/app/api/ai/hint/route.ts` is the same pipeline with a hint-flavoured prompt, no session reuse
-(a one-shot `sessions.create`), and returns `HintResult` as plain JSON (no streaming). The client
-calls `api.games.useHint` **first** and aborts if the limit is reached (FR-40).
+(a one-shot `sessions.create`), and returns `HintResult` as plain JSON (no streaming). The ROUTE
+charges FR-40's limit itself — `fetchMutation(api.games.useHint, …, { token })` with the caller's
+Clerk token, before any engine or model work, mapping `"hint-limit"` to 429 — so a caller that skips
+the browser is capped too. The client must not pre-charge it (that would spend two hints per press).
+
+**Direct AI SDK fallback budget:** both routes hold the agent phase to ONE `EVE_BUDGET_MS` deadline
+(NFR-5). The direct attempt gets `deadline - Date.now()` and is skipped below
+`AI_DIRECT_MIN_BUDGET_MS`; giving it a fresh 8 s let a slow eve failure occupy ~18 s for one move.
+`use-ai-turn` additionally caps its own fetch at `AI_ROUTE_TIMEOUT_MS`.
 
 **Direct AI SDK fallback (optional, P5's call):** if eve is unavailable in an environment,
 `generateText({ model: "anthropic/claude-haiku-4.5", output: Output.object({ schema }), timeout: { totalMs: 8000 }, abortSignal, maxRetries: 0 })`
@@ -3105,7 +3139,8 @@ Route-group note: `(protected)` does not affect URLs. Parallel-route slots now r
    `games.lastHeartbeat`). Patching `games` every 15 s would push a new document to both players and
    every spectator, re-rendering the board and defeating NFR-1's perceived latency. Convex's own
    guidelines call this out ("separate high-churn operational data"). `games.spectatorCount` is a
-   denormalised number refreshed by the sweep cron, so the ticker and spectator badge stay cheap.
+   denormalised number refreshed by its own 20 s cron (`games.refreshSpectatorCounts`, live games
+   included), so the ticker and spectator badge stay cheap.
 
 3. **AI commentary moved off the `games` document into a `commentary` table** (PRD §4 had
    `games.aiCommentary[]`). Same reason plus the Convex rule against unbounded arrays in a document:
@@ -3221,3 +3256,21 @@ Route-group note: `(protected)` does not affect URLs. Parallel-route slots now r
    (typically 2-4 s on Haiku 4.5). If true token streaming is wanted later, the documented
    alternative is a real `commit_move` tool whose `action.input.appended` deltas do stream, at the
    cost of an extra model step (~+4 s), which would break FR-38.
+
+17. **PRD §3.8's "Stockfish Skill Level" column is deliberately not applied to the engine.**
+    Every search — candidates and hints alike — runs at `Skill Level 20`
+    (`STOCKFISH_CANDIDATE_SKILL_LEVEL`), because below 20 SF11 randomises `bestmove` and forces
+    internal MultiPV >= 4 (stockfish.md §6), so the ranking handed to the agent would not match the
+    move the engine would play. The handicap lives entirely in the selection policy, which is stated
+    once in PRD §3.8 wording and duplicated verbatim in three places that `difficulty.test.ts` keeps
+    in sync: `DIFFICULTIES[*].selectionPolicy` (sent to the agent, the primary chooser), the table in
+    `agent/instructions.md`, and `selectCandidate` (the fallback). `depth` is the only per-difficulty
+    engine setting. The `skillLevel` field was removed from `DifficultyConfig` because nothing read it.
+
+18. **FR-36 / NFR-5 fallbacks are split by who failed.** When the *agent* answered with an illegal
+    SAN, timed out, or the route threw, `/api/ai/move` plays `candidates[0]` — the raw Stockfish best
+    move the PRD names — because the agent, not the difficulty policy, is what failed. When the
+    *route itself* is unreachable from the browser (offline, 5xx, the client-side
+    `AI_ROUTE_TIMEOUT_MS` backstop), `use-ai-turn` applies `selectCandidate` instead: no server took
+    a turn at all, so the game stays in difficulty character rather than jumping to full engine
+    strength for one move.

@@ -17,7 +17,6 @@ import {
   clampLimit,
   DEFAULT_LOCAL_PLAYER_TWO_NAME,
   HINTS_ALLOWED,
-  LIVE_SCAN_LIMIT,
   MAX_COMMENTARY_ROWS,
   MAX_HINTS_PER_GAME,
   MAX_LIVE_GAMES,
@@ -25,6 +24,10 @@ import {
   MAX_RECENT_GAMES,
   PRESENCE_GC_LIMIT,
   PRESENCE_TTL_MS,
+  SPECTATOR_REFRESH_LIMIT,
+  SPECTATOR_SCAN_LIMIT,
+  STALE_GAME_SWEEP_LIMIT,
+  STALE_GAME_TTL_MS,
   type Difficulty,
 } from "./lib/constants";
 import {
@@ -45,6 +48,7 @@ import {
   colourOf,
   finalizeGame,
   findActiveGame,
+  requireFreeToStart,
   requireParticipant,
   sideName,
   viewerRole,
@@ -55,23 +59,7 @@ import {
   vLiveGameSummary,
   vMoveResult,
 } from "./lib/returns";
-import {
-  vColour,
-  vDifficulty,
-  vEndReason,
-  vPromotionPiece,
-  vWinner,
-} from "./lib/validators";
-
-const PRESENCE_SCAN_LIMIT = 200;
-
-const vTerminalStatus = v.union(
-  v.literal("checkmate"),
-  v.literal("stalemate"),
-  v.literal("draw"),
-  v.literal("resigned"),
-  v.literal("abandoned"),
-);
+import { vColour, vDifficulty, vPromotionPiece } from "./lib/validators";
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -171,6 +159,9 @@ export const createAiGame = mutation({
   returns: v.id("games"),
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx);
+    // FR-26: one game at a time, and starting one leaves the queue — otherwise
+    // `queue.pair` could pair this player into a second, rated game they never see.
+    await requireFreeToStart(ctx, player._id);
     const now = Date.now();
     const snap = startingSnapshot();
     return await ctx.db.insert("games", {
@@ -200,6 +191,7 @@ export const createLocalGame = mutation({
   returns: v.id("games"),
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx);
+    await requireFreeToStart(ctx, player._id); // FR-26, as in createAiGame
     const trimmed = (args.playerTwoName ?? "").trim().slice(0, MAX_LOCAL_NAME_LENGTH);
     const now = Date.now();
     const snap = startingSnapshot();
@@ -257,11 +249,15 @@ export const listLive = query({
   returns: v.array(vLiveGameSummary),
   handler: async (ctx, args) => {
     const limit = clampLimit(args.limit, MAX_LIVE_GAMES);
+    // `mode` is part of the index, so a wall of active vs-AI games can never crowd
+    // online games out of the window (they used to share one `status` index).
     const rows = await ctx.db
       .query("games")
-      .withIndex("by_status_and_lastMoveAt", (q) => q.eq("status", "active"))
+      .withIndex("by_mode_and_status_and_lastMoveAt", (q) =>
+        q.eq("mode", "online").eq("status", "active"),
+      )
       .order("desc")
-      .take(LIVE_SCAN_LIMIT);
+      .take(limit);
 
     const out: Array<{
       _id: Id<"games">;
@@ -275,8 +271,6 @@ export const listLive = query({
     }> = [];
 
     for (const game of rows) {
-      if (out.length >= limit) break;
-      if (game.mode !== "online") continue;
       const white =
         game.whiteId === null ? null : await ctx.db.get("players", game.whiteId);
       const black =
@@ -326,12 +320,13 @@ export const gamesForProfile = query({
   args: { username: v.string(), limit: v.number() },
   returns: v.array(vGameSummary),
   handler: async (ctx, args) => {
+    // `.first()` — a duplicate `usernameLower` must not 500 the profile page.
     const player = await ctx.db
       .query("players")
       .withIndex("by_usernameLower", (q) =>
         q.eq("usernameLower", args.username.toLowerCase()),
       )
-      .unique();
+      .first();
     if (player === null) return [];
     return await recentGamesFor(ctx, player._id, args.limit);
   },
@@ -493,7 +488,11 @@ export const resign = mutation({
   },
 });
 
-/** FR-31. Offering into a standing offer from the other side accepts it. */
+/**
+ * FR-31. Offering into a standing offer from the other side accepts it. Rejected
+ * for `ai` games: the AI has no seat, so it can never answer, and the human cannot
+ * answer their own offer — the offer would just sit on the document unanswerable.
+ */
 export const offerDraw = mutation({
   args: { gameId: v.id("games") },
   returns: v.null(),
@@ -501,6 +500,7 @@ export const offerDraw = mutation({
     const player = await requirePlayer(ctx);
     const game = await loadGame(ctx, args.gameId);
     if (game.status !== "active") throw new Error("game-not-active");
+    if (game.mode === "ai") throw new Error("draw-not-available");
 
     const seat = seatOf(game, player._id);
     const colour: Colour = seat === "both" ? game.turn : seat;
@@ -522,6 +522,7 @@ export const respondDraw = mutation({
     const player = await requirePlayer(ctx);
     const game = await loadGame(ctx, args.gameId);
     if (game.status !== "active") throw new Error("game-not-active");
+    if (game.mode === "ai") throw new Error("draw-not-available");
     if (game.drawOffer === undefined) throw new Error("no-draw-offer");
 
     const seat = seatOf(game, player._id);
@@ -548,10 +549,13 @@ async function agreeDraw(ctx: MutationCtx, game: Doc<"games">): Promise<void> {
 }
 
 /**
- * FR-43/44/46. Rejected outright for online games. Rebuilds the position by
- * replaying the truncated SAN list, permanently unrates the game (FR-49), drops
- * commentary past the new head and clears the Eve session so the agent cannot
- * diverge from the board.
+ * FR-43/44/46. Rejected outright for online games, and — like every other
+ * mutation — for a game that has already ended: `finalizeGame` has committed Elo,
+ * the W/L/D record and a `ratingHistory` row by then, and reopening the game would
+ * leave all three describing a game that is live again (FR-49). Rebuilds the
+ * position by replaying the truncated SAN list, permanently unrates the game,
+ * drops commentary past the new head and clears the Eve session so the agent
+ * cannot diverge from the board.
  */
 export const undo = mutation({
   args: { gameId: v.id("games"), toPly: v.number() },
@@ -563,6 +567,7 @@ export const undo = mutation({
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx);
     const game = await loadGame(ctx, args.gameId);
+    if (game.status !== "active") throw new Error("game-not-active");
     seatOf(game, player._id);
     if (game.mode === "online") throw new Error("undo-not-allowed");
     if (
@@ -592,10 +597,8 @@ export const undo = mutation({
       pgn: snap.pgn,
       turn: snap.turn,
       lastMove: last === null ? undefined : toStoredLastMove(last),
-      status: "active",
-      winner: undefined,
-      endReason: undefined,
-      endedAt: undefined,
+      // No `status`/`winner`/`endReason`/`endedAt` here: the guard above means the
+      // game is still `active`, so there is no terminal state to unwind.
       drawOffer: undefined,
       undoCount,
       rated: false,
@@ -616,6 +619,47 @@ export const undo = mutation({
 });
 
 /* ---------------------------------------------------------------- presence */
+
+/** One participant's last heartbeat, read by exact key (never by scanning). */
+async function lastSeenOf(
+  ctx: QueryCtx | MutationCtx,
+  gameId: Id<"games">,
+  playerId: Id<"players"> | null,
+): Promise<number | null> {
+  if (playerId === null) return null;
+  const row = await ctx.db
+    .query("presence")
+    .withIndex("by_gameId_and_playerId", (q) =>
+      q.eq("gameId", gameId).eq("playerId", playerId),
+    )
+    .unique();
+  return row === null ? null : row.lastSeen;
+}
+
+/**
+ * FR-32. Both participants' last heartbeat, so the game page can say "your
+ * opponent may have disconnected" from real presence instead of inferring it from
+ * `lastMoveAt` (a player who is present but thinking is not disconnected).
+ *
+ * Deliberately NO wall-clock read: a query is not re-run as time passes (§I-14),
+ * so the client compares these stamps against `Date.now()` on its own interval.
+ */
+export const presenceFor = query({
+  args: { gameId: v.id("games") },
+  returns: v.object({
+    w: v.union(v.number(), v.null()),
+    b: v.union(v.number(), v.null()),
+  }),
+  handler: async (ctx, args) => {
+    await requireIdentity(ctx);
+    const game = await ctx.db.get("games", args.gameId);
+    if (game === null) return { w: null, b: null };
+    return {
+      w: await lastSeenOf(ctx, game._id, game.whiteId),
+      b: await lastSeenOf(ctx, game._id, game.blackId),
+    };
+  },
+});
 
 /**
  * FR-32. Writes to the `presence` table, NEVER to the game document — patching
@@ -690,35 +734,57 @@ export const setEveSession = mutation({
 
 /* ------------------------------------------------------------------ crons */
 
-/** Used by the abandon sweep; wraps the same `finalizeGame` as the public paths. */
-export const finalizeInternal = internalMutation({
-  args: {
-    gameId: v.id("games"),
-    status: vTerminalStatus,
-    winner: vWinner,
-    endReason: vEndReason,
-    skipRatings: v.optional(v.boolean()),
-  },
+/**
+ * FR-8. Every 20 s: recompute the denormalised `spectatorCount` of the most
+ * recently active online games and patch the ones that changed.
+ *
+ * It is deliberately NOT part of `sweepAbandoned`: this pass reads the hot end of
+ * the index (every game currently being played), so it conflicts with the moves
+ * landing there and gets retried. Keeping it separate means those retries can
+ * never delay the abandonment pass, which reads only the idle tail.
+ */
+export const refreshSpectatorCounts = internalMutation({
+  args: {},
   returns: v.null(),
-  handler: async (ctx, args) => {
-    const game = await ctx.db.get("games", args.gameId);
-    if (game === null) return null;
-    if (game.status !== "active") return null; // idempotent: already finalised
-    await finalizeGame(
-      ctx,
-      game,
-      { status: args.status, winner: args.winner, endReason: args.endReason },
-      { skipRatings: args.skipRatings === true },
-    );
+  handler: async (ctx) => {
+    const cutoff = Date.now() - ABANDON_TIMEOUT_MS;
+    const live = await ctx.db
+      .query("games")
+      .withIndex("by_mode_and_status_and_lastMoveAt", (q) =>
+        q.eq("mode", "online").eq("status", "active"),
+      )
+      .order("desc")
+      .take(SPECTATOR_REFRESH_LIMIT);
+
+    for (const game of live) {
+      // A live game never enters the abandon window, so this is the only place its
+      // "N watching" badge can be kept honest.
+      const spectators = await ctx.db
+        .query("presence")
+        .withIndex("by_gameId_and_role", (q) =>
+          q.eq("gameId", game._id).eq("role", "spectator"),
+        )
+        .take(SPECTATOR_SCAN_LIMIT);
+      const spectatorCount = spectators.filter((row) => row.lastSeen >= cutoff).length;
+      if ((game.spectatorCount ?? 0) !== spectatorCount) {
+        await ctx.db.patch("games", game._id, { spectatorCount });
+      }
+    }
     return null;
   },
 });
 
 /**
- * FR-32. Every 20 s: for each `active` online game whose last move is older than
- * 60 s, compare the two participants' presence. One stale → the present side wins
- * (rated normally); both stale → a draw with NO rating change. Also refreshes the
- * denormalised `spectatorCount`.
+ * FR-32. Every 20 s, in two bounded passes over the (mode, status, lastMoveAt)
+ * index:
+ *
+ *  1. the abandon sweep proper: for each `active` ONLINE game whose last move is
+ *     older than 60 s, compare the two participants' presence. One stale → the
+ *     present side wins (rated normally); both stale → a draw with NO rating
+ *     change. Restricting the index range to `mode === "online"` is what keeps
+ *     never-ending ai/local games from filling the window forever;
+ *  2. finalise `ai`/`local` games nobody has touched in a day (unrated), so they
+ *     do not accumulate as permanently `active` rows and block FR-26.
  */
 export const sweepAbandoned = internalMutation({
   args: {},
@@ -726,34 +792,23 @@ export const sweepAbandoned = internalMutation({
   handler: async (ctx) => {
     const now = Date.now();
     const cutoff = now - ABANDON_TIMEOUT_MS;
+
+    /* 1 — abandonment */
     const stale = await ctx.db
       .query("games")
-      .withIndex("by_status_and_lastMoveAt", (q) =>
-        q.eq("status", "active").lt("lastMoveAt", cutoff),
+      .withIndex("by_mode_and_status_and_lastMoveAt", (q) =>
+        q.eq("mode", "online").eq("status", "active").lt("lastMoveAt", cutoff),
       )
       .take(ABANDON_SWEEP_LIMIT);
 
     for (const game of stale) {
-      const presence = await ctx.db
-        .query("presence")
-        .withIndex("by_gameId_and_playerId", (q) => q.eq("gameId", game._id))
-        .take(PRESENCE_SCAN_LIMIT);
-
-      const spectatorCount = presence.filter(
-        (row) => row.role === "spectator" && row.lastSeen >= cutoff,
-      ).length;
-      if ((game.spectatorCount ?? 0) !== spectatorCount) {
-        await ctx.db.patch("games", game._id, { spectatorCount });
-      }
-
-      if (game.mode !== "online") continue;
       const { whiteId, blackId } = game;
       if (whiteId === null || blackId === null) continue;
 
-      const whiteSeen =
-        presence.find((row) => row.playerId === whiteId)?.lastSeen ?? game.createdAt;
-      const blackSeen =
-        presence.find((row) => row.playerId === blackId)?.lastSeen ?? game.createdAt;
+      // Read both rows by exact key: a bounded scan of this game's presence could
+      // be filled by spectators and hide the players, forfeiting a live game.
+      const whiteSeen = (await lastSeenOf(ctx, game._id, whiteId)) ?? game.createdAt;
+      const blackSeen = (await lastSeenOf(ctx, game._id, blackId)) ?? game.createdAt;
       const whiteGone = whiteSeen < cutoff;
       const blackGone = blackSeen < cutoff;
       if (!whiteGone && !blackGone) continue;
@@ -770,6 +825,27 @@ export const sweepAbandoned = internalMutation({
           extra: { pgn: snap.pgn },
         },
       );
+    }
+
+    /* 2 — TTL for solo games */
+    const ttlCutoff = now - STALE_GAME_TTL_MS;
+    for (const mode of ["ai", "local"] as const) {
+      const forgotten = await ctx.db
+        .query("games")
+        .withIndex("by_mode_and_status_and_lastMoveAt", (q) =>
+          q.eq("mode", mode).eq("status", "active").lt("lastMoveAt", ttlCutoff),
+        )
+        .take(STALE_GAME_SWEEP_LIMIT);
+
+      for (const game of forgotten) {
+        const snap = snapshot(replay(game.moves), "draw");
+        await finalizeGame(
+          ctx,
+          game,
+          { status: "abandoned", winner: "draw", endReason: "abandonment" },
+          { now, skipRatings: true, extra: { pgn: snap.pgn } },
+        );
+      }
     }
     return null;
   },

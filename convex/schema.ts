@@ -92,9 +92,14 @@ export default defineSchema({
     lastMoveAt: v.number(),
     endedAt: v.optional(v.number()),
   })
-    .index("by_status_and_lastMoveAt", ["status", "lastMoveAt"]) // listLive + abandon sweep
+    // `mode` leads so ai/local rows can never occupy the window listLive and the
+    // abandon sweep read — an idle vs-AI game must not hide a live online one.
+    .index("by_mode_and_status_and_lastMoveAt", ["mode", "status", "lastMoveAt"])
     .index("by_whiteId_and_createdAt", ["whiteId", "createdAt"])
-    .index("by_blackId_and_createdAt", ["blackId", "createdAt"]),
+    .index("by_blackId_and_createdAt", ["blackId", "createdAt"])
+    // (owner, status): the FR-26 active-game lookup, O(1) instead of a 100-row scan.
+    .index("by_whiteId_and_status", ["whiteId", "status"])
+    .index("by_blackId_and_status", ["blackId", "status"]),
 
   // --------------------------------------------------------------- presence
   // Heartbeats and spectator tracking live here, NOT on `games`: patching the game

@@ -2,13 +2,14 @@
 // src/components/ai/hint-button.tsx — FR-40
 //
 // Renders ONLY for Beginner and Casual vs-AI games and only on the human's turn.
-// The three-per-game limit is charged by `api.games.useHint` BEFORE the route is
-// called, so a network failure still costs the hint and a fourth press is rejected
-// by Convex, not by this component.
+// The three-per-game limit is charged by /api/ai/hint itself (`api.games.useHint`
+// with the caller's token) so that the cap holds for a caller that skips this
+// component entirely; `remaining` below is the live `game.hintsUsed` and updates
+// through the subscription as soon as the route has charged.
 //
 // Drop it straight into P3's controls: `<HintButton gameId={gameId} />`.
 import { useCallback } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import { LightbulbIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
@@ -41,8 +42,6 @@ export function HintButton({ gameId, className }: HintButtonProps) {
   const isParticipant = view?.viewerRole === "white" || view?.viewerRole === "black";
   const isAiGame = game !== null && game.mode === "ai" && isParticipant;
 
-  // Named `chargeHint`, not `useHint`: a `use*` local trips react-hooks/rules-of-hooks.
-  const chargeHint = useMutation(api.games.useHint);
   const { search } = useStockfish(isAiGame && hintsAllowed);
   const pending = useAiStore((s) => s.hintPending);
   const hint = useAiStore((s) => s.hint);
@@ -60,9 +59,6 @@ export function HintButton({ gameId, className }: HintButtonProps) {
     store.setHintPending(true);
     store.setHint(null);
     try {
-      // FR-40 order: charge the limit first, then do the expensive work.
-      await chargeHint({ gameId });
-
       let candidates: Candidate[] = [];
       try {
         const result = await search({
@@ -85,7 +81,7 @@ export function HintButton({ gameId, className }: HintButtonProps) {
     } finally {
       useAiStore.getState().setHintPending(false);
     }
-  }, [fen, gameId, search, chargeHint]);
+  }, [fen, gameId, search]);
 
   if (!isAiGame || !hintsAllowed) return null;
 

@@ -17,15 +17,35 @@ const CASTLE_ROOK: Record<string, { from: SquareId; to: SquareId }> = {
 export class PieceTracker {
   private slots = new Map<SquareId, Slot>();
   private seq = 0;
+  /** Ply rendered by the previous `sync`, or null when nothing has been rendered. */
+  private lastPly: number | null = null;
 
   reset(): void {
     this.slots.clear();
     this.seq = 0;
+    this.lastPly = null;
   }
 
-  /** Produce the piece list for `fen`. Pass the move that produced it (or null
-   *  when jumping to an arbitrary review ply — ids are then re-derived). */
-  sync(fen: string, lastMove: LastMove | null): BoardPiece[] {
+  /**
+   * Produce the piece list for `fen`, which is the position after `ply` half-moves.
+   *
+   * Only an ADJACENT step has one move that explains the transition, and the
+   * direction decides which move that is: stepping FORWARD to `ply` it is the move
+   * ending at `ply`; stepping BACKWARD to `ply` it is the move ending at `ply + 1`,
+   * replayed in reverse. Every other transition (first render, a review jump, a
+   * take-back) re-derives ids — those are not animated (§E.8.6).
+   *
+   * `moveEndingAt` is called at most once and only for an adjacent step, so the
+   * caller may replay the game inside it.
+   */
+  sync(
+    fen: string,
+    ply: number,
+    moveEndingAt: (ply: number) => LastMove | null,
+  ): BoardPiece[] {
+    const previousPly = this.lastPly;
+    this.lastPly = ply;
+
     const pieces = piecesFromFen(fen);
     const prev = this.slots;
     const next = new Map<SquareId, Slot>();
@@ -41,10 +61,25 @@ export class PieceTracker {
       next.set(to, { id: slot.id, type: piece.type, colour: piece.colour });
     };
 
-    if (lastMove) {
-      carry(lastMove.from, lastMove.to);
-      const rook = CASTLE_ROOK[`${lastMove.from}${lastMove.to}`];
-      if (rook && lastMove.san.startsWith("O-O")) carry(rook.from, rook.to);
+    // `reverse` is true when the move is being un-played, i.e. it is carrying the
+    // pieces from their destination squares back to their origins.
+    const applyMove = (move: LastMove | null, reverse: boolean) => {
+      if (!move) return;
+      const rook = CASTLE_ROOK[`${move.from}${move.to}`];
+      const castled = rook !== undefined && move.san.startsWith("O-O");
+      if (reverse) {
+        carry(move.to, move.from);
+        if (castled) carry(rook.to, rook.from);
+        return;
+      }
+      carry(move.from, move.to);
+      if (castled) carry(rook.from, rook.to);
+    };
+
+    if (previousPly !== null && ply === previousPly + 1) {
+      applyMove(moveEndingAt(ply), false);
+    } else if (previousPly !== null && ply === previousPly - 1) {
+      applyMove(moveEndingAt(previousPly), true);
     }
 
     // Pieces that did not move keep their id.

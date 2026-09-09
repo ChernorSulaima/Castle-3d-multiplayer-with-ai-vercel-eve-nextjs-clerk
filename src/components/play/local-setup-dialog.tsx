@@ -22,9 +22,14 @@ import { describeConvexError } from "@/components/providers/convex-errors";
 export function LocalSetupDialog({
   open,
   onOpenChange,
+  /** True the moment the create mutation is sent, false again if it rejects. Lets
+   *  `/play` tell this self-started game apart from a `queue.pair` match, which it
+   *  otherwise cannot: both simply make an id appear in `games.myActiveGame`. */
+  onStartingChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onStartingChange?: (starting: boolean) => void;
 }) {
   const router = useRouter();
   const createLocalGame = useMutation(api.games.createLocalGame);
@@ -34,6 +39,7 @@ export function LocalSetupDialog({
   async function start() {
     if (starting) return;
     setStarting(true);
+    onStartingChange?.(true);
     const trimmed = playerTwoName.trim();
     try {
       const gameId = await createLocalGame(
@@ -42,6 +48,7 @@ export function LocalSetupDialog({
       router.push(`/game/${gameId}`);
     } catch (error) {
       setStarting(false);
+      onStartingChange?.(false);
       toast.error(describeConvexError(error, "Could not start the game. Try again."));
     }
   }

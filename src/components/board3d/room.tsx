@@ -2,6 +2,7 @@
 // FR-21h..FR-21n: every visual difference between rooms comes from `src/lib/rooms.ts`.
 // Adding a room = one entry there plus an .hdr in public/hdri — no change in this file.
 "use client";
+import { useEffect } from "react";
 import { Backdrop, Environment, Grid, Sparkles, Stars, useTexture } from "@react-three/drei";
 import { SRGBColorSpace } from "three";
 import type { RoomPreset } from "@/lib/rooms";
@@ -10,6 +11,10 @@ import { PLINTH_HEIGHT, PLINTH_TOP_Y } from "./layout";
 /** Blurred photo backdrop for a player-uploaded room image (FR-21k, v1 scope in §I-16). */
 function ImageBackdrop({ url }: { url: string }) {
   const texture = useTexture(url);
+
+  // Convex storage URLs are signed and expire, so a stale entry in drei's global loader
+  // cache would resurrect a dead URL on the next mount. Drop it when this one goes.
+  useEffect(() => () => useTexture.clear(url), [url]);
 
   return (
     <mesh position={[0, 4, -16]} raycast={() => null}>
@@ -38,21 +43,30 @@ export function Room({ room, imageUrl }: RoomProps) {
 
   return (
     <>
-      {room.background === "colour" && (
-        <color attach="background" args={[room.backgroundColor ?? "#0f1115"]} />
-      )}
-
-      {/* The HDRI is always the IBL source; `background` only controls the skybox. */}
+      {/* The HDRI is always the IBL source; `background` only controls the skybox.
+          `backgroundBlurriness` rather than `blur`: only EnvironmentCube maps `blur` onto
+          it, so the Park room (drei's `ground` path renders an EnvironmentMap) silently
+          lost its configured blur — and `blur` was applied to the THREE.Scene as a stray
+          property instead. */}
       <Environment
         files={room.hdri}
         background={showHdriBackground}
-        blur={lights.backgroundBlur}
+        backgroundBlurriness={lights.backgroundBlur}
         backgroundIntensity={lights.bgIntensity}
         environmentIntensity={lights.envIntensity}
         environmentRotation={[0, lights.envYaw, 0]}
         backgroundRotation={[0, lights.envYaw, 0]}
         ground={floor.kind === "ground" ? { radius: 40, height: 6, scale: 100 } : false}
       />
+
+      {/* MUST stay after <Environment>. drei restores the previous skybox from a
+          dependency-less layout effect whose cleanup runs in the mutation phase, in child
+          order — put this first and switching an HDRI room to a flat-colour room leaves
+          the OLD room's HDRI as the background (FR-21j/FR-21m live preview). Ordered
+          after, the restore happens first and this attach wins. */}
+      {room.background === "colour" && (
+        <color attach="background" args={[room.backgroundColor ?? "#0f1115"]} />
+      )}
 
       {imageUrl && <ImageBackdrop url={imageUrl} />}
 

@@ -262,6 +262,19 @@ describe("lastMoveAtPly", () => {
     expect(last?.san).toBe("Qxf7#");
   });
 
+  it("points an en-passant capture at the square the pawn actually stood on", () => {
+    // 1. e4 a6 2. e5 d5 3. exd6 e.p. — the pawn taken is on d5, not on the d6 landing
+    // square, so the FR-17 capture flight must start one rank back.
+    const last = lastMoveAtPly(["e4", "a6", "e5", "d5", "exd6"], 5);
+    expect(last).toMatchObject({ from: "e5", to: "d6", captured: "p", capturedSquare: "d5" });
+  });
+
+  it("leaves capturedSquare unset for an ordinary capture", () => {
+    const last = lastMoveAtPly(SCHOLARS_MATE, SCHOLARS_MATE.length);
+    expect(last?.captured).toBe("p");
+    expect(last?.capturedSquare).toBeUndefined();
+  });
+
   it("carries the promotion piece", () => {
     const last = lastMoveAtPly(["a4", "h5", "a5", "h4", "a6", "h3", "axb7", "hxg2", "bxa8=Q"], 9);
     expect(last).toMatchObject({ to: "a8", promotion: "q", captured: "r" });
@@ -331,20 +344,24 @@ describe("buildPgn", () => {
 /* ----------------------------------------------------------- PieceTracker */
 
 describe("PieceTracker", () => {
+  /** The controller hands `sync` a resolver for "the move that ends at ply N". */
+  const moveAt = (moves: string[]) => (ply: number) => lastMoveAtPly(moves, ply);
+  const constant = (move: LastMove | null) => () => move;
+  const none = constant(null);
+
   it("assigns 32 unique ids in the start position", () => {
     const tracker = new PieceTracker();
-    const pieces = tracker.sync(DEFAULT_FEN, null);
+    const pieces = tracker.sync(DEFAULT_FEN, 0, none);
     expect(pieces).toHaveLength(32);
     expect(new Set(pieces.map((p) => p.id)).size).toBe(32);
   });
 
   it("carries a moving piece's id to its new square", () => {
     const tracker = new PieceTracker();
-    const before = tracker.sync(DEFAULT_FEN, null);
+    const before = tracker.sync(DEFAULT_FEN, 0, none);
     const pawnId = before.find((p) => p.square === "e2")!.id;
 
-    const move: LastMove = { from: "e2", to: "e4", san: "e4", colour: "w" };
-    const after = tracker.sync(fenAtPly(["e4"], 1), move);
+    const after = tracker.sync(fenAtPly(["e4"], 1), 1, moveAt(["e4"]));
 
     expect(after.find((p) => p.square === "e4")!.id).toBe(pawnId);
     expect(after.find((p) => p.square === "e2")).toBeUndefined();
@@ -353,13 +370,8 @@ describe("PieceTracker", () => {
 
   it("keeps every other piece's id stable across a move", () => {
     const tracker = new PieceTracker();
-    const before = tracker.sync(DEFAULT_FEN, null);
-    const after = tracker.sync(fenAtPly(["e4"], 1), {
-      from: "e2",
-      to: "e4",
-      san: "e4",
-      colour: "w",
-    });
+    const before = tracker.sync(DEFAULT_FEN, 0, none);
+    const after = tracker.sync(fenAtPly(["e4"], 1), 1, moveAt(["e4"]));
     const idBySquare = new Map(before.map((p) => [p.square, p.id]));
     for (const piece of after) {
       if (piece.square === "e4") continue;
@@ -367,44 +379,73 @@ describe("PieceTracker", () => {
     }
   });
 
+  // FR-17 / FR-54: "Previous move" un-plays a move, so the transition is explained by
+  // the move that ends at the ply we came FROM, reversed. Feeding it the move that
+  // ends at the ply we are going TO gave the piece a new id, and it popped.
+  it("carries the piece BACK when stepping to the previous ply", () => {
+    const moves = ["e4", "e5", "Nf3", "Nc6", "Bb5"];
+    const tracker = new PieceTracker();
+    tracker.sync(DEFAULT_FEN, 0, moveAt(moves));
+    let forward = tracker.sync(fenAtPly(moves, 4), 4, moveAt(moves));
+    const bishopId = forward.find((p) => p.square === "f1")!.id;
+    forward = tracker.sync(fenAtPly(moves, 5), 5, moveAt(moves));
+    expect(forward.find((p) => p.square === "b5")!.id).toBe(bishopId);
+
+    const back = tracker.sync(fenAtPly(moves, 4), 4, moveAt(moves));
+    expect(back.find((p) => p.square === "f1")!.id).toBe(bishopId);
+    expect(new Set(back.map((p) => p.id)).size).toBe(back.length);
+  });
+
+  it("un-plays a capture without disturbing the capturer's id", () => {
+    const moves = ["e4", "d5", "exd5"];
+    const tracker = new PieceTracker();
+    tracker.sync(DEFAULT_FEN, 0, moveAt(moves));
+    tracker.sync(fenAtPly(moves, 1), 1, moveAt(moves));
+    tracker.sync(fenAtPly(moves, 2), 2, moveAt(moves));
+    const afterCapture = tracker.sync(fenAtPly(moves, 3), 3, moveAt(moves));
+    const capturerId = afterCapture.find((p) => p.square === "d5")!.id;
+
+    const back = tracker.sync(fenAtPly(moves, 2), 2, moveAt(moves));
+    expect(back.find((p) => p.square === "e4")!.id).toBe(capturerId);
+    expect(back).toHaveLength(32);
+    expect(new Set(back.map((p) => p.id)).size).toBe(32);
+  });
+
   it("moves BOTH the king and the rook on a castle", () => {
     const tracker = new PieceTracker();
-    const before = tracker.sync(CASTLING_FEN, null);
+    const before = tracker.sync(CASTLING_FEN, 0, none);
     const kingId = before.find((p) => p.square === "e1")!.id;
     const rookId = before.find((p) => p.square === "h1")!.id;
 
     const chess = new Chess(CASTLING_FEN);
     const castle = chess.move("O-O");
-    const after = tracker.sync(chess.fen(), {
+    const move: LastMove = {
       from: castle.from as SquareId,
       to: castle.to as SquareId,
       san: castle.san,
       colour: castle.color,
-    });
+    };
+    const after = tracker.sync(chess.fen(), 1, constant(move));
 
     expect(after.find((p) => p.square === "g1")!.id).toBe(kingId);
     expect(after.find((p) => p.square === "f1")!.id).toBe(rookId);
+
+    // ...and both come back when the castle is un-played.
+    const back = tracker.sync(CASTLING_FEN, 0, constant(move));
+    expect(back.find((p) => p.square === "e1")!.id).toBe(kingId);
+    expect(back.find((p) => p.square === "h1")!.id).toBe(rookId);
   });
 
   it("drops the captured piece's id and keeps the capturer's", () => {
+    const moves = ["e4", "d5", "exd5"];
     const tracker = new PieceTracker();
-    tracker.sync(DEFAULT_FEN, null);
-    const afterD5 = tracker.sync(fenAtPly(["e4", "d5"], 2), {
-      from: "d7",
-      to: "d5",
-      san: "d5",
-      colour: "b",
-    });
+    tracker.sync(DEFAULT_FEN, 0, moveAt(moves));
+    tracker.sync(fenAtPly(moves, 1), 1, moveAt(moves));
+    const afterD5 = tracker.sync(fenAtPly(moves, 2), 2, moveAt(moves));
     const capturerId = afterD5.find((p) => p.square === "e4")!.id;
     const victimId = afterD5.find((p) => p.square === "d5")!.id;
 
-    const afterCapture = tracker.sync(fenAtPly(["e4", "d5", "exd5"], 3), {
-      from: "e4",
-      to: "d5",
-      san: "exd5",
-      colour: "w",
-      captured: "p",
-    });
+    const afterCapture = tracker.sync(fenAtPly(moves, 3), 3, moveAt(moves));
 
     expect(afterCapture).toHaveLength(31);
     expect(afterCapture.find((p) => p.square === "d5")!.id).toBe(capturerId);
@@ -413,16 +454,14 @@ describe("PieceTracker", () => {
 
   it("gives a promoted pawn a stable id and the new type", () => {
     const tracker = new PieceTracker();
-    tracker.sync(PROMOTION_FEN, null);
+    tracker.sync(PROMOTION_FEN, 0, none);
     const chess = new Chess(PROMOTION_FEN);
     const promo = chess.move({ from: "a7", to: "a8", promotion: "q" });
-    const after = tracker.sync(chess.fen(), {
-      from: "a7",
-      to: "a8",
-      san: promo.san,
-      colour: "w",
-      promotion: "q",
-    });
+    const after = tracker.sync(
+      chess.fen(),
+      1,
+      constant({ from: "a7", to: "a8", san: promo.san, colour: "w", promotion: "q" }),
+    );
     const queen = after.find((p) => p.square === "a8")!;
     expect(queen.type).toBe("q");
     expect(new Set(after.map((p) => p.id)).size).toBe(after.length);
@@ -430,28 +469,37 @@ describe("PieceTracker", () => {
 
   it("still produces a complete, unique set when jumping to an arbitrary review ply", () => {
     const tracker = new PieceTracker();
-    tracker.sync(DEFAULT_FEN, null);
-    const jumped = tracker.sync(fenAtPly(SCHOLARS_MATE, 6), null);
+    tracker.sync(DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE));
+    const jumped = tracker.sync(fenAtPly(SCHOLARS_MATE, 6), 6, moveAt(SCHOLARS_MATE));
     expect(jumped).toHaveLength(piecesFromFen(fenAtPly(SCHOLARS_MATE, 6)).length);
     expect(new Set(jumped.map((p) => p.id)).size).toBe(jumped.length);
   });
 
   it("reset() starts the id sequence over", () => {
     const tracker = new PieceTracker();
-    const first = tracker.sync(DEFAULT_FEN, null);
+    const first = tracker.sync(DEFAULT_FEN, 0, none);
     tracker.reset();
-    const second = tracker.sync(DEFAULT_FEN, null);
+    const second = tracker.sync(DEFAULT_FEN, 0, none);
     expect(second.map((p) => p.id)).toEqual(first.map((p) => p.id));
   });
 
-  it("stays consistent across a whole game replayed move by move", () => {
+  it("is idempotent — re-syncing the same ply keeps every id", () => {
     const tracker = new PieceTracker();
-    tracker.sync(DEFAULT_FEN, null);
+    tracker.sync(DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE));
+    const once = tracker.sync(fenAtPly(SCHOLARS_MATE, 1), 1, moveAt(SCHOLARS_MATE));
+    const twice = tracker.sync(fenAtPly(SCHOLARS_MATE, 1), 1, moveAt(SCHOLARS_MATE));
+    expect(twice.map((p) => p.id)).toEqual(once.map((p) => p.id));
+  });
+
+  it("stays consistent across a whole game replayed move by move, forwards and back", () => {
+    const tracker = new PieceTracker();
+    tracker.sync(DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE));
     for (let ply = 1; ply <= SCHOLARS_MATE.length; ply++) {
-      const pieces = tracker.sync(
-        fenAtPly(SCHOLARS_MATE, ply),
-        lastMoveAtPly(SCHOLARS_MATE, ply),
-      );
+      const pieces = tracker.sync(fenAtPly(SCHOLARS_MATE, ply), ply, moveAt(SCHOLARS_MATE));
+      expect(new Set(pieces.map((p) => p.id)).size).toBe(pieces.length);
+    }
+    for (let ply = SCHOLARS_MATE.length - 1; ply >= 0; ply--) {
+      const pieces = tracker.sync(fenAtPly(SCHOLARS_MATE, ply), ply, moveAt(SCHOLARS_MATE));
       expect(new Set(pieces.map((p) => p.id)).size).toBe(pieces.length);
     }
   });
@@ -560,9 +608,29 @@ describe("camera presets and quality tiers", () => {
     expect(CAMERA_PRESETS.white.position[1]).toBe(CAMERA_PRESETS.black.position[1]);
   });
 
-  it("keeps the top-down preset off the polar singularity", () => {
+  // camera-controls clamps the polar angle in rotateTo()/the pointer handlers but NOT in
+  // setLookAt(), so a preset outside the FR-20 range stays there until the first orbit
+  // drag and then snaps. Every preset must already be inside the clamp.
+  it("keeps every preset inside the FR-20 polar clamp", () => {
+    for (const pose of Object.values(CAMERA_PRESETS)) {
+      const [x, y, z] = [
+        pose.position[0] - pose.target[0],
+        pose.position[1] - pose.target[1],
+        pose.position[2] - pose.target[2],
+      ];
+      const polar = Math.acos(y / Math.hypot(x, y, z));
+      expect(polar).toBeGreaterThanOrEqual(CAMERA_LIMITS.minPolarAngle);
+      expect(polar).toBeLessThanOrEqual(CAMERA_LIMITS.maxPolarAngle);
+    }
+  });
+
+  it("keeps the top-down preset overhead but off the singularity", () => {
     expect(CAMERA_PRESETS.top.position[2]).not.toBe(0);
-    expect(Math.abs(CAMERA_PRESETS.top.position[2])).toBeLessThan(0.01);
+    // Well above the seats, and looking almost straight down.
+    expect(CAMERA_PRESETS.top.position[1]).toBeGreaterThan(CAMERA_PRESETS.white.position[1]);
+    expect(Math.abs(CAMERA_PRESETS.top.position[2])).toBeLessThan(
+      Math.abs(CAMERA_PRESETS.white.position[2]),
+    );
   });
 
   it("keeps every preset inside the dolly limits", () => {

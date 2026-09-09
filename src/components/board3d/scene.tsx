@@ -2,7 +2,7 @@
 // Everything inside the <Canvas>. Suspends on the GLB and the room HDRI, so it is always
 // mounted under a <Suspense> boundary owned by board-3d.tsx.
 "use client";
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { ContactShadows, Preload } from "@react-three/drei";
 import type { Mesh } from "three";
 import type { CameraControlsImpl } from "@react-three/drei";
@@ -61,7 +61,13 @@ export function Scene({
 
   return (
     <>
-      <Room room={room} imageUrl={roomImageUrl} />
+      {/* FR-21m: the room owns the only assets that suspend on a settings change — the
+          HDRI and the uploaded backdrop. Its own boundary means swapping presets
+          mid-game blanks the backdrop for the length of the download, never the board,
+          the pieces or the camera rig. */}
+      <Suspense fallback={null}>
+        <Room room={room} imageUrl={roomImageUrl} />
+      </Suspense>
 
       {/* NOTE: drei 10.7.8's <SoftShadows> is NOT usable with three 0.185.1. Its PCSS
           patch of `ShaderChunk.shadowmap_pars_fragment` calls `unpackRGBAToDepth`, which
