@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // engine lives under a version-stamped directory (/stockfish/sf11/*) -> immutable is safe; bump the dir when upgrading
+        // engine builds live under version-stamped directories (/stockfish/sf18/*, /stockfish/sf11/*) -> immutable is safe; add a new dir when upgrading
         source: "/stockfish/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
