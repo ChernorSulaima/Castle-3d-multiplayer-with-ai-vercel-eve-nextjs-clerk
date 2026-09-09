@@ -62,9 +62,21 @@ export function poseForPreset(preset: CameraPresetId): CameraPose {
 
 export interface QualityConfig {
   dpr: [number, number]; // FR-32: never above 2
-  /** <Canvas shadows> value. */
+  /**
+   * Requested `<Canvas shadows>` value. board-3d.tsx maps it to what three 0.185.1
+   * actually supports: `"basic"` stays BasicShadowMap (hard edges), and both `true` and
+   * `"soft"` become `"percentage"` (PCFShadowMap, percentage-closer filtering) because
+   * r185 deprecated PCFSoftShadowMap and substitutes PCFShadowMap anyway.
+   */
   shadows: false | true | "basic" | "soft";
-  softShadows: boolean; // drei <SoftShadows/> (High only; global side effect)
+  /**
+   * DEAD CONFIG — nothing reads it. drei 10.7.8's `<SoftShadows>` (PCSS) cannot compile
+   * against three 0.185.1: its shader patch calls `unpackRGBAToDepth`, which r185 no
+   * longer declares in `shadowmap_pars_fragment`, so every MeshStandard/Physical program
+   * fails to link. Kept only so the field can be revived if drei ships an r185 patch;
+   * the reproduction is documented in board3d/scene.tsx.
+   */
+  softShadows: boolean;
   directionalShadowMapSize: number;
   reflector: { enabled: boolean; resolution: number } ;
   contactShadows: { enabled: boolean; resolution: number; frames: number };
@@ -88,7 +100,7 @@ export interface QualityConfig {
 export const QUALITY_TIERS: Record<ResolvedQualityTier, QualityConfig> = {
   low: {
     dpr: [1, 1.25],
-    shadows: "basic",
+    shadows: "basic", // BasicShadowMap: hard-edged. Softness comes from ContactShadows.
     softShadows: false,
     directionalShadowMapSize: 512,
     reflector: { enabled: false, resolution: 0 },
@@ -107,7 +119,7 @@ export const QUALITY_TIERS: Record<ResolvedQualityTier, QualityConfig> = {
   },
   medium: {
     dpr: [1, 1.5],
-    shadows: true, // PCFSoft
+    shadows: true, // -> "percentage" (PCFShadowMap); PCFSoft is gone in r185
     softShadows: false,
     directionalShadowMapSize: 1024,
     reflector: { enabled: true, resolution: 256 },
@@ -126,8 +138,9 @@ export const QUALITY_TIERS: Record<ResolvedQualityTier, QualityConfig> = {
   },
   high: {
     dpr: [1, 2],
-    shadows: "soft",
-    softShadows: true,
+    shadows: "soft", // -> "percentage" (PCFShadowMap), same filter as Medium
+    softShadows: true, // NOT APPLIED (see the field's doc comment) — High's extra
+    // shadow quality is the 2048 map below plus live ContactShadows, not PCSS.
     directionalShadowMapSize: 2048,
     reflector: { enabled: true, resolution: 1024 },
     contactShadows: { enabled: true, resolution: 512, frames: Infinity },

@@ -65,9 +65,13 @@ export default function Board3D(props: BoardViewProps) {
     return { ...base, post: { ...base.post, composer: false } };
   }, [tier, postFxEnabled]);
 
-  // three r185 deprecated PCFSoftShadowMap and silently substitutes PCFShadowMap, so
-  // `true` / "soft" from the tier table would only earn a console warning. "percentage"
-  // asks for the map three actually uses; the visual result is identical.
+  // three 0.185.1 deprecated PCFSoftShadowMap: `WebGLShadowMap` warns and substitutes
+  // PCFShadowMap, so the tier table's `true` / "soft" would only earn a console warning.
+  // "percentage" asks for the map three actually uses; the visual result is identical.
+  // The upshot for FR-31: High and Medium both get PERCENTAGE-CLOSER filtered shadows
+  // (they differ in shadow-map size and dpr, not technique) and Low gets hard-edged
+  // BasicShadowMap plus a baked ContactShadows pass. Nothing here is PCSS — see the
+  // shadow note in scene.tsx for why drei's <SoftShadows> cannot be used with r185.
   const canvasShadows = quality.shadows === false ? false : quality.shadows === "basic" ? "basic" : "percentage";
 
   const meshOutline = !quality.post.composer || !quality.post.outline.enabled;

@@ -104,7 +104,7 @@ chess-3d-ai-clerk-game/
 │
 ├── scripts/
 │   ├── bake-chess-pieces.mjs                   (exists) rebuilds the piece GLB from public/models/source; DO NOT DELETE
-│   └── copy-stockfish.mjs              [P0]    manual refresh script: copies stockfish@11.0.0 src/stockfish.{js,wasm} + license into public/stockfish/sf11 (files are COMMITTED; not a postinstall)
+│   └── copy-stockfish.mjs              [P0]    manual refresh script: copies BOTH builds — stockfish@18.0.8 bin/stockfish-18-lite-single.{js,wasm} → public/stockfish/sf18 and stockfish@11.0.0 src/stockfish.{js,wasm} → public/stockfish/sf11, each with its GPLv3 licence (files are COMMITTED; not a postinstall)
 │
 ├── public/
 │   ├── hdri/{study,space,park,arcade,minimal}.hdr   (exists) 5 × 1k CC0 Poly Haven HDRIs
@@ -112,7 +112,11 @@ chess-3d-ai-clerk-game/
 │   │   ├── chess-pieces.glb                    96,580 B; meshes King/Queen/Rook/Bishop/Knight/Pawn (assets.md §B3)
 │   │   ├── ATTRIBUTION.md                      CC-BY 3.0 text that MUST be surfaced in the UI (P2)
 │   │   └── source/{king,queen,rook,bishop,knight,pawn}.glb   unmodified originals
-│   ├── stockfish/sf11/                         (exists, COMMITTED) stockfish@11.0.0 — 669 KB gzipped total, no SIMD, no SharedArrayBuffer
+│   ├── stockfish/sf18/                         (COMMITTED) stockfish@18.0.8 lite-single — the DEFAULT build (§I-1); NNUE, needs WASM SIMD, no SharedArrayBuffer/COOP+COEP
+│   │   ├── stockfish-18-lite-single.js         21 KB classic-worker glue; loads the sibling .wasm, exposes a download-progress MessagePort
+│   │   ├── stockfish-18-lite-single.wasm       7,295,411 B raw (5.64 MB gz)
+│   │   └── LICENSE-GPL-3.0.txt
+│   ├── stockfish/sf11/                         (exists, COMMITTED) stockfish@11.0.0 — the automatic no-SIMD FALLBACK, 669 KB gzipped total, no SharedArrayBuffer
 │   │   ├── stockfish.js                        2.33 MB raw (~165 KB gz) classic-worker glue; loads sibling stockfish.wasm
 │   │   ├── stockfish.wasm                      1.41 MB raw (503 KB gz)
 │   │   └── LICENSE-GPL-3.0.txt
@@ -313,7 +317,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // engine lives under a version-stamped directory (/stockfish/sf11/*) -> immutable is safe; bump the dir when upgrading
+        // each engine lives under a version-stamped directory (/stockfish/sf18/*, /stockfish/sf11/*) -> immutable is safe; bump the dir when upgrading
         source: "/stockfish/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
@@ -348,7 +352,7 @@ export default withEve(nextConfig);
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "convex": "convex dev",
-    "postinstall": "node scripts/copy-stockfish.mjs"
+    "copy:stockfish": "node scripts/copy-stockfish.mjs"   // MANUAL, not a postinstall: the copies under public/ are committed
   },
   "dependencies": {
     "maath": "0.10.8"                          // drei dep, NOT hoisted by pnpm; P4 imports maath/easing
@@ -367,31 +371,45 @@ pnpm layout — do not import them (declare GLTF result shapes locally instead; 
 installed. `zod`, `ai`, `eve`, `stockfish`, `chess.js`, `zustand`, `three`, `@react-three/*`,
 `postprocessing`, `convex`, `@clerk/nextjs` are already present.
 
-**`scripts/copy-stockfish.mjs` — [P0]** (from `stockfish.md` §3.1; keeps the 7 MB binary out of git):
+**`scripts/copy-stockfish.mjs` — [P0]** (layouts from `stockfish.md` §3.1 for SF18 and §11.4 for
+SF11). It refreshes **both** shipped builds from their devDependencies — nothing imports either
+package at runtime, the browser only ever loads the copies under `public/`:
 
 ```js
-// scripts/copy-stockfish.mjs
-import { copyFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const from = join(root, "node_modules", "stockfish");
-const to = join(root, "public", "stockfish", "sf11");
-
-if (!existsSync(from)) {
-  console.warn("[stockfish] package not installed yet, skipping copy");
-  process.exit(0);
-}
-await mkdir(to, { recursive: true });
-await copyFile(join(from, "src/stockfish.js"), join(to, "stockfish.js"));
-await copyFile(join(from, "src/stockfish.wasm"), join(to, "stockfish.wasm"));
-await copyFile(join(from, "license.txt"), join(to, "LICENSE-GPL-3.0.txt")); // GPLv3 compliance
-console.log("[stockfish] stockfish@11.0.0 copied to public/stockfish/sf11");
+// scripts/copy-stockfish.mjs (abridged — see the file for the comments)
+const BUILDS = [
+  {
+    label: "stockfish@18.0.8 lite-single",     // the DEFAULT build (§I-1)
+    pkg: "stockfish",
+    dir: "sf18",
+    files: [
+      ["bin/stockfish-18-lite-single.js", "stockfish-18-lite-single.js"],
+      ["bin/stockfish-18-lite-single.wasm", "stockfish-18-lite-single.wasm"],
+      ["Copying.txt", "LICENSE-GPL-3.0.txt"],  // GPLv3 compliance
+    ],
+  },
+  {
+    label: "stockfish@11.0.0 (no-SIMD fallback)",
+    pkg: "stockfish11",                        // npm alias: "npm:stockfish@11.0.0"
+    dir: "sf11",
+    files: [
+      ["src/stockfish.js", "stockfish.js"],
+      ["src/stockfish.wasm", "stockfish.wasm"],
+      ["license.txt", "LICENSE-GPL-3.0.txt"],  // GPLv3 compliance
+    ],
+  },
+];
+// …for each build: skip with a warning when the package is absent, else mkdir -p
+// public/stockfish/<dir> and copyFile every pair.
 ```
 
-`.gitignore` — no change: `public/stockfish/sf11/` is committed (≈3.7 MB raw). (`.eve/` and `.output/` are already ignored.) The script is `pnpm copy:stockfish`, run manually only when upgrading the engine.
+Each glue resolves its `.wasm` as a **sibling of its `.js`**, so neither the basenames nor the
+directory names may change without re-running the script and bumping the directory (the
+`/stockfish/:path*` cache header is `immutable`, so the path is the cache key).
+
+`.gitignore` — no change: `public/stockfish/sf18/` and `public/stockfish/sf11/` are committed
+(≈11 MB raw in total). (`.eve/` and `.output/` are already ignored.) The script is
+`pnpm copy:stockfish`, run manually only when upgrading an engine — **never** a postinstall.
 
 **`tsconfig.json` — [P0].** Leave as-is. `convex/` sits at the repo root and `paths` only maps
 `@/*` → `./src/*`, so **all imports of generated Convex code use relative paths**, e.g. from
@@ -828,7 +846,7 @@ Called by `convex/crons.ts`: `crons.interval("pair queued players", { seconds: 5
 | `games.respondDraw` | mutation | `{ gameId, accept: v.boolean() }` | `v.null()` | participant | Only the colour that did **not** offer may respond. Rejected for `mode === "ai"` like `offerDraw`. Accept → `status:"draw"`, `winner:"draw"`, `endReason:"agreement"`, finalize. Decline → unset `drawOffer`. |
 | `games.undo` | mutation | `{ gameId, toPly: v.number() }` | `v.object({ fen: v.string(), turn: vColour, undoCount: v.number() })` | participant | FR-43/44/46. **Rejected when `mode === "online"`, and when `status !== "active"`** (`"game-not-active"`, like every other mutation): once `finalizeGame` has committed Elo, the W/L/D record and a `ratingHistory` row, reopening the game would leave all three describing a game that is live again (FR-49). `canUndo` in the controller carries the same `active` term. `toPly` must satisfy `0 <= toPly < moves.length`. In `ai` mode `toPly` is snapped down so it is the human's turn again (rewinds a full turn). Rebuilds by replaying `moves.slice(0, toPly)` through chess.js and rewriting `fen/pgn/turn/lastMove/moves`. `undoCount += (previousLength - toPly)`, `rated = false` (FR-49), `drawOffer` cleared, `commentary` rows with `ply > toPly` deleted, and `eveSessionId` cleared so P5 starts a fresh Eve session (see §F.4). |
 | `games.presenceFor` | query | `{ gameId: v.id("games") }` | `v.object({ w: v.union(v.number(), v.null()), b: v.union(v.number(), v.null()) })` | auth | FR-32. Both participants' `presence.lastSeen`, read by exact key on `by_gameId_and_playerId`; `null` for a seat with no row (the AI seat, or a player who has not sent a heartbeat yet). **No wall-clock read** (§I-14): the game page compares the stamps against `Date.now()` on its own 20 s interval, and falls back to `lastMoveAt` for spectators. |
-| `games.heartbeat` | mutation | `{ gameId }` | `v.null()` | player | FR-32. Upserts the caller's `presence` row (`role` from participation, else `"spectator"`) with `lastSeen: Date.now()`. Called every 15 s while the tab is visible. |
+| `games.heartbeat` | mutation | `{ gameId }` | `v.null()` | participant, or a spectator of an **online** game | FR-32. Upserts the caller's `presence` row (`role` from participation, else `"spectator"`) with `lastSeen: Date.now()`. Called every 15 s while the tab is visible. **A non-participant is rejected (`"not-a-participant"`) unless `mode === "online"`** — only online games have an audience, so nobody can plant presence rows on someone else's ai/local board (CONVEX-AUTHZ-07) — and a game whose `status !== "active"` is a silent no-op rather than a throw, so a stale tab cannot spam errors every 15 s. |
 | `games.useHint` | mutation | `{ gameId }` | `v.object({ hintsUsed: v.number(), remaining: v.number() })` | participant | FR-40. Only `mode:"ai"` and `difficulty` in `{beginner, casual}`; throws `"hint-limit"` when `hintsUsed >= 3`. Increments and returns. The hint text itself is written by `commentary.append` with `source:"hint"`. |
 | `games.setEveSession` | mutation | `{ gameId, eveSessionId: v.string() }` | `v.null()` | participant | Persists the durable Eve session id after the first AI turn (`eve-agent.md` §3.3). Only sets it when currently unset or different. |
 | `games.refreshSpectatorCounts` | **internalMutation** | `{}` | `v.null()` | internal | FR-8. Every 20 s: the 100 most recently active `online` games (`by_mode_and_status_and_lastMoveAt`, `.order("desc")`) get `spectatorCount` recomputed from `by_gameId_and_role` (spectator rows seen within 60 s, `.take(50)`), patched only when it changed. A game that is being played never goes idle, so the abandon sweep alone left the "N watching" badge at 0 for exactly the games people watch. Kept OUT of `sweepAbandoned` on purpose: it reads the hot end of the index and is therefore the pass that conflicts and gets retried, which must never delay abandonment. |
@@ -892,8 +910,9 @@ next(R, K, S, E) = Math.round(R + K * (S - E))     with S ∈ {1, 0.5, 0}
   `ratingAi`; the same delta is applied to `rating`. One `ratingHistory` row with `pool: "ai"`.
 - **Local games**: never rated, never touch `wins/losses/draws`.
 - **Games with any take-back do not affect rating** — `undo` sets `games.rated = false` permanently
-  and `finalizeGame()` skips all rating work when `rated === false`. `wins/losses/draws` counters are
-  also skipped for unrated games so the leaderboard record matches the rating.
+  and `finalizeGame()` then skips `rating`/`ratingHuman`/`ratingAi` and the `ratingHistory` row.
+  `wins/losses/draws` still count (FR-45's "Won with 2 take-backs" is a real win); only `mode ===
+  "local"` (FR-21b) and `skipRatings` leave the record untouched as well.
 - **Abandoned with both sides gone**: finalized as a draw with **no** rating change
   (`rated` is left true but `finalizeGame` is called with `skipRatings: true`).
 - Ratings are floored at 100 (`Math.max(100, …)`) so a losing streak cannot go negative.
@@ -1315,7 +1334,27 @@ export function queueRangeAt(joinedAt: number, now: number): number {
 export const EVE_BUDGET_MS = 10_000; // NFR-5 hard ceiling for the Eve call
 export const AI_TARGET_LATENCY_MS = 3_000; // FR-38 target; UI shows "still thinking" past this
 export const AI_ROUTE_MAX_DURATION = 30; // seconds; `export const maxDuration` on the route
-export const STOCKFISH_WORKER_URL = "/stockfish/sf11/stockfish.js"; // stockfish@11.0.0 (stockfish.md §11): Skill Level 0-20, MultiPV 1-500, NO UCI_Elo/UCI_LimitStrength
+/** Which engine binary a worker was booted from (§I-1).
+ *   sf18 — stockfish@18.0.8 `lite-single`: the DEFAULT. NNUE, 5.64 MB gzipped, needs
+ *          WASM SIMD, no SharedArrayBuffer/COOP+COEP.
+ *   sf11 — stockfish@11.0.0: the automatic fallback for browsers without WASM SIMD.
+ *          Classical eval, 669 KB gzipped. NOT a user-facing setting. */
+export type EngineBuild = "sf18" | "sf11";
+/** Classic, same-origin workers loaded by URL STRING from `public/` — never
+ *  `new Worker(new URL(...))` (Turbopack appends `#params=[…]` and BOTH glues read
+ *  `location.hash` as the wasm-path override). Each `.js` resolves its `.wasm` as a
+ *  sibling, so basenames/directories only change with `pnpm copy:stockfish`. Neither
+ *  build has `UCI_Elo`/`UCI_LimitStrength`; both have `Skill Level` 0-20 and MultiPV. */
+export const STOCKFISH_WORKER_URLS: Record<EngineBuild, string> = {
+  sf18: "/stockfish/sf18/stockfish-18-lite-single.js",
+  sf11: "/stockfish/sf11/stockfish.js",
+};
+/** Byte size of each build's `.wasm`, to show progress before `total` arrives. */
+export const STOCKFISH_WASM_BYTES: Record<EngineBuild, number> = {
+  sf18: 7_295_411, sf11: 1_413_916,
+};
+/** Human label for the AI-move source badge. */
+export const ENGINE_BUILD_LABEL: Record<EngineBuild, string> = { sf18: "SF18", sf11: "SF11" };
 export const STOCKFISH_CANDIDATE_SKILL_LEVEL = 20; // honest ranking for candidates (stockfish.md §6)
 
 /* ------------------------------------------------------- 3D piece model */
@@ -1820,7 +1859,7 @@ export interface QualityConfig {
   dpr: [number, number]; // FR-32: never above 2
   /** <Canvas shadows> value. */
   shadows: false | true | "basic" | "soft";
-  softShadows: boolean; // drei <SoftShadows/> (High only; global side effect)
+  softShadows: boolean; // DEAD CONFIG — nothing reads it: drei 10.7.8's <SoftShadows> (PCSS) cannot compile against three 0.185.1 (see src/lib/camera.ts)
   directionalShadowMapSize: number;
   reflector: { enabled: boolean; resolution: number } ;
   contactShadows: { enabled: boolean; resolution: number; frames: number };
@@ -2617,23 +2656,42 @@ Owner: P5 (`use-ai-turn.ts`). Runs only when `game.mode === "ai"`.
 2. `use-ai-turn` detects that transition. It guards with a ref on `game.moves.length` so a re-render
    or a second tab cannot start two turns for the same ply.
 3. `aiStore.setPhase("engine")`. `use-stockfish` lazily creates the worker
-   (`new Worker(STOCKFISH_WORKER_URL)` = `/stockfish/sf11/stockfish.js` — a **classic, same-origin
-   worker loaded by URL string from `public/`**; never bundled through Turbopack, never
-   `new Worker(new URL(...))`). This is **stockfish@11.0.0** (see `stockfish.md` §11, which
-   supersedes §2): 669 KB gzipped in total, so first load is ~1 s on broadband; there is no
-   download-progress channel in this glue, so `engine-loading.tsx` shows an indeterminate
-   "Loading engine…" state until `uciok`. The `.wasm` is resolved automatically as the sibling of
-   the `.js` (override only via the URL hash). SF11 has **no `UCI_Elo`/`UCI_LimitStrength`**; only
-   `Skill Level` (0-20), `MultiPV`, `Skill Level Maximum Error` and `Skill Level Probability`.
+   (`new Worker(STOCKFISH_WORKER_URLS[build])` — a **classic, same-origin worker loaded by URL
+   string from `public/`**; never bundled through Turbopack, never `new Worker(new URL(...))`).
+   Which `build` is decided once per page by `engine-build.ts`'s `WebAssembly.validate` SIMD probe
+   (§I-1):
+   * **sf18** (default) — `/stockfish/sf18/stockfish-18-lite-single.js`, stockfish@18.0.8
+     `lite-single`: NNUE, 5.64 MB gzipped, requires WASM SIMD, defines its own non-shared memory
+     (no SharedArrayBuffer, no COOP/COEP). Its glue takes one end of a `MessageChannel`
+     (`worker.postMessage({progressPort}, [port])`, `stockfish.md` §4) and streams
+     `{percent, loaded, total}` while it fetches the wasm, so `engine-loading.tsx` shows a **real
+     progress bar** for the first load.
+   * **sf11** (fallback) — `/stockfish/sf11/stockfish.js`, stockfish@11.0.0: 669 KB gzipped, no
+     SIMD required, **no progress channel**, so the bar stays indeterminate until `uciok`. It is
+     also the one-shot recovery path when the sf18 wasm cannot load at all (`swapSharedEngine`
+     in `stockfish-client.ts`, driven from `use-stockfish.ts`): the shared engine is replaced,
+     every mounted consumer re-points through `onSharedEngineChange`, and a toast names the
+     compatibility engine. Never user-selectable.
+
+   Each `.wasm` is resolved automatically as the sibling of its `.js` (override only via the URL
+   hash). **Neither** build has `UCI_Elo`/`UCI_LimitStrength`; both have `Skill Level` (0-20) and
+   `MultiPV`, which is all this wrapper sends.
 4. `ucinewgame`, `setoption name Skill Level value 20`, `setoption name MultiPV value <multiPv>`,
    `isready`, `position fen <fen>`, `go depth <depth>` with a client-side `stop` timer at
    `searchTimeoutMs`. **Skill Level is 20 for candidate generation** — below 20 Stockfish randomises
    `bestmove` and forces internal MultiPV ≥ 4, so the reported ranking would not match the move
-   (`stockfish.md` §6). There is no weakened engine search anywhere: the handicap is the
-   difficulty's `selectionPolicy`, applied by the agent and by `selectCandidate` (§I-17).
+   (`stockfish.md` §6). The handicap therefore lives in exactly two places: `selectionPolicy`,
+   applied by the agent and by `selectCandidate`, on the normal path (§I-17); and
+   `DifficultyConfig.skillLevel`, applied by the engine itself, on the raw-engine fallback of
+   step 5 only — the one search that is deliberately weakened (review AI-10).
 5. `parse-uci` keeps a `Map<multipv, line>` (last line per rank wins), skipping
    `lowerbound`/`upperbound` and `info string` lines. `candidates.ts` converts each PV head from UCI
-   to SAN with chess.js and yields `Candidate[]`, best first. `candidates[0].san` is the fallback move.
+   to SAN with chess.js and yields `Candidate[]`, best first. When the agent answers with no usable
+   move, the fallback is `fallbackEngineMove()` (`engine/fallback-move.ts`) — one MultiPV-1 search at
+   the difficulty's `skillLevel`, capped by whatever is LEFT of `AI_ROUTE_TIMEOUT_MS` and skipped
+   entirely at Skill Level 20 (there the engine has no handicap to apply and step 4 already ran the
+   identical search). `selectCandidate(difficulty, candidates)` — effectively `candidates[0].san` for
+   the "always rank 1" difficulties — is what plays when that search is skipped or returns nothing.
 6. `aiStore.setPhase("agent")`. `POST /api/ai/move` with
    `{ gameId, fen, history, difficulty, candidates, eveSessionId? }`.
 7. The route handler (server): `const { userId } = await auth()` → 401 when absent; zod-parses the
@@ -2769,8 +2827,11 @@ the position stays server-validated.
 
 ### E.11 Room change (FR-21h … FR-21n)
 
-1. `/settings` (or the in-game settings drawer) opens → `room-picker` calls
-   `useEnvironment.preload({ files })` for all five HDRIs so switching is instant (FR-21m).
+1. The in-game settings drawer opens (or the room list on `/settings` is first hovered/focused) →
+   `preloadRoomAssets()` calls `useEnvironment.preload({ files })` for all five HDRIs plus
+   `useGLTF.preload()` for the piece GLB, so switching is instant (FR-21m). Once per session, and
+   never from a bare mount (§I-8); hover/focus/selection of a single room falls back to
+   `prefetchHdri` for that one file.
 2. Selecting a preset updates the ui-store immediately (live preview) and debounces
    `api.players.updateSettings({ roomPreset })` by 400 ms.
 3. Custom colours use `resolveRoom("custom", colors)`; the picker writes `roomColors` on every drag
@@ -3033,8 +3094,8 @@ Route-group note: `(protected)` does not affect URLs. Parallel-route slots now r
 
 **P0 — shared contracts**
 - [ ] Every file in §D exists at the stated path with the stated exports, compiling under `strict`.
-- [ ] `package.json` has `engines.node >= 24`, the `typecheck`/`postinstall` scripts, `maath`, `@types/three`, `@types/node@^24`.
-- [ ] `pnpm install` runs `scripts/copy-stockfish.mjs` and `public/stockfish/` contains the `.js`, `.wasm` and `LICENSE-GPL-3.0.txt`. `scripts/bake-chess-pieces.mjs` and `public/models/**` are left untouched and **committed**.
+- [ ] `package.json` has `engines.node >= 24`, the `typecheck`/`copy:stockfish` scripts, `maath`, `@types/three`, `@types/node@^24`.
+- [ ] `pnpm copy:stockfish` refreshes both builds and `public/stockfish/{sf18,sf11}/` each contain the `.js`, `.wasm` and `LICENSE-GPL-3.0.txt`. `scripts/bake-chess-pieces.mjs` and `public/models/**` are left untouched and **committed**.
 - [ ] Both zustand stores use the curried `create<T>()(…)` form and follow §D.12.
 - [ ] `.gitignore` ignores `/public/stockfish/`; `.env.example` lists the Eve and Clerk redirect vars.
 - [ ] No file in `src/lib/**` imports React, Convex functions, or anything from `src/components/**` (except the two zustand stores, which are `"use client"`).
@@ -3122,18 +3183,55 @@ Route-group note: `(protected)` does not affect URLs. Parallel-route slots now r
 
 ## I. Open decisions and deviations from the PRD
 
-1. **NFR-3 is met by using `stockfish@11.0.0` instead of `stockfish@18`.** The installed
-   `stockfish@18.0.8` package's smallest build (`lite-single`) is 5.64 MB gzipped, so it was
-   replaced (research `stockfish.md` §11, verified by downloading 15 registry tarballs): the
-   `stockfish@11.0.0` classical (non-NNUE) build is **669 KB gzipped** (503 KB wasm + ~165 KB JS),
-   needs **no WASM SIMD and no SharedArrayBuffer** (so no COOP/COEP, widest browser support), and
-   supports `Skill Level` 0-20 and `MultiPV` 1-500. Measured in Chromium: `uciok` in ~108 ms,
-   depth 13 + MultiPV 3 in ~750 ms. **Trade-offs:** SF11 has no `UCI_Elo`/`UCI_LimitStrength`
-   (not needed — the difficulty table only uses Skill Level + depth), and it is weaker than SF18
-   NNUE at equal depth, which is irrelevant for the five human-facing levels (depth 18 SF11 is
-   still far beyond club strength). The engine files are committed under `public/stockfish/sf11/`
-   (version-stamped dir → `Cache-Control: immutable` is safe) with `LICENSE-GPL-3.0.txt` alongside
-   (GPLv3 compliance; banners intact). It is lazy-loaded only in AI mode and terminated on unmount.
+1. **`stockfish@18.0.8` `lite-single` is the default engine; NFR-3's 2 MB budget is waived.**
+   USER DECISION, 2026-09-09 ("use the best and latest versions") — this supersedes the earlier
+   decision to ship `stockfish@11.0.0` as the only engine in order to meet NFR-3.
+
+   **Default — `sf18`:** `stockfish-18-lite-single.{js,wasm}`, NNUE (small net, embedded),
+   **5.64 MB gzipped** (7.3 MB raw wasm + 21 KB glue), served from
+   `public/stockfish/sf18/`. It defines its own non-shared memory, so it needs **no
+   `SharedArrayBuffer` and no COOP/COEP** (which would break Clerk/Convex/HDRI cross-origin
+   loads), but it is compiled with `-msimd128` and therefore **requires WASM SIMD**. It reserves
+   128 MB of wasm memory, growable, so it is created lazily — only in AI mode — and
+   `terminate()`d on unmount. Its glue exposes a download-progress `MessagePort`
+   (`postMessage({progressPort})`), wired through `use-stockfish` to `aiStore.downloadPercent`, so
+   the one-off 5.6 MB download shows a real determinate progress bar instead of a spinner. The
+   files sit in a version-stamped directory, so the `/stockfish/:path*`
+   `Cache-Control: public, max-age=31536000, immutable` header in `next.config.ts` is safe: the
+   download happens once per browser, ever.
+
+   **Automatic fallback — `sf11`:** `stockfish@11.0.0` (classical/HCE, 669 KB gzipped, no SIMD,
+   64 MB fixed memory) stays committed under `public/stockfish/sf11/` for browsers without WASM
+   SIMD. Selection is automatic and **not a user-facing setting**: `engine-build.ts` runs
+   `WebAssembly.validate` on the 31-byte SIMD probe copied verbatim from `wasm-feature-detect`
+   v1.9.0 and picks `sf18` when it passes, `sf11` when it does not, showing a one-time
+   "Using the compatibility engine" toast in that case. SF11 has no progress channel, so its
+   loading bar stays indeterminate. The active build is shown in the AI-move source badge
+   (`SF18` / `SF11`) and mirrored into `uiStore.engineBuild`.
+
+   It is also the **recovery path when sf18 cannot load at all** — a missing or truncated 7.3 MB
+   wasm, or a device that cannot allocate it. The first `init()` rejection on an sf18 build calls
+   `swapSharedEngine("sf11")` (`stockfish-client.ts`): the shared engine is replaced **keeping the
+   refcount**, every mounted consumer re-points through `onSharedEngineChange` and boots the
+   replacement, and the same toast appears. At most **one** downgrade per page session, and never
+   for sf11 itself — without it a bad sf18 deploy would leave every AI game with no candidate
+   generation and no hint button, retrying the same broken URL, with sf11 unused on disk.
+
+   **One wrapper, both builds.** `stockfish-client.ts` speaks the subset both engines share:
+   plain-string output lines, `ucinewgame`, `MultiPV`, `Skill Level` 0-20, `position fen`,
+   `go depth`, `stop` → `bestmove`. **`UCI_Elo`/`UCI_LimitStrength` are never sent to either**
+   (SF11 does not have them, and on SF18 they would override `Skill Level`). Verified 2026-09-09
+   by driving BOTH packages' Node loaders through this exact sequence and parsing their output
+   with the shipped `parse-uci.ts`: `uci` → `uciok`, `isready` → `readyok`, `ucinewgame`,
+   `setoption MultiPV 3` + `Skill Level 20`, `position fen`, `go depth 6` → three `multipv`
+   lines and a `bestmove` on each (SF18 11 ms, SF11 49 ms on this Mac).
+
+   **Trade-offs accepted:** the first AI game of a browser session downloads 5.6 MB (cached
+   immutably afterwards, and nothing is fetched at all outside AI mode); pre-SIMD browsers
+   (roughly pre-2021 Safari/Chrome) silently get the weaker SF11; both engine binaries are
+   committed to the repo. Both directories carry `LICENSE-GPL-3.0.txt` (GPLv3 compliance; file
+   banners intact) and both packages are **devDependencies** — nothing imports them at runtime;
+   `pnpm copy:stockfish` refreshes `public/` from them.
 
 2. **Heartbeats moved off the `games` document into a `presence` table** (PRD §4 had
    `games.lastHeartbeat`). Patching `games` every 15 s would push a new document to both players and
@@ -3203,8 +3301,15 @@ Route-group note: `(protected)` does not affect URLs. Parallel-route slots now r
    becomes unacceptable; they are unrendered and unverified, so prefer the GLB.
 
 8. **HDRI budget:** the PRD risk note wanted five presets under 6 MB; the five chosen 1k CC0 files
-   total **6.92 MB**. The hard requirement (NFR-9, < 1.5 MB per file, lazy, cached) is met and only
-   the active room is ever fetched, so the total is never downloaded at once. Accepted.
+   total **6.92 MB**. The hard requirement (NFR-9, < 1.5 MB per file, lazy, cached) is met and a game
+   only ever fetches its active room; the full set is warmed as ONE background batch per session
+   (drei `useEnvironment.preload` + `useGLTF.preload` via `preloadBoard3D`) because FR-21m demands
+   instant preset switching — skipped entirely on Save-Data and 2g/slow-2g/3g links, which keep the
+   per-room hover warm. The trigger is always INTENT, never a bare mount: the in-game settings
+   drawer opening, or the first hover/focus on the room list on `/settings` (which has no drawer and
+   no canvas). A `/settings` visit that never touches the room list therefore downloads neither the
+   ~6.9 MB of HDRI nor the three/drei chunk — `navigator.connection` is Chromium-only, so a mount
+   preload would have charged every Safari/Firefox visitor the full batch. Accepted.
 
 9. **`CameraControls` over `OrbitControls`** (FR-23 permits either). Only camera-controls gives the
    target boundary box (FR-21), promise-based animated transitions for the presets and the local-2P

@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CommentaryPanel } from "@/components/ai/commentary-panel";
 import { HintButton } from "@/components/ai/hint-button";
 import { SettingsForm } from "@/components/settings/settings-form";
+import { preloadRoomAssets } from "@/components/settings/room-picker";
 import { useAiTurn } from "@/hooks/use-ai-turn";
 import { useGameController } from "@/hooks/use-game-controller";
 import { useHeartbeat } from "@/hooks/use-heartbeat";
@@ -78,6 +79,17 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
   // This is the ONE writer for the whole shell — the settings drawer's <SettingsForm/>
   // shares it, so a change never queues two debounced `players.updateSettings` calls.
   const saveSettings = useSettingsWriter();
+
+  // FR-21m: opening the drawer is the earliest reliable signal that a preset switch is
+  // coming, so that is where the whole room asset set gets warmed (drei preload APIs,
+  // once per session, skipped on Save-Data / slow links — see room-picker.tsx).
+  const onSettingsDrawerOpenChange = useCallback(
+    (open: boolean) => {
+      setSettingsDrawerOpen(open);
+      if (open) preloadRoomAssets();
+    },
+    [setSettingsDrawerOpen],
+  );
   const setControllerBoardView = actions.setBoardView;
   const setBoardViewPersisted = useCallback(
     (next: BoardView) => {
@@ -240,7 +252,7 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
                 drawer". <SettingsForm /> writes through to the ui-store synchronously,
                 so a room change is visible behind the drawer while it is still open,
                 and it never touches the game document (FR-21m). */}
-            <Drawer open={settingsDrawerOpen} onOpenChange={setSettingsDrawerOpen}>
+            <Drawer open={settingsDrawerOpen} onOpenChange={onSettingsDrawerOpenChange}>
               <DrawerTrigger render={<Button size="sm" variant="outline" />}>
                 <SettingsIcon aria-hidden />
                 Room

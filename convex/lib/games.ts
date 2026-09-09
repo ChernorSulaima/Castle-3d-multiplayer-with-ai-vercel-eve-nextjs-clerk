@@ -154,7 +154,11 @@ export interface FinalizeInput {
 }
 
 export interface FinalizeOptions {
-  /** Skip ratings AND the W/L/D record (abandoned by both sides — §C.7). */
+  /**
+   * Skip ratings AND the W/L/D record: the game did not really happen as far as
+   * either player's record is concerned (abandoned by both sides, and the TTL
+   * sweep of solo games nobody ever came back to — §C.7).
+   */
   skipRatings?: boolean;
   /** Pinned wall clock; mutations get one consistent `Date.now()` per transaction. */
   now?: number;
@@ -168,9 +172,17 @@ function scoreFor(colour: Colour, winner: Winner): Score {
 }
 
 /**
- * The one place a game ends. Patches the terminal fields, then — unless the game
- * is unrated (local, or any take-back was used, FR-49) — applies Elo to the right
- * pool, updates W/L/D and writes one `ratingHistory` row per human player.
+ * The one place a game ends. Patches the terminal fields, then records the result
+ * against the human player(s).
+ *
+ * Two independent switches, deliberately NOT one (FR-45/FR-48/FR-49, §C.7):
+ *
+ *  - `game.rated` gates ONLY the Elo change and its `ratingHistory` row. A game with
+ *    a take-back "does not affect rating" — it is still a game that was won, lost or
+ *    drawn, so `wins/losses/draws` still move. That is what makes the result dialog's
+ *    "Won with 2 take-backs" (FR-45) consistent with the profile record;
+ *  - `mode === "local"` and `opts.skipRatings` skip BOTH: pass-and-play never counts
+ *    (FR-21b), and neither does a game both sides walked away from.
  */
 export async function finalizeGame(
   ctx: MutationCtx,
@@ -189,11 +201,11 @@ export async function finalizeGame(
   });
 
   if (opts.skipRatings === true) return;
-  if (!game.rated || game.mode === "local") return;
+  if (game.mode === "local") return;
   if (game.mode === "online") {
-    await finalizeOnline(ctx, game, end.winner, now);
+    await finalizeOnline(ctx, game, end.winner, now, game.rated);
   } else if (game.mode === "ai") {
-    await finalizeAi(ctx, game, end.winner, now);
+    await finalizeAi(ctx, game, end.winner, now, game.rated);
   }
 }
 
@@ -202,6 +214,7 @@ async function finalizeOnline(
   game: Doc<"games">,
   winner: Winner,
   now: number,
+  rated: boolean,
 ): Promise<void> {
   const { whiteId, blackId } = game;
   if (whiteId === null || blackId === null) return;
@@ -209,13 +222,12 @@ async function finalizeOnline(
   const black = await ctx.db.get("players", blackId);
   if (white === null || black === null) return;
 
-  const { whiteDelta, blackDelta } = onlineRatings(
-    white.ratingHuman,
-    black.ratingHuman,
-    winner,
-  );
-  await applyResult(ctx, white, "human", whiteDelta, scoreFor("w", winner), game._id, now);
-  await applyResult(ctx, black, "human", blackDelta, scoreFor("b", winner), game._id, now);
+  const { whiteDelta, blackDelta } = rated
+    ? onlineRatings(white.ratingHuman, black.ratingHuman, winner)
+    : { whiteDelta: 0, blackDelta: 0 };
+  const args = { gameId: game._id, now, rated } as const;
+  await applyResult(ctx, white, "human", whiteDelta, scoreFor("w", winner), args);
+  await applyResult(ctx, black, "human", blackDelta, scoreFor("b", winner), args);
 }
 
 async function finalizeAi(
@@ -223,6 +235,7 @@ async function finalizeAi(
   game: Doc<"games">,
   winner: Winner,
   now: number,
+  rated: boolean,
 ): Promise<void> {
   const humanId = game.whiteId ?? game.blackId;
   if (humanId === null) return;
@@ -232,8 +245,21 @@ async function finalizeAi(
 
   const difficulty = (game.difficulty ?? "casual") as Difficulty;
   const score = scoreFor(humanColour, winner);
-  const delta = aiRatingDelta(human.ratingAi, AI_RATING[difficulty], score);
-  await applyResult(ctx, human, "ai", delta, score, game._id, now);
+  const delta = rated
+    ? aiRatingDelta(human.ratingAi, AI_RATING[difficulty], score)
+    : 0;
+  await applyResult(ctx, human, "ai", delta, score, {
+    gameId: game._id,
+    now,
+    rated,
+  });
+}
+
+interface ApplyResultArgs {
+  gameId: Id<"games">;
+  now: number;
+  /** false → count the W/L/D only; leave every rating and `ratingHistory` alone. */
+  rated: boolean;
 }
 
 async function applyResult(
@@ -242,26 +268,33 @@ async function applyResult(
   pool: "human" | "ai",
   delta: number,
   score: Score,
-  gameId: Id<"games">,
-  now: number,
+  { gameId, now, rated }: ApplyResultArgs,
 ): Promise<void> {
+  const record = {
+    wins: player.wins + (score === 1 ? 1 : 0),
+    losses: player.losses + (score === 0 ? 1 : 0),
+    draws: player.draws + (score === 0.5 ? 1 : 0),
+    updatedAt: now,
+  };
+
+  // FR-49: a take-back unrates the game, not the result. The record moves, the
+  // three ratings do not, and no sparkline point is written.
+  if (!rated) {
+    await ctx.db.patch("players", player._id, record);
+    return;
+  }
+
   const before = pool === "human" ? player.ratingHuman : player.ratingAi;
   const after = applyDelta(before, delta);
   // Re-derive the delta from the floored rating so `before + delta === after` always
   // holds in ratingHistory, even when MIN_RATING clamped the result.
   const applied = after - before;
-  const record = {
-    wins: player.wins + (score === 1 ? 1 : 0),
-    losses: player.losses + (score === 0 ? 1 : 0),
-    draws: player.draws + (score === 0.5 ? 1 : 0),
-    rating: applyDelta(player.rating, applied),
-    updatedAt: now,
-  };
+  const scored = { ...record, rating: applyDelta(player.rating, applied) };
 
   if (pool === "human") {
-    await ctx.db.patch("players", player._id, { ...record, ratingHuman: after });
+    await ctx.db.patch("players", player._id, { ...scored, ratingHuman: after });
   } else {
-    await ctx.db.patch("players", player._id, { ...record, ratingAi: after });
+    await ctx.db.patch("players", player._id, { ...scored, ratingAi: after });
   }
 
   await ctx.db.insert("ratingHistory", {

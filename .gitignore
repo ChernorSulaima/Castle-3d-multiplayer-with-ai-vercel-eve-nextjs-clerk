@@ -46,3 +46,8 @@ next-env.d.ts
 # eve local state / build output
 .eve/
 .output/
+
+# playwright (end-to-end)
+/playwright-report/
+/test-results/
+/playwright/.cache/

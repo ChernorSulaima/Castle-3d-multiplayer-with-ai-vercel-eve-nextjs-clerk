@@ -1,24 +1,35 @@
 // src/lib/engine/stockfish-client.ts
 //
-// Browser-only wrapper around stockfish@11.0.0 running in a CLASSIC worker loaded by
-// URL string from /public (constants.STOCKFISH_WORKER_URL = "/stockfish/sf11/stockfish.js").
+// Browser-only wrapper around BOTH shipped Stockfish builds, running in a CLASSIC
+// worker loaded by URL string from /public (constants.STOCKFISH_WORKER_URLS):
+//
+//   sf18 (default) — stockfish@18.0.8 `lite-single`, needs WASM SIMD
+//   sf11 (fallback) — stockfish@11.0.0, for browsers without WASM SIMD
+//
+// One wrapper serves both because the parts this file uses are identical: plain-string
+// output lines, `MultiPV`, `Skill Level` 0..20, `ucinewgame`, `position fen`, `go depth`,
+// `stop` -> `bestmove`. We never send `UCI_Elo`/`UCI_LimitStrength` (SF11 has neither and
+// on SF18 it would override `Skill Level`), and never `Threads`/`Hash` (pinned on both).
 //
 // Never `new Worker(new URL(...))`: under Turbopack that appends a `#params=[...]`
-// fragment, and this glue treats `self.location.hash` as the override path for the
-// sibling `.wasm` (stockfish.md §11.3 + nextjs16-shadcn.md §4b). The `.wasm` is resolved
-// automatically as the sibling of the `.js`, so nothing else needs configuring.
+// fragment, and BOTH glues treat `self.location.hash` as the override path for the
+// sibling `.wasm` (stockfish.md §3.2 and §11.3 + nextjs16-shadcn.md §4b). The `.wasm` is
+// resolved automatically as the sibling of the `.js`, so nothing else needs configuring.
 //
-// SF11 facts this file depends on (all verified in stockfish.md §11.2):
-//   * every output line arrives as a plain string in `e.data`
-//   * options are `MultiPV` 1..500 and `Skill Level` 0..20 — there is NO UCI_Elo
-//   * `Threads`/`Hash` are pinned (min == max), so we never send them
-//   * the glue does no command queueing, so searches MUST be serialised here
-//   * `stop` produces `bestmove` ~180 ms later
-import { STOCKFISH_WORKER_URL } from "@/lib/constants";
-import type { EngineStatus } from "@/lib/types";
+// Per-build differences this file handles:
+//   * SF18 exposes a download-progress `MessagePort` (`postMessage({progressPort})`,
+//     stockfish.md §4) — wired to `onProgress` so the 5.6 MB first load shows real
+//     progress. SF11 has no such channel and stays indeterminate.
+//   * SF18's glue queues `go`/`setoption` internally; SF11's does not. Searches are
+//     serialised here either way, which satisfies both.
+// Relative, not "@/…": these are VALUE imports and the vitest node runner has no
+// path-alias resolver (type-only "@/…" imports are erased and stay fine).
+import { STOCKFISH_WORKER_URLS, type EngineBuild } from "../constants";
+import type { EngineStatus } from "../types";
+import { detectEngineBuild } from "./engine-build";
 import { PvCollector, isBestMove, isReadyOk, isUciOk, parseBestMove, type PvLine } from "./parse-uci";
 
-/** Handshake budget. Cold load of the 669 KB gzipped engine measured at ~108 ms. */
+/** Handshake budget. Cold load measured at ~108 ms (SF11) / ~350 ms (SF18, warm). */
 export const ENGINE_INIT_TIMEOUT_MS = 20_000;
 const READY_TIMEOUT_MS = 10_000;
 /** `stop` -> `bestmove` was measured at ~180 ms; 4 s is a generous ceiling. */
@@ -49,6 +60,14 @@ export interface SearchResult {
   stopped: boolean;
 }
 
+/** Download progress for the wasm, normalised for the UI. */
+export interface EngineProgress {
+  /** 0..100. The glue reports a 0..1 fraction; it is scaled here. */
+  percent: number;
+  loadedBytes: number;
+  totalBytes: number;
+}
+
 export class EngineUnavailableError extends Error {
   constructor(message = "engine-unavailable") {
     super(message);
@@ -58,6 +77,7 @@ export class EngineUnavailableError extends Error {
 
 type LineListener = (line: string) => void;
 type StatusListener = (status: EngineStatus) => void;
+type ProgressListener = (progress: EngineProgress) => void;
 interface Pending {
   fail(error: Error): void;
 }
@@ -68,16 +88,30 @@ export class StockfishEngine {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly lineListeners = new Set<LineListener>();
   private readonly statusListeners = new Set<StatusListener>();
+  private readonly progressListeners = new Set<ProgressListener>();
   private readonly pending = new Set<Pending>();
   private currentStatus: EngineStatus = "idle";
+  private lastProgress: EngineProgress | null = null;
   private disposed = false;
   private appliedMultiPv: number | null = null;
   private appliedSkillLevel: number | null = null;
+  readonly url: string;
 
-  constructor(readonly url: string = STOCKFISH_WORKER_URL) {}
+  constructor(
+    /** Which shipped binary to boot. Defaults to the WASM-SIMD probe's answer. */
+    readonly build: EngineBuild = detectEngineBuild(),
+    url: string = STOCKFISH_WORKER_URLS[build],
+  ) {
+    this.url = url;
+  }
 
   getStatus(): EngineStatus {
     return this.currentStatus;
+  }
+
+  /** Last download-progress snapshot, or null (SF11, or nothing reported yet). */
+  getProgress(): EngineProgress | null {
+    return this.lastProgress;
   }
 
   /** Subscribe to status transitions. Returns the unsubscribe function. */
@@ -85,6 +119,17 @@ export class StockfishEngine {
     this.statusListeners.add(listener);
     return () => {
       this.statusListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Subscribe to wasm download progress. SF18 only — SF11's glue has no progress
+   * channel, so the listener simply never fires and the UI stays indeterminate.
+   */
+  onProgress(listener: ProgressListener): () => void {
+    this.progressListeners.add(listener);
+    return () => {
+      this.progressListeners.delete(listener);
     };
   }
 
@@ -111,6 +156,7 @@ export class StockfishEngine {
       worker.onerror = () => {
         this.failAll(new EngineUnavailableError("worker-error"));
       };
+      this.attachProgressPort(worker);
       try {
         await this.expect(isUciOk, () => this.send("uci"), ENGINE_INIT_TIMEOUT_MS);
         await this.expect(isReadyOk, () => this.send("isready"), READY_TIMEOUT_MS);
@@ -166,11 +212,41 @@ export class StockfishEngine {
     this.teardownWorker();
     this.readyPromise = null;
     this.lineListeners.clear();
+    this.lastProgress = null;
+    // Only here — with the worker actually terminated — is "idle" the truth. A
+    // consumer that merely unmounts must NOT reset the status while other
+    // consumers still hold the shared engine (review AI-7); `releaseEngine()`
+    // returns the remaining refcount so `use-stockfish` can tell the difference.
     this.setStatus("idle");
     this.statusListeners.clear();
+    this.progressListeners.clear();
   }
 
   /* --------------------------------------------------------------- internals */
+
+  /**
+   * SF18 only: hand the glue one end of a `MessageChannel` and it streams
+   * `{percent, loaded, total, …}` objects while it fetches the 7.3 MB wasm
+   * (stockfish.md §4; `percent` is a 0..1 FRACTION — verified in the shipped glue:
+   * `{percent: e/n, loaded: e, total: n, …}` — and the port self-closes at 1).
+   * Posted immediately after `new Worker` so it is the first message the glue sees.
+   */
+  private attachProgressPort(worker: Worker): void {
+    if (this.build !== "sf18") return;
+    if (typeof MessageChannel === "undefined") return;
+    try {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (event: MessageEvent<unknown>) => {
+        const progress = toProgress(event.data);
+        if (progress === null) return;
+        this.lastProgress = progress;
+        for (const listener of [...this.progressListeners]) listener(progress);
+      };
+      worker.postMessage({ progressPort: channel.port2 }, [channel.port2]);
+    } catch {
+      // A browser that refuses the transfer just means no progress bar.
+    }
+  }
 
   private async runSearch(request: SearchRequest): Promise<SearchResult> {
     await this.init();
@@ -317,31 +393,113 @@ export class StockfishEngine {
 let sharedEngine: StockfishEngine | null = null;
 let refCount = 0;
 let disposeTimer: ReturnType<typeof setTimeout> | null = null;
+const changeListeners = new Set<(engine: StockfishEngine) => void>();
 
-export function acquireEngine(): StockfishEngine {
+/**
+ * @param build pins the binary for a shared engine that has to be CREATED here
+ * (the sf18 -> sf11 downgrade in `use-stockfish`). Ignored when one already
+ * exists — use {@link swapSharedEngine} to replace a live engine.
+ */
+export function acquireEngine(build?: EngineBuild): StockfishEngine {
   if (disposeTimer !== null) {
     clearTimeout(disposeTimer);
     disposeTimer = null;
   }
-  sharedEngine ??= new StockfishEngine();
+  sharedEngine ??= new StockfishEngine(build);
   refCount += 1;
   return sharedEngine;
 }
 
-export function releaseEngine(): void {
+/**
+ * Subscribe to shared-engine REPLACEMENTS (see {@link swapSharedEngine}). Every
+ * mounted consumer must re-point through this: the old instance is disposed, so a
+ * consumer that kept its own handle would search a dead worker.
+ *
+ * @returns the unsubscribe function.
+ */
+export function onSharedEngineChange(listener: (engine: StockfishEngine) => void): () => void {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
+/**
+ * Replace the shared engine with one booted from `build` and tell every consumer.
+ *
+ * This is the recovery path for "the default sf18 build cannot load at all" (a missing
+ * or truncated 7.3 MB wasm, a device that cannot allocate it): sf11 ships alongside it
+ * and runs everywhere, so a page session that would otherwise have NO engine — no AI
+ * moves, no hints — downgrades once instead of failing.
+ *
+ * The refcount is deliberately CARRIED OVER: every consumer keeps exactly the one hold
+ * it already had, so nobody's `releaseEngine()` goes missing and the replacement is not
+ * torn down under a consumer that never released.
+ */
+export function swapSharedEngine(build: EngineBuild): StockfishEngine {
+  const previous = sharedEngine;
+  const next = new StockfishEngine(build);
+  sharedEngine = next;
+  previous?.dispose();
+  for (const listener of [...changeListeners]) listener(next);
+  return next;
+}
+
+/**
+ * Drop one reference.
+ *
+ * @returns the number of consumers still holding the engine. `0` means this caller
+ * was the last one and the worker is on its way out, so it is the ONLY case in
+ * which a consumer may reset the shared engine status to "idle" (review AI-7 — the
+ * hint button and the AI turn hook can hold the engine at the same time, and the
+ * one that unmounts first used to blank the other's "ready" state).
+ */
+export function releaseEngine(): number {
   refCount = Math.max(0, refCount - 1);
-  if (refCount > 0 || disposeTimer !== null) return;
+  if (refCount > 0 || disposeTimer !== null) return refCount;
   disposeTimer = setTimeout(() => {
     disposeTimer = null;
     if (refCount > 0) return;
     sharedEngine?.dispose();
     sharedEngine = null;
   }, ENGINE_DISPOSE_DELAY_MS);
+  return refCount;
 }
 
 /** Test/debug helper: the live shared engine, if any. */
 export function peekSharedEngine(): StockfishEngine | null {
   return sharedEngine;
+}
+
+/** Drop the shared engine now, without waiting for the dispose timer, and forget
+ *  every reference to it. Used by tests; a live downgrade uses {@link swapSharedEngine},
+ *  which keeps the refcount instead of zeroing it. */
+export function disposeSharedEngine(): void {
+  if (disposeTimer !== null) {
+    clearTimeout(disposeTimer);
+    disposeTimer = null;
+  }
+  sharedEngine?.dispose();
+  sharedEngine = null;
+  refCount = 0;
+}
+
+/** `{percent, loaded, total}` from the SF18 glue -> a UI-friendly 0..100 percent. */
+function toProgress(data: unknown): EngineProgress | null {
+  if (typeof data !== "object" || data === null) return null;
+  const raw = data as { percent?: unknown; loaded?: unknown; total?: unknown };
+  if (typeof raw.loaded !== "number" || typeof raw.total !== "number") return null;
+  const fraction =
+    typeof raw.percent === "number" && Number.isFinite(raw.percent)
+      ? raw.percent
+      : raw.total > 0
+        ? raw.loaded / raw.total
+        : 0;
+  return {
+    percent: clamp(Math.round(fraction * 100), 0, 100),
+    loadedBytes: Math.max(0, raw.loaded),
+    totalBytes: Math.max(0, raw.total),
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

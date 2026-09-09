@@ -69,14 +69,25 @@ export function Scene({
         <Room room={room} imageUrl={roomImageUrl} />
       </Suspense>
 
-      {/* NOTE: drei 10.7.8's <SoftShadows> is NOT usable with three 0.185.1. Its PCSS
-          patch of `ShaderChunk.shadowmap_pars_fragment` calls `unpackRGBAToDepth`, which
-          r185 no longer declares in that chunk (verified: 0 occurrences, and `packing`
-          is not included by meshphysical's fragment shader), so EVERY MeshStandard/
-          Physical program fails to link — "no matching overloaded function found" then
-          a flood of "useProgram: program not valid". Reproduced live at the High tier.
-          `quality.softShadows` therefore stays unused; High still gets soft shadows from
-          the Canvas' `shadows="soft"` (PCFSoftShadowMap) plus a 2048 shadow map. */}
+      {/* SHADOWS — what each tier ACTUALLY gets (there is no PCSS anywhere):
+            Low    <Canvas shadows="basic"> = BasicShadowMap, hard-edged, 512 map, plus a
+                   ContactShadows pass baked once (`frames: 1`).
+            Medium PCFShadowMap (percentage-closer filtering), 1024 map, live ContactShadows.
+            High   the same PCFShadowMap, 2048 map, live ContactShadows — the softness comes
+                   from the filter kernel and the bigger map, not from a different technique.
+          Two things force that, both verified against the installed packages:
+          (a) three 0.185.1 DEPRECATED PCFSoftShadowMap — `WebGLShadowMap` warns and falls
+              back to PCFShadowMap — so board-3d.tsx asks for `shadows="percentage"`
+              directly instead of the tier table's `true` / "soft".
+          (b) drei 10.7.8's <SoftShadows> is unusable here: its PCSS patch of
+              `ShaderChunk.shadowmap_pars_fragment` calls `unpackRGBAToDepth`, which r185
+              no longer declares in that chunk (0 occurrences; it lives in `packing`,
+              which meshphysical's fragment shader does not include), so EVERY
+              MeshStandard/Physical program fails to link — "no matching overloaded
+              function found" then a flood of "useProgram: program not valid".
+              Reproduced live at the High tier. `quality.softShadows` is therefore dead
+              config: nothing reads it, and nothing should until drei ships a PCSS patch
+              built for r185's depth-texture shadow maps. */}
 
       <ambientLight intensity={room.lights.ambientIntensity} />
       <directionalLight

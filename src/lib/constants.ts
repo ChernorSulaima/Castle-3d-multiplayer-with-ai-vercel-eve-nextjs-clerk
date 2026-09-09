@@ -97,7 +97,39 @@ export const AI_DIRECT_MIN_BUDGET_MS = 1_500; // below this, skip the direct att
 export const AI_ROUTE_TIMEOUT_MS = EVE_BUDGET_MS + 5_000;
 export const AI_TARGET_LATENCY_MS = 3_000; // FR-38 target; UI shows "still thinking" past this
 export const AI_ROUTE_MAX_DURATION = 30; // seconds; `export const maxDuration` on the route
-export const STOCKFISH_WORKER_URL = "/stockfish/sf11/stockfish.js"; // stockfish@11.0.0 (stockfish.md §11): Skill Level 0-20, MultiPV 1-500, NO UCI_Elo/UCI_LimitStrength
+/**
+ * Which engine binary a worker was booted from.
+ *   sf18 — stockfish@18.0.8 `lite-single`: the DEFAULT (user decision 2026-09-09).
+ *          NNUE, 5.64 MB gzipped, needs WASM SIMD, no SharedArrayBuffer/COOP+COEP.
+ *   sf11 — stockfish@11.0.0: the automatic fallback for browsers without WASM SIMD.
+ *          Classical eval, 669 KB gzipped. NOT a user-facing setting.
+ */
+export type EngineBuild = "sf18" | "sf11";
+
+/**
+ * Classic, same-origin workers loaded by URL STRING from `public/` — never
+ * `new Worker(new URL(...))` (Turbopack appends a `#params=[…]` fragment and both
+ * glues read `location.hash` as the wasm-path override). Each `.js` resolves its
+ * `.wasm` as a sibling, so the basenames and directories must not change without
+ * re-running `pnpm copy:stockfish` (stockfish.md §3.2 and §11.3).
+ */
+export const STOCKFISH_WORKER_URLS: Record<EngineBuild, string> = {
+  sf18: "/stockfish/sf18/stockfish-18-lite-single.js",
+  sf11: "/stockfish/sf11/stockfish.js",
+};
+
+/** Byte size of each build's `.wasm`, used to show progress before `total` arrives. */
+export const STOCKFISH_WASM_BYTES: Record<EngineBuild, number> = {
+  sf18: 7_295_411,
+  sf11: 1_413_916,
+};
+
+/** Human label for the AI-move source badge. */
+export const ENGINE_BUILD_LABEL: Record<EngineBuild, string> = {
+  sf18: "SF18",
+  sf11: "SF11",
+};
+
 export const STOCKFISH_CANDIDATE_SKILL_LEVEL = 20; // honest ranking for candidates (stockfish.md §6)
 
 /* ------------------------------------------------------- 3D piece model */

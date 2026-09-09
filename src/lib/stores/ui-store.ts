@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { autoQualityTier, dropTier } from "../camera";
 import { DEFAULT_ROOM } from "../rooms";
-import { SETTINGS_STORAGE_KEY } from "../constants";
+import { SETTINGS_STORAGE_KEY, type EngineBuild } from "../constants";
 
 export interface UiState {
   /** True once settings from `players.me` have been merged in — gates the 3D mount
@@ -36,6 +36,11 @@ export interface UiState {
   /** FR-21k: signed Convex storage URL for the player's uploaded backdrop, mirrored from
    *  `players.me`. Session-only — the URL expires, so it never goes to localStorage. */
   roomImageUrl: string | null;
+  /** Which Stockfish binary the worker booted from ("sf18" by default, "sf11" on a
+   *  browser without WASM SIMD), or null before an AI game has mounted the engine.
+   *  Session-only and NOT a user setting — it is detected, shown in the AI-move
+   *  source badge, and never persisted. */
+  engineBuild: EngineBuild | null;
 
   hydrateFromServer(settings: PlayerSettings): void;
   markHydrated(): void;
@@ -51,6 +56,7 @@ export interface UiState {
   setReducedMotion(on: boolean): void;
   setOrientation(colour: Colour): void;
   setRoomImageUrl(url: string | null): void;
+  setEngineBuild(build: EngineBuild | null): void;
   autoDetectTier(input: Parameters<typeof autoQualityTier>[0]): void;
   degradeTier(): void;
   setHistoryDrawerOpen(open: boolean): void;
@@ -79,6 +85,7 @@ export const useUiStore = create<UiState>()(
         historyDrawerOpen: false,
         settingsDrawerOpen: false,
         roomImageUrl: null,
+        engineBuild: null,
 
         // Convex wins over anything rehydrated from localStorage.
         hydrateFromServer: (s) =>
@@ -105,6 +112,7 @@ export const useUiStore = create<UiState>()(
         setReducedMotion: (reducedMotion) => set({ reducedMotion }),
         setOrientation: (orientation) => set({ orientation }),
         setRoomImageUrl: (roomImageUrl) => set({ roomImageUrl }),
+        setEngineBuild: (engineBuild) => set({ engineBuild }),
         autoDetectTier: (input) => {
           if (get().qualityTier !== "auto") return;
           set({ resolvedTier: autoQualityTier(input) });

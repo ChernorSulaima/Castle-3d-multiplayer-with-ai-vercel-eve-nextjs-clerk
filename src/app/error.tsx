@@ -26,7 +26,8 @@ export default function RootError({
       </p>
       <h1 className="text-2xl font-semibold tracking-tight">Something went wrong</h1>
       <p className="text-sm text-muted-foreground">
-        The move did not go through. Try again — nothing on the server was lost.
+        This page hit an error while rendering. Nothing on the server was lost — your games,
+        ratings and settings are exactly where you left them.
       </p>
       {error.digest ? (
         <code className="rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">

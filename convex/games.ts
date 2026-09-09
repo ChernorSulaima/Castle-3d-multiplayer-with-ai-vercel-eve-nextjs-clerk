@@ -664,6 +664,16 @@ export const presenceFor = query({
 /**
  * FR-32. Writes to the `presence` table, NEVER to the game document — patching
  * `games` every 15 s would push a new doc to every subscriber (§I-2).
+ *
+ * Scoped, not "any signed-in player may write a row on any game" (CONVEX-AUTHZ-07):
+ *
+ *  - participants always count, in every mode;
+ *  - a non-participant is only ever the audience of an ONLINE game — that is what
+ *    keeps `spectatorCount` (FR-8) working. `ai` and `local` games have no audience,
+ *    so a stranger cannot plant presence rows on someone else's private board;
+ *  - a finished game takes no heartbeats, but that is a silent no-op rather than a
+ *    throw: a stale tab that has not yet seen the result would otherwise raise an
+ *    error every 15 s forever.
  */
 export const heartbeat = mutation({
   args: { gameId: v.id("games") },
@@ -671,7 +681,14 @@ export const heartbeat = mutation({
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx);
     const game = await loadGame(ctx, args.gameId);
-    const role = colourOf(game, player._id) ?? "spectator";
+
+    const colour = colourOf(game, player._id);
+    if (colour === null && game.mode !== "online") {
+      throw new Error("not-a-participant");
+    }
+    if (game.status !== "active") return null;
+
+    const role = colour ?? "spectator";
     const now = Date.now();
 
     const existing = await ctx.db

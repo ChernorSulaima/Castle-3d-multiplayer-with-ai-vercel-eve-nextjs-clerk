@@ -49,6 +49,101 @@ describe("games.heartbeat", () => {
     expect(game.moves).toEqual([]);
     expect(game.status).toBe("active");
   });
+
+  test("both participants of a solo game may beat (CONVEX-AUTHZ-07)", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const ai = await seedGame(t, {
+      mode: "ai",
+      whiteId: alice.id,
+      blackId: null,
+      aiColor: "b",
+      difficulty: "casual",
+    });
+    const local = await seedGame(t, { mode: "local", whiteId: alice.id, blackId: null });
+
+    await as(t, alice).mutation(api.games.heartbeat, { gameId: ai });
+    await as(t, alice).mutation(api.games.heartbeat, { gameId: local });
+
+    expect((await presenceFor(t, ai)).map((row) => row.role)).toEqual(["w"]);
+    expect((await presenceFor(t, local)).map((row) => row.role)).toEqual(["w"]);
+  });
+
+  test("rejects a stranger on ai and local games — they have no audience", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const mallory = await signUp(t, "mallory");
+    const ai = await seedGame(t, {
+      mode: "ai",
+      whiteId: alice.id,
+      blackId: null,
+      aiColor: "b",
+      difficulty: "casual",
+    });
+    const local = await seedGame(t, { mode: "local", whiteId: alice.id, blackId: null });
+
+    await expect(
+      as(t, mallory).mutation(api.games.heartbeat, { gameId: ai }),
+    ).rejects.toThrow(/not-a-participant/);
+    await expect(
+      as(t, mallory).mutation(api.games.heartbeat, { gameId: local }),
+    ).rejects.toThrow(/not-a-participant/);
+
+    expect(await presenceFor(t, ai)).toHaveLength(0);
+    expect(await presenceFor(t, local)).toHaveLength(0);
+  });
+
+  test("is a silent no-op once the game is over, for players and spectators alike", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
+    const mallory = await signUp(t, "mallory");
+    const gameId = await seedGame(t, {
+      mode: "online",
+      whiteId: alice.id,
+      blackId: bob.id,
+    });
+    await as(t, alice).mutation(api.games.heartbeat, { gameId });
+    const before = (await presenceFor(t, gameId))[0].lastSeen;
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch("games", gameId, {
+        status: "resigned",
+        winner: "b",
+        endReason: "resignation",
+        endedAt: Date.now(),
+      });
+    });
+
+    // A tab that has not yet noticed the result keeps beating: no throw, no write.
+    await as(t, alice).mutation(api.games.heartbeat, { gameId });
+    await as(t, mallory).mutation(api.games.heartbeat, { gameId });
+
+    const rows = await presenceFor(t, gameId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastSeen).toBe(before);
+  });
+
+  test("requires an identity and a game that exists", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
+    const gameId = await seedGame(t, {
+      mode: "online",
+      whiteId: alice.id,
+      blackId: bob.id,
+    });
+    await expect(t.mutation(api.games.heartbeat, { gameId })).rejects.toThrow(
+      /Not authenticated/,
+    );
+
+    await t.run(async (ctx) => {
+      await ctx.db.delete("games", gameId);
+    });
+    await expect(
+      as(t, alice).mutation(api.games.heartbeat, { gameId }),
+    ).rejects.toThrow(/game-not-found/);
+  });
 });
 
 describe("games.sweepAbandoned", () => {

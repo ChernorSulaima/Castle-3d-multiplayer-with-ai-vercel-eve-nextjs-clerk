@@ -16,7 +16,12 @@ import {
   replay,
   toHistoryRows,
 } from "../chess";
-import { PieceTracker } from "../piece-tracker";
+import {
+  EMPTY_PIECE_TRACKER_STATE,
+  PieceTracker,
+  derivePieces,
+  type PieceTrackerState,
+} from "../piece-tracker";
 import {
   DEFAULT_FEN,
   gridPosition,
@@ -502,6 +507,118 @@ describe("PieceTracker", () => {
       const pieces = tracker.sync(fenAtPly(SCHOLARS_MATE, ply), ply, moveAt(SCHOLARS_MATE));
       expect(new Set(pieces.map((p) => p.id)).size).toBe(pieces.length);
     }
+  });
+});
+
+/* ------------------------------------------- derivePieces (render purity) */
+
+// Review GF-5: `useGameController` calls `derivePieces` in its RENDER body and adjusts
+// state from the result, so the function has to behave like a pure reducer under the
+// React Compiler: no hidden mutation of its input, identical output for identical input,
+// and a fixed point after one step (otherwise the render-phase setState loops forever).
+describe("derivePieces (the render-safe core of PieceTracker)", () => {
+  const moveAt = (moves: string[]) => (ply: number) => lastMoveAtPly(moves, ply);
+
+  /** What the controller does: derive, adopt the new state, derive again until settled. */
+  function renderUntilSettled(
+    state: PieceTrackerState,
+    fen: string,
+    ply: number,
+    moveEndingAt: (ply: number) => LastMove | null,
+  ): { state: PieceTrackerState; renders: number } {
+    let current = state;
+    for (let renders = 1; renders <= 5; renders++) {
+      const derived = derivePieces(current, fen, ply, moveEndingAt);
+      if (derived === current) return { state: current, renders };
+      current = derived;
+    }
+    throw new Error("derivePieces never reached a fixed point");
+  }
+
+  it("is a pure function: deriving twice from the same state yields the same ids", () => {
+    const start = derivePieces(EMPTY_PIECE_TRACKER_STATE, DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE));
+    const fen1 = fenAtPly(SCHOLARS_MATE, 1);
+
+    const first = derivePieces(start, fen1, 1, moveAt(SCHOLARS_MATE));
+    const second = derivePieces(start, fen1, 1, moveAt(SCHOLARS_MATE));
+
+    expect(second.pieces).toEqual(first.pieces);
+    expect(second.seq).toBe(first.seq);
+    // ...and the shared input state was not mutated by either call.
+    expect(start.ply).toBe(0);
+    expect(start.pieces.find((p) => p.square === "e2")!.id).toBe(
+      first.pieces.find((p) => p.square === "e4")!.id,
+    );
+  });
+
+  it("re-deriving its own fen/ply returns the SAME state object (the fixed point)", () => {
+    const start = derivePieces(EMPTY_PIECE_TRACKER_STATE, DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE));
+    expect(derivePieces(start, DEFAULT_FEN, 0, moveAt(SCHOLARS_MATE))).toBe(start);
+
+    // So the controller's render -> setState -> render cycle settles in one extra pass,
+    // and `position` keeps a stable array identity between unrelated re-renders.
+    const settled = renderUntilSettled(start, fenAtPly(SCHOLARS_MATE, 1), 1, moveAt(SCHOLARS_MATE));
+    expect(settled.renders).toBe(2);
+    expect(settled.state.pieces).toBe(
+      renderUntilSettled(settled.state, fenAtPly(SCHOLARS_MATE, 1), 1, moveAt(SCHOLARS_MATE)).state
+        .pieces,
+    );
+  });
+
+  it("asks for the explaining move at most once per transition, even across re-renders", () => {
+    let calls = 0;
+    const counted = (ply: number) => {
+      calls++;
+      return lastMoveAtPly(SCHOLARS_MATE, ply);
+    };
+    const start = derivePieces(EMPTY_PIECE_TRACKER_STATE, DEFAULT_FEN, 0, counted);
+    calls = 0;
+    renderUntilSettled(start, fenAtPly(SCHOLARS_MATE, 1), 1, counted);
+    expect(calls).toBe(1);
+  });
+
+  it("keeps ids stable across a whole game driven the way the controller drives it", () => {
+    let state = renderUntilSettled(
+      EMPTY_PIECE_TRACKER_STATE,
+      DEFAULT_FEN,
+      0,
+      moveAt(SCHOLARS_MATE),
+    ).state;
+    const pawnId = state.pieces.find((p) => p.square === "e2")!.id;
+
+    for (let ply = 1; ply <= SCHOLARS_MATE.length; ply++) {
+      state = renderUntilSettled(state, fenAtPly(SCHOLARS_MATE, ply), ply, moveAt(SCHOLARS_MATE))
+        .state;
+      expect(new Set(state.pieces.map((p) => p.id)).size).toBe(state.pieces.length);
+    }
+    // 1.e4 ... the same pawn is still on e4 seven plies later, with the same id.
+    expect(state.pieces.find((p) => p.square === "e4")!.id).toBe(pawnId);
+
+    for (let ply = SCHOLARS_MATE.length - 1; ply >= 0; ply--) {
+      state = renderUntilSettled(state, fenAtPly(SCHOLARS_MATE, ply), ply, moveAt(SCHOLARS_MATE))
+        .state;
+      expect(new Set(state.pieces.map((p) => p.id)).size).toBe(state.pieces.length);
+    }
+    expect(state.pieces.find((p) => p.square === "e2")!.id).toBe(pawnId);
+  });
+
+  it("re-derives from scratch after the controller resets on a take-back", () => {
+    const state = renderUntilSettled(
+      EMPTY_PIECE_TRACKER_STATE,
+      fenAtPly(SCHOLARS_MATE, 3),
+      3,
+      moveAt(SCHOLARS_MATE),
+    ).state;
+    // §E.5.7: `undo` throws the state away rather than mutating a tracker instance.
+    const afterReset = renderUntilSettled(
+      EMPTY_PIECE_TRACKER_STATE,
+      fenAtPly(SCHOLARS_MATE, 1),
+      1,
+      moveAt(SCHOLARS_MATE),
+    ).state;
+    expect(new Set(afterReset.pieces.map((p) => p.id)).size).toBe(afterReset.pieces.length);
+    expect(afterReset.pieces[0].id).toBe("p1");
+    expect(state.ply).toBe(3);
   });
 });
 

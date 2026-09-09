@@ -8,9 +8,11 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ColourPickers } from "@/components/settings/colour-pickers";
+import { preloadBoard3D } from "@/components/board3d/board-3d-loader";
 import { useUiStore } from "@/lib/stores/ui-store";
 import {
   DEFAULT_ROOM_COLORS,
+  HDRI_FILES,
   ROOMS,
   ROOM_ORDER,
   resolveRoom,
@@ -22,24 +24,96 @@ import { describeConvexError } from "@/components/providers/convex-errors";
 import { cn } from "@/lib/utils";
 
 /**
- * FR-21m — switching rooms should be instant. §E.11 suggests drei's
- * `useEnvironment.preload`, but that would pull three.js and the whole R3F loader
- * stack into `/settings`, a page with no canvas on it. Warming the browser's HTTP
- * cache achieves the same thing for free: `next.config.ts` serves `/hdri/*` with
- * `max-age=2592000`, so drei's later fetch inside the scene is a cache hit.
+ * FR-21m — "preset switching is instant (assets preloaded on the settings drawer open)".
  *
- * Prefetch is intent-based (hover/focus/selection) rather than all five at once:
- * the set totals 6.92 MB and §I-8 is explicit that it must never be downloaded in
- * one go.
+ * TWO layers, both driven by INTENT — never by a bare mount. §I-8 caps what a page may
+ * download speculatively, and `/settings` has no canvas and no drawer, so its trigger is
+ * the first hover/focus on the room list rather than `useEffect(..., [])`: a visitor who
+ * came for the sound toggle must not pay ~8 MB (5 HDRIs + the three/drei chunk) for it.
+ *
+ * 1. `preloadRoomAssets()` — the bulk warm, fired once per session from the in-game
+ *    settings drawer opening (game-shell) or the first room-list hover/focus here. It
+ *    pulls the 3D chunk with a DYNAMIC import (so `/settings` still ships no three.js in
+ *    its own bundle) and then uses drei's documented preload APIs:
+ *    `useEnvironment.preload({ files })` for all five HDRIs and `useGLTF.preload()` for
+ *    the piece GLB, via `preloadBoard3D` (r3f-drei.md §3/§4). Those populate drei's own
+ *    loader cache, so a later preset switch inside the scene neither re-fetches nor
+ *    re-decodes — an HTTP-cache-only warm would still pay the RGBE decode.
+ *    ~6.9 MB of HDRI + 96 KB of GLB; `next.config.ts` serves `/hdri/*` with
+ *    `max-age=2592000`, so repeat sessions are cache hits. Skipped entirely on Save-Data
+ *    and on 3g/2g/slow-2g connections (see §I-8) — those players keep layer 2 only, and
+ *    every room still works, it just downloads on demand.
+ *
+ * 2. `prefetchHdri()` — the per-room warm on hover/focus/selection, for exactly the
+ *    connections (and the repeat hovers) that layer 1 does not cover.
  */
 const warmed = new Set<string>();
 
+interface NetworkInformation {
+  saveData?: boolean;
+  effectiveType?: string;
+}
+
+function networkInformation(): NetworkInformation | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  return (navigator as Navigator & { connection?: NetworkInformation }).connection;
+}
+
+/** Connections on which ~7 MB of speculative download is not acceptable (§I-8). */
+const METERED_EFFECTIVE_TYPES = new Set(["slow-2g", "2g", "3g"]);
+
+function isMeteredConnection(): boolean {
+  const connection = networkInformation();
+  if (!connection) return false;
+  if (connection.saveData === true) return true;
+  return (
+    connection.effectiveType !== undefined &&
+    METERED_EFFECTIVE_TYPES.has(connection.effectiveType)
+  );
+}
+
+let roomAssetsPreloaded = false;
+
+/**
+ * Warm every room preset's HDRI plus the piece GLB, once per session. Called when the
+ * in-game settings drawer opens (game-shell) and on the first room-list hover/focus
+ * here. Safe to call any number of times; a no-op after the first run and on metered
+ * links.
+ *
+ * The HDRIs are NOT marked warmed here. `preloadBoard3D` resolves as soon as the chunk
+ * is imported — `useEnvironment.preload`/`useGLTF.preload` are fire-and-forget, so a
+ * file that 404s or dies on a flaky connection never reaches the `catch`. Marking them
+ * up front therefore suppressed the hover retry permanently for the very users it
+ * exists for; `prefetchHdri` owns the `warmed` set alone, and a duplicate request for
+ * an already-cached HDRI is a cheap disk hit.
+ *
+ * @returns true when THIS call started the bulk warm, so a caller that also wants one
+ * specific file can skip the redundant single fetch.
+ */
+export function preloadRoomAssets(): boolean {
+  if (roomAssetsPreloaded || typeof window === "undefined") return false;
+  if (isMeteredConnection()) return false;
+  roomAssetsPreloaded = true;
+  void preloadBoard3D(HDRI_FILES).catch(() => {
+    // The chunk failed; let hover/selection retry file by file.
+    roomAssetsPreloaded = false;
+  });
+  return true;
+}
+
+/**
+ * Hover/focus on the room list: the earliest reliable "a preset switch is coming" signal
+ * on `/settings`, which has no drawer to open. The bulk warm covers every HDRI, so the
+ * single-file fetch only runs when it declined (already warmed this session, a metered
+ * link, or the in-game drawer got there first).
+ */
+function warmRoom(url: string): void {
+  if (!preloadRoomAssets()) prefetchHdri(url);
+}
+
 function prefetchHdri(url: string): void {
   if (warmed.has(url) || typeof window === "undefined") return;
-  const connection = (
-    navigator as Navigator & { connection?: { saveData?: boolean } }
-  ).connection;
-  if (connection?.saveData === true) return;
+  if (networkInformation()?.saveData === true) return;
   warmed.add(url);
   fetch(url, { cache: "force-cache" })
     .then((response) => response.arrayBuffer())
@@ -200,8 +274,8 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
               type="button"
               aria-pressed={selected}
               onClick={() => choose(id)}
-              onPointerEnter={() => prefetchHdri(room.hdri)}
-              onFocus={() => prefetchHdri(room.hdri)}
+              onPointerEnter={() => warmRoom(room.hdri)}
+              onFocus={() => warmRoom(room.hdri)}
               className={cn(
                 "grid gap-2 rounded-lg border p-2 text-left transition-colors",
                 "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -219,8 +293,8 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
           type="button"
           aria-pressed={roomPreset === "custom"}
           onClick={() => choose("custom")}
-          onPointerEnter={() => prefetchHdri(customRoom.hdri)}
-          onFocus={() => prefetchHdri(customRoom.hdri)}
+          onPointerEnter={() => warmRoom(customRoom.hdri)}
+          onFocus={() => warmRoom(customRoom.hdri)}
           className={cn(
             "grid gap-2 rounded-lg border p-2 text-left transition-colors",
             "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",

@@ -19,9 +19,15 @@ import {
   toHistoryRows,
 } from "@/lib/chess";
 import { CAMERA_FLIP_MS, DEFAULT_FEN } from "@/lib/constants";
+// One map for every Convex error code, shared with the toast layer (§S1).
+import { describeGameError, errorCopyFor } from "@/lib/errors";
 import { seatPresetFor } from "@/lib/camera";
 import { pgnFilename, pgnResult } from "@/lib/format";
-import { PieceTracker } from "@/lib/piece-tracker";
+import {
+  EMPTY_PIECE_TRACKER_STATE,
+  derivePieces,
+  type PieceTrackerState,
+} from "@/lib/piece-tracker";
 import { useUiStore } from "@/lib/stores/ui-store";
 import type {
   BoardPiece,
@@ -50,36 +56,6 @@ import { api } from "../../convex/_generated/api";
 const NO_MOVES: string[] = [];
 const NO_TARGETS: LegalTarget[] = [];
 const EMPTY_CAPTURES: CapturedPieces = { w: [], b: [] };
-
-/** Machine codes thrown by the Convex mutations mapped to user copy. */
-const ERROR_COPY: Record<string, string> = {
-  "illegal-move": "That move is not legal.",
-  "not-your-turn": "It is not your turn.",
-  "not-a-participant": "You are not playing in this game.",
-  "promotion-required": "Choose a promotion piece first.",
-  "game-not-active": "This game has already finished.",
-  "game-not-found": "That game no longer exists.",
-  "undo-not-allowed": "Take-backs are disabled in online matches.",
-  "invalid-ply": "That position is no longer part of this game.",
-  "stale-ai-move": "The position moved on — nothing was applied.",
-  "not-ai-turn": "It is not the AI's turn.",
-  "not-an-ai-game": "This is not a game against the AI.",
-  "no-draw-offer": "There is no draw offer to answer.",
-  "cannot-answer-own-offer": "You cannot answer your own draw offer.",
-  "draw-not-available": "Draws can only be agreed against another player.",
-  "hint-limit": "No hints left in this game.",
-  "hints-unavailable": "Hints are only available at Beginner and Casual.",
-  "Not authenticated": "Please sign in again.",
-  "Player not provisioned": "Your player profile is still being created.",
-};
-
-function messageFor(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  for (const [code, copy] of Object.entries(ERROR_COPY)) {
-    if (raw.includes(code)) return copy;
-  }
-  return "Something went wrong. Please try again.";
-}
 
 /** `games.lastMove` is stored with widened string fields; narrow it for the boards. */
 function toLastMove(stored: GameView["game"]["lastMove"]): LastMove | null {
@@ -202,16 +178,24 @@ export function useGameController(
   const renderedPly = reviewPly ?? totalPlies;
   const lastMove = useMemo(() => moveEndingAt(renderedPly), [moveEndingAt, renderedPly]);
 
-  // One tracker per mounted game. It lives in state (not a ref) so it can be read
-  // during render without tripping `react-hooks/refs`; `sync` is idempotent.
+  // One tracker state per mounted game, threaded through `useState` rather than a
+  // mutable tracker instance: `derivePieces` is a PURE transition, so calling it in the
+  // render body is legal under the React Compiler (`react-hooks/purity`), and a discarded
+  // or replayed render can never advance the ids behind React's back (review GF-5).
+  // The state is adjusted during render — the documented "derive state from props"
+  // escape hatch — because the ids must be correct in the SAME commit that shows the new
+  // FEN, and `derivePieces` reaches a fixed point after one step (re-deriving a state's
+  // own fen/ply returns it by reference), so this settles in exactly one extra render.
   // It is given the rendered PLY, not just `lastMove`: stepping backwards through the
   // history is the transition P_k -> P_{k-1}, which `lastMove` does not describe, and
   // feeding it that move popped the piece instead of sliding it (FR-17, FR-54).
-  const [tracker] = useState(() => new PieceTracker());
-  const position: BoardPiece[] = useMemo(
-    () => tracker.sync(fen, renderedPly, moveEndingAt),
-    [tracker, fen, renderedPly, moveEndingAt],
+  const [trackerState, setTrackerState] = useState<PieceTrackerState>(EMPTY_PIECE_TRACKER_STATE);
+  const derived = useMemo(
+    () => derivePieces(trackerState, fen, renderedPly, moveEndingAt),
+    [trackerState, fen, renderedPly, moveEndingAt],
   );
+  if (derived !== trackerState) setTrackerState(derived);
+  const position: BoardPiece[] = derived.pieces;
 
   const turn: Colour = useMemo(() => {
     if (reviewPly === null) return game?.turn ?? "w";
@@ -307,7 +291,7 @@ export function useGameController(
       await fn();
       return true;
     } catch (caught) {
-      const message = messageFor(caught);
+      const message = describeGameError(caught);
       setError(message);
       setSelectedSquare(null);
       toast.error(message);
@@ -418,10 +402,11 @@ export function useGameController(
       if (ok) {
         goToPly(null);
         setSelectedSquare(null);
-        tracker.reset(); // §E.5.7: the position jumps, ids are re-derived.
+        // §E.5.7: the position jumps, ids are re-derived from scratch.
+        setTrackerState(EMPTY_PIECE_TRACKER_STATE);
       }
     },
-    [canUndo, mode, totalPlies, run, undoMove, gameId, goToPly, tracker],
+    [canUndo, mode, totalPlies, run, undoMove, gameId, goToPly],
   );
 
   const resign = useCallback(async () => {
@@ -545,7 +530,7 @@ export function useGameController(
 
   return {
     ready: loaded && view !== null,
-    error: loaded && view === null ? ERROR_COPY["game-not-found"] : error,
+    error: loaded && view === null ? errorCopyFor("game-not-found", "game") : error,
     view,
     role,
     board,

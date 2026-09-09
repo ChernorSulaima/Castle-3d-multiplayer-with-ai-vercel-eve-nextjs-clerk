@@ -1,14 +1,18 @@
 // src/lib/engine/parse-uci.ts
 //
-// UCI output parser for stockfish@11.0.0 (see docs/research/stockfish.md §5 and §11.2).
+// UCI output parser shared by BOTH shipped builds — stockfish@18.0.8 lite-single (the
+// default) and stockfish@11.0.0 (the no-SIMD fallback). See docs/research/stockfish.md
+// §5 (SF18) and §11.2 (SF11).
 // Every line the worker emits is a plain string. Only two line shapes matter:
 //
 //   info depth 13 seldepth 23 multipv 1 score cp -22 nodes 560401 nps 890939 time 629 pv e7e6 d2d4 ...
 //   bestmove e7e5 ponder g1f3          (or `bestmove (none)` in a mated/stalemated position)
 //
-// Deliberately a token walk rather than the regex sketched in the research doc:
-// SF11 omits `hashfull` and sometimes `seldepth`/`nps`, and a strict regex silently
-// drops those lines. Scores are ALWAYS from the side-to-move's point of view.
+// Deliberately a token walk rather than the regex sketched in the research doc: SF11
+// omits `hashfull` and sometimes `seldepth`/`nps` and appends a `bmc <float>` token after
+// the pv, while SF18 emits `hashfull` and no `bmc`. A strict regex silently drops one
+// build's lines or the other's. Scores are ALWAYS from the side-to-move's point of view.
+// Verified 2026-09-09 by parsing live `go depth 6` MultiPV-3 output from both engines.
 
 /** One `info ... multipv N ... pv ...` line, normalised. */
 export interface PvLine {

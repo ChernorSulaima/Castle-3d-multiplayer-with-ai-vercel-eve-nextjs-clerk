@@ -19,7 +19,8 @@ export default function GameError({
     <div className="mx-auto flex w-full max-w-lg flex-col items-start gap-3 p-6">
       <h1 className="text-xl font-semibold">This game could not be loaded</h1>
       <p className="text-sm text-muted-foreground">
-        The connection to the game may have dropped, or you may not have access to it.
+        The live connection to this game dropped, or it is not a game you can open. The position
+        itself is safe on the server — trying again usually brings it straight back.
       </p>
       <div className="flex gap-2">
         <Button onClick={reset}>Try again</Button>

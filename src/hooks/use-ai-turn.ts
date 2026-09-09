@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
+import { convexErrorCode } from "@/lib/errors";
 import { postAiMove } from "@/lib/engine/ai-client";
 import {
   candidatesFromLegalMoves,
@@ -27,6 +28,7 @@ import {
   selectCandidate,
   uciToSan,
 } from "@/lib/engine/candidates";
+import { fallbackEngineMove, fallbackSearchBudgetMs } from "@/lib/engine/fallback-move";
 import { useStockfish } from "@/lib/engine/use-stockfish";
 import type { SearchRequest, SearchResult } from "@/lib/engine/stockfish-client";
 import { AI_ROUTE_TIMEOUT_MS, STOCKFISH_CANDIDATE_SKILL_LEVEL } from "@/lib/constants";
@@ -298,7 +300,28 @@ async function runAiTurn(input: RunAiTurnInput): Promise<void> {
 
   // 3. Local re-validation (the route validates too — this is the second gate).
   if (move === null) {
-    const picked = selectCandidate(difficulty, candidates);
+    // The agent did not answer, so Stockfish plays the move itself. THIS is the one
+    // search that uses the difficulty's Skill Level (PRD §3.8 / review AI-10):
+    // candidate generation stays at Skill Level 20 so its ranking is honest, but a
+    // raw engine move must be weakened by the engine (§E.4 step 4). If the engine is
+    // unavailable too, fall through to the JS policy over the existing candidates.
+    //
+    // It gets what is LEFT of the turn budget, not a second full `searchTimeoutMs`,
+    // and at Skill Level 20 it is skipped entirely — `fallbackSearchBudgetMs` explains
+    // both, and `selectCandidate` already returns rank 1 there.
+    const budgetMs = fallbackSearchBudgetMs(difficulty, AI_ROUTE_TIMEOUT_MS - (Date.now() - startedAt));
+    const engineMove =
+      budgetMs === null
+        ? null
+        : await fallbackEngineMove({
+            fen: game.fen,
+            difficulty,
+            search: input.search,
+            signal,
+            timeoutMs: budgetMs,
+          });
+    if (signal.aborted) return;
+    const picked = engineMove ?? selectCandidate(difficulty, candidates);
     if (picked === null) {
       store.setError("no-legal-moves");
       return;
@@ -359,11 +382,11 @@ function aiTurnKey(game: Doc<"games"> | null): string | null {
 
 function errorCode(error: unknown): string {
   if (error instanceof Error) {
-    // Convex surfaces `throw new Error("illegal-move")` with framing around it.
-    const match = /\b(stale-ai-move|not-ai-turn|game-not-active|not-a-participant|illegal-move|not-an-ai-game|game-not-found)\b/.exec(
-      error.message,
-    );
-    return match?.[1] ?? error.message.slice(0, 120);
+    // Convex surfaces `throw new Error("illegal-move")` with framing around it, so the
+    // shared matcher (`@/lib/errors`, §S1) digs the code out of the transport noise.
+    // Client-side codes it does not know — `no-legal-moves`, `ai-route-timeout` — are
+    // already bare messages, so the slice passes them straight through.
+    return convexErrorCode(error) ?? error.message.slice(0, 120);
   }
   return "ai-turn-failed";
 }

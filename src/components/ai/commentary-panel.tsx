@@ -19,8 +19,10 @@ import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ENGINE_BUILD_LABEL, type EngineBuild } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { useAiStore } from "@/lib/stores/ai-store";
+import { useUiStore } from "@/lib/stores/ui-store";
 import type { Difficulty, GameId } from "@/lib/types";
 import { cn } from "cn";
 import { AiThinkingIndicator } from "./ai-thinking-indicator";
@@ -47,6 +49,7 @@ export function CommentaryPanel({
   const lastSource = useAiStore((s) => s.lastSource);
   const lastLatencyMs = useAiStore((s) => s.lastLatencyMs);
   const error = useAiStore((s) => s.error);
+  const engineBuild = useUiStore((s) => s.engineBuild);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const count = rows?.length ?? 0;
@@ -76,13 +79,19 @@ export function CommentaryPanel({
           <Badge
             variant={lastSource === "eve" ? "outline" : "ghost"}
             title={
-              lastSource === "eve"
+              (lastSource === "eve"
                 ? `Move chosen by the agent${latencyLabel(lastLatencyMs)}`
-                : `Agent unavailable — engine move played${latencyLabel(lastLatencyMs)}`
+                : `Agent unavailable — engine move played${latencyLabel(lastLatencyMs)}`) +
+              buildTitle(engineBuild)
             }
             className="ml-auto font-mono text-[10px] uppercase"
           >
             {lastSource}
+            {engineBuild !== null ? (
+              // Which Stockfish binary produced the candidates: sf18 by default,
+              // sf11 on a browser without WASM SIMD (§I-1).
+              <span className="ml-1 opacity-60">{ENGINE_BUILD_LABEL[engineBuild]}</span>
+            ) : null}
           </Badge>
         ) : null}
       </header>
@@ -141,6 +150,13 @@ function plyLabel(ply: number): string {
 
 function latencyLabel(ms: number | null): string {
   return ms === null ? "" : ` in ${(ms / 1000).toFixed(1)}s`;
+}
+
+function buildTitle(build: EngineBuild | null): string {
+  if (build === null) return "";
+  return build === "sf18"
+    ? " · candidates from Stockfish 18 (lite-single)"
+    : " · candidates from Stockfish 11 (compatibility engine, no WASM SIMD)";
 }
 
 function friendlyError(code: string): string {

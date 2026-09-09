@@ -1,10 +1,12 @@
 // @vitest-environment node
 // src/lib/engine/__tests__/engine.test.ts
 //
-// Every `info` line below is VERBATIM output from the engine this app ships
-// (stockfish@11.0.0 via node_modules/stockfish/src/stockfish.js, captured on
-// Node 24.14.1). Note the trailing `bmc <float>` token, which is specific to the
-// ddugovic/chess.com fork and is not mentioned in docs/research/stockfish.md §5.
+// Every `info` line below is VERBATIM output from an engine this app ships
+// (stockfish@11.0.0 — now the no-SIMD fallback — via node_modules/stockfish11/src/stockfish.js,
+// captured on Node 24.14.1). Note the trailing `bmc <float>` token, which is specific to the
+// ddugovic/chess.com fork and is not mentioned in docs/research/stockfish.md §5. The default
+// build (stockfish@18.0.8 lite-single) emits `hashfull` and no `bmc`; both shapes were driven
+// through this parser live on 2026-09-09 (see §I-1).
 import { describe, expect, it } from "vitest";
 import {
   PvCollector,
@@ -22,6 +24,9 @@ import {
   uciToSan,
 } from "../candidates";
 import { asAiStreamFrame, encodeFrame, readNdjson } from "../ai-stream";
+import { FALLBACK_MIN_BUDGET_MS, fallbackEngineMove, fallbackSearchBudgetMs } from "../fallback-move";
+import type { SearchRequest, SearchResult } from "../stockfish-client";
+import { DIFFICULTIES } from "../../difficulty";
 import type { AiMoveResult, Candidate } from "@/lib/types";
 
 const START_BLACK = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
@@ -211,6 +216,132 @@ describe("selectCandidate", () => {
 
   it("returns null for an empty list", () => {
     expect(selectCandidate("casual", [], seeded([0.5]))).toBeNull();
+  });
+});
+
+describe("fallbackEngineMove (review AI-10)", () => {
+  const emptyResult: SearchResult = {
+    bestmove: "c7c5",
+    ponder: null,
+    lines: [],
+    elapsedMs: 12,
+    stopped: false,
+  };
+
+  it("searches at the difficulty's Skill Level and depth, MultiPV 1", async () => {
+    const seen: SearchRequest[] = [];
+    for (const difficulty of ["beginner", "casual", "intermediate", "advanced", "grandmaster"] as const) {
+      const move = await fallbackEngineMove({
+        fen: START_BLACK,
+        difficulty,
+        search: (request) => {
+          seen.push(request);
+          return Promise.resolve(emptyResult);
+        },
+      });
+      expect(move?.san).toBe("c5");
+    }
+    expect(seen.map((r) => r.skillLevel)).toEqual([1, 5, 10, 15, 20]);
+    expect(seen.map((r) => r.depth)).toEqual([2, 6, 10, 14, 18]);
+    expect(seen.every((r) => r.multiPv === 1)).toBe(true);
+    expect(seen.map((r) => r.timeoutMs)).toEqual(
+      (["beginner", "casual", "intermediate", "advanced", "grandmaster"] as const).map(
+        (d) => DIFFICULTIES[d].searchTimeoutMs,
+      ),
+    );
+  });
+
+  it("attaches the eval only when `bestmove` really is the head of a reported line", async () => {
+    // Skill Level < 20 makes Stockfish play a randomised move that is usually NOT
+    // `multipv 1` (stockfish.md §6), so the score must not be misattributed.
+    const withLine = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "grandmaster",
+      search: () =>
+        Promise.resolve({
+          ...emptyResult,
+          lines: [{ multipv: 1, depth: 18, seldepth: 24, scoreCp: -18, mateIn: null, pv: ["c7c5", "g1f3"] }],
+        }),
+    });
+    expect(withLine).toMatchObject({ san: "c5", scoreCp: -18, depth: 18, pv: ["c7c5", "g1f3"] });
+
+    const mismatched = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "beginner",
+      search: () =>
+        Promise.resolve({
+          ...emptyResult,
+          bestmove: "a7a6", // the weakened pick
+          lines: [{ multipv: 1, depth: 2, seldepth: 4, scoreCp: -18, mateIn: null, pv: ["c7c5"] }],
+        }),
+    });
+    expect(mismatched).toMatchObject({ san: "a6", scoreCp: null, mateIn: null });
+  });
+
+  it("returns null (never throws) when the engine is unavailable, mated or illegal", async () => {
+    const dead = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "casual",
+      search: () => Promise.reject(new Error("engine-unavailable")),
+    });
+    expect(dead).toBeNull();
+
+    const none = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "casual",
+      search: () => Promise.resolve({ ...emptyResult, bestmove: null }),
+    });
+    expect(none).toBeNull();
+
+    const illegal = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "casual",
+      search: () => Promise.resolve({ ...emptyResult, bestmove: "e2e4" }), // white's move
+    });
+    expect(illegal).toBeNull();
+  });
+
+  it("skips the search at Skill Level 20 and caps it with the turn's remaining budget", () => {
+    // Grandmaster ran the identical search in step 1 (depth 18, Skill Level 20), so a
+    // second one returns the move `candidates[0]` already is — several seconds for
+    // nothing on a path that has already blown FR-38.
+    expect(fallbackSearchBudgetMs("grandmaster", 60_000)).toBeNull();
+    // Below 20 the engine's own weakening is the point, but only inside what is left.
+    expect(fallbackSearchBudgetMs("advanced", 60_000)).toBe(DIFFICULTIES.advanced.searchTimeoutMs);
+    expect(fallbackSearchBudgetMs("advanced", 900)).toBe(900);
+    // A spent budget (the agent route burned AI_ROUTE_TIMEOUT_MS) means no search.
+    expect(fallbackSearchBudgetMs("advanced", FALLBACK_MIN_BUDGET_MS - 1)).toBeNull();
+    expect(fallbackSearchBudgetMs("beginner", 0)).toBeNull();
+    expect(fallbackSearchBudgetMs("casual", -5_000)).toBeNull();
+    expect(fallbackSearchBudgetMs("casual", Number.NaN)).toBeNull();
+  });
+
+  it("searches inside the caller's budget when one is passed", async () => {
+    const seen: SearchRequest[] = [];
+    await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "advanced", // searchTimeoutMs 2400
+      timeoutMs: 700,
+      search: (request) => {
+        seen.push(request);
+        return Promise.resolve(emptyResult);
+      },
+    });
+    expect(seen[0].timeoutMs).toBe(700);
+  });
+
+  it("gives up on an aborted turn", async () => {
+    const controller = new AbortController();
+    const move = await fallbackEngineMove({
+      fen: START_BLACK,
+      difficulty: "advanced",
+      signal: controller.signal,
+      search: () => {
+        controller.abort();
+        return Promise.resolve(emptyResult);
+      },
+    });
+    expect(move).toBeNull();
   });
 });
 

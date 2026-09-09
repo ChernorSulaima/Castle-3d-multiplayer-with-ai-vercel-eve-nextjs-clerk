@@ -295,6 +295,40 @@ describe("draw offers", () => {
     expect((await readPlayer(t, alice.id)).draws).toBe(1);
   });
 
+  test("an unrated online game still counts the draw for both sides (FR-48)", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    const bob = await signUp(t, "bob");
+    // `undo` is rejected outright for online games (FR-46), so this can only be
+    // reached defensively — but the rule is the same in every mode: `rated: false`
+    // suppresses the Elo, never the W/L/D record.
+    const gameId = await seedGame(t, {
+      mode: "online",
+      whiteId: alice.id,
+      blackId: bob.id,
+      sans: ["e4", "e5"],
+      rated: false,
+    });
+
+    await as(t, alice).mutation(api.games.offerDraw, { gameId });
+    await as(t, bob).mutation(api.games.respondDraw, { gameId, accept: true });
+
+    for (const player of [alice, bob]) {
+      const row = await readPlayer(t, player.id);
+      expect(row.draws).toBe(1);
+      expect(row.ratingHuman).toBe(1200);
+      expect(row.rating).toBe(1200);
+    }
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("ratingHistory")
+          .withIndex("by_gameId", (q) => q.eq("gameId", gameId))
+          .take(5),
+      ),
+    ).toHaveLength(0);
+  });
+
   test("declining clears the offer and leaves the game running", async () => {
     const t = makeTest();
     const alice = await signUp(t, "alice");
@@ -662,8 +696,9 @@ describe("games.undo", () => {
     await as(t, alice).mutation(api.games.undo, { gameId, toPly: 4 });
     expect((await readGame(t, gameId)).rated).toBe(false);
 
-    // Replay to mate through the real paths: the game is unrated now, so the win
-    // moves no Elo and is not counted in the W/L/D record.
+    // Replay to mate through the real paths. FR-45/FR-48/FR-49: the take-back
+    // unrates the game, not the result — no Elo moves and no sparkline point is
+    // written, but it is still a win on the record ("Won with 2 take-backs").
     await as(t, alice).mutation(api.games.makeMove, { gameId, from: "f1", to: "c4" });
     await as(t, alice).mutation(api.games.makeAiMove, {
       gameId,
@@ -674,7 +709,51 @@ describe("games.undo", () => {
     expect((await readGame(t, gameId)).status).toBe("checkmate");
     const player = await readPlayer(t, alice.id);
     expect(player.ratingAi).toBe(1200);
+    expect(player.ratingHuman).toBe(1200);
+    expect(player.rating).toBe(1200);
+    expect(player.wins).toBe(1);
+    expect(player.losses).toBe(0);
+    expect(player.draws).toBe(0);
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("ratingHistory")
+          .withIndex("by_gameId", (q) => q.eq("gameId", gameId))
+          .take(5),
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("a take-back'd loss still counts on the record (FR-45/FR-48)", async () => {
+    const t = makeTest();
+    const alice = await signUp(t, "alice");
+    // Fool's mate: the human plays white and gets mated by the AI on ply 4.
+    const gameId = await seedGame(t, {
+      mode: "ai",
+      whiteId: alice.id,
+      blackId: null,
+      aiColor: "b",
+      difficulty: "casual",
+      sans: ["f3", "e5", "g4"],
+    });
+    await as(t, alice).mutation(api.games.undo, { gameId, toPly: 2 });
+    expect((await readGame(t, gameId)).rated).toBe(false);
+
+    await as(t, alice).mutation(api.games.makeMove, { gameId, from: "g2", to: "g4" });
+    await as(t, alice).mutation(api.games.makeAiMove, {
+      gameId,
+      san: "Qh4#",
+      expectedPly: 3,
+    });
+
+    const game = await readGame(t, gameId);
+    expect(game.status).toBe("checkmate");
+    expect(game.winner).toBe("b");
+    const player = await readPlayer(t, alice.id);
+    expect(player.losses).toBe(1);
     expect(player.wins).toBe(0);
+    expect(player.ratingAi).toBe(1200);
+    expect(player.rating).toBe(1200);
   });
 
   test("rejects an out-of-range ply", async () => {

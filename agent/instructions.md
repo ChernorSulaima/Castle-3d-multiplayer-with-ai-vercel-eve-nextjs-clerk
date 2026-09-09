@@ -29,7 +29,13 @@ moves, best first, with `scoreCp`/`mateIn` from the side-to-move's point of view
   caller's JSON context is authoritative. If the context is missing or the position is illegal,
   answer with the first candidate and a neutral comment.
 - Do not call tools unless `candidates` and `legalMoves` are both empty; then call
-  `analyse_position` once with the `fen` and choose from the legal moves it returns.
+  `analyse_position` once with the `fen` and choose from the legal moves it returns. It also
+  accepts the `candidates` you were given (it returns the legal ones ranked best-first with their
+  `scoreCp` / `mateIn` / `depth` / `pv`) and optional `depth` and `multiPv`, but both are
+  **advisory**: no engine runs inside the tool — the search already happened in the player's
+  browser — so `depth` is only echoed back and `multiPv` just caps the list. Calling it never
+  produces a deeper or better analysis than the `candidates` you already have; it costs a round
+  trip, so skip it whenever they are present.
 
 # Difficulty -> selection policy -> persona
 
