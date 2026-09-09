@@ -1,6 +1,4 @@
-import Link from "next/link";
-import { Show } from "@clerk/nextjs";
-import { buttonVariants } from "@/components/ui/button";
+import { HeroActions } from "@/components/nav/auth-nav";
 import { ROOM_ORDER, ROOMS } from "@/lib/rooms";
 import { DIFFICULTIES, DIFFICULTY_ORDER } from "@/lib/difficulty";
 
@@ -35,32 +33,7 @@ export function Hero() {
         </p>
 
         <div className="mt-7 flex flex-wrap items-center gap-3">
-          <Show
-            when="signed-in"
-            fallback={
-              <>
-                <Link href="/sign-up" className={buttonVariants({ size: "lg" })}>
-                  Create an account
-                </Link>
-                <Link
-                  href="/sign-in"
-                  className={buttonVariants({ variant: "outline", size: "lg" })}
-                >
-                  Sign in
-                </Link>
-              </>
-            }
-          >
-            <Link href="/play" className={buttonVariants({ size: "lg" })}>
-              Play now
-            </Link>
-            <Link
-              href="/leaderboard"
-              className={buttonVariants({ variant: "outline", size: "lg" })}
-            >
-              Leaderboard
-            </Link>
-          </Show>
+          <HeroActions />
         </div>
       </div>
 

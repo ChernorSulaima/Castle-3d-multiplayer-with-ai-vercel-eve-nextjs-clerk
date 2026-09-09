@@ -144,8 +144,12 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     id: "space",
     label: "Space",
     description: "A board adrift under the Milky Way.",
-    hdri: "/hdri/space.hdr", // polyhaven `qwantani_night_puresky`, CC0
-    background: "hdri",
+    hdri: "/hdri/space.hdr", // polyhaven `qwantani_night_puresky`, CC0 — IBL only
+    // The 1k night HDRI has a grey horizon glow that reads as overcast from the seat
+    // camera, so the skybox is a near-black colour and the `extras.stars` layer supplies
+    // the starfield; the HDRI still lights and reflects in the pieces (FR-21i "Space").
+    background: "colour",
+    backgroundColor: "#04060d",
     lights: {
       key: { position: [-5, 9, -3], intensity: 1.6, color: "#bcd4ff" },
       ambientIntensity: 0.08,

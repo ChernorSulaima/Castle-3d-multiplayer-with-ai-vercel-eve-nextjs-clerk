@@ -1,15 +1,9 @@
 import Link from "next/link";
-import { Show, UserButton } from "@clerk/nextjs";
-import { NavLinks, NAV_LINKS, PUBLIC_NAV_LINKS } from "@/components/nav/nav-links";
-import { buttonVariants } from "@/components/ui/button";
+import { AuthActions, AuthNavLinks } from "@/components/nav/auth-nav";
 
 /**
- * Server component so it can use `<Show>` — in Core 3 `<SignedIn>`/`<SignedOut>`/
- * `<Protect>` throw at render, and `@clerk/nextjs` only re-exports the *server*
- * `<Show>`. The interactive parts (active-route links) are client children.
- *
- * Links are plain `<Link>`s styled with `buttonVariants(...)`, never
- * `<Button render={<a/>}/>` — Base UI's own guidance for anchor-shaped buttons.
+ * Server component shell; everything auth-dependent lives in the client
+ * `AuthNavLinks` / `AuthActions` (see auth-nav.tsx for why no `auth()` runs here).
  */
 export function SiteHeader() {
   return (
@@ -26,23 +20,11 @@ export function SiteHeader() {
         </Link>
 
         <div className="min-w-0 flex-1">
-          <Show when="signed-in" fallback={<NavLinks links={PUBLIC_NAV_LINKS} />}>
-            <NavLinks links={NAV_LINKS} />
-          </Show>
+          <AuthNavLinks />
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <Show when="signed-out">
-            <Link href="/sign-in" className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              Sign in
-            </Link>
-            <Link href="/sign-up" className={buttonVariants({ size: "sm" })}>
-              Sign up
-            </Link>
-          </Show>
-          <Show when="signed-in">
-            <UserButton />
-          </Show>
+          <AuthActions />
         </div>
       </div>
     </header>
