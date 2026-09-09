@@ -488,3 +488,427 @@ convex/matchmaking.ts + convex/crons.ts   internalMutation + crons.interval (4.6
 5. Whether `auth.protect()` in a route-group **layout** is sufficient for Next 16 cache components / PPR (Clerk docs show page-level examples; layouts render once per navigation). Page-level `auth.protect()` (or per Server Function) is the safest per Clerk's migration guide.
 6. Clerk Core 3 `ClerkProvider` "inside `<body>`" recommendation was read from the changelog summary, not the raw page; the placement above follows both quickstarts anyway.
 7. Convex free-tier limits (function timeouts, memory) were not pulled; the runtimes page fetched did not list them.
+
+---
+
+## 4.8 Concurrency, matchmaking atomicity and scheduled loops
+
+Covers FR-22..FR-26 (§3.5 Matchmaking) and FR-32 (§3.6 disconnect forfeit). Verified against
+`node_modules/convex@1.45.0` (`src/server/*.ts`, `dist/esm-types/server/*.d.ts`, `CHANGELOG.md`,
+`dist/esm/cli/insights.js`) and docs.convex.dev (`/database/advanced/occ`, `/error`,
+`/scheduling/scheduled-functions`, `/scheduling/cron-jobs`, `/production/state/limits`) plus
+stack.convex.dev/how-convex-works via Context7.
+
+### 4.8.1 The transaction model: serializable OCC with automatic server-side retries
+
+| Fact | Value | Source |
+|---|---|---|
+| Isolation level | **True serializability** — not snapshot isolation. Docs explicitly say Convex "provides true serializability and will yield correct results regardless of what transactions are issued concurrently". | docs `/database/advanced/occ` |
+| Mechanism | Each transaction records a **read set** = the exact documents and **index ranges scanned**. At commit Convex checks whether any write landed in that read set between start and commit ts. Overlap ⇒ abort + re-run. | stack.convex.dev/how-convex-works (via Context7) |
+| Auto-retry | **Yes.** Mutations are deterministic and side-effect free, so Convex "can run several retries if necessary until we succeed". | docs `/database/advanced/occ` |
+| Retry count | **Not documented.** Docs only say "Convex internally does several retries to mitigate this concern." Treat the number as unspecified. | docs `/error` |
+| Failure surface | After retries are exhausted the mutation throws and the **client's `await mutation(...)` promise rejects** with a message of the form:<br>`Documents read from or written to the table "queue" changed while this mutation was being run and on every subsequent retry.`<br>The message names the table, the conflicting mutation, and one conflicting document id. | docs `/error` |
+| Observability | `npx convex insights` (`--details`, `--json`, `--prod`) reports insight kinds `occRetried` / `occFailedPermanently`, with `occCalls`, `occTableName`, and per-event `occ_retry_count`, `occ_document_id`, `occ_write_source`. Covers the last 72 hours; cloud deployments only. | pkg `dist/esm/cli/insights.js` |
+| Atomicity | All writes in a mutation "will only apply together" — write your mutation as if it always succeeds and is atomic. | docs `/database/advanced/occ` |
+
+**What `useMutation` does on retry: nothing.** The retry is entirely server-side and invisible to the
+client. `useMutation` (pkg `dist/esm-types/react/client.d.ts` L472) returns a `ReactMutation` whose
+call returns `Promise<FunctionReturnType<Mutation>>`; the promise resolves once with the final result
+or rejects with the write-conflict error. There is no client-side OCC retry loop in
+`src/browser/sync/*` (the only retry logic there is WebSocket reconnect backoff and auth-token
+re-confirmation). **Consequence: any user-facing mutation that can lose an OCC race must either be
+low-contention or be wrapped in your own try/catch + user-visible retry.**
+
+**Version note (1.42.0+, so present in 1.45.0):** `ctx.runQuery(..., { useStaleSnapshot: true })` — an
+advanced `AdvancedRunQueryOptions` flag that reads a recent-but-possibly-stale snapshot to dodge OCC
+conflicts (pkg `dist/esm-types/server/registration.d.ts` L890-903). It is **mutations-only**
+(`registration_impl.ts` L342-344 throws `"useStaleSnapshot is only supported in mutations, not
+queries."`). The doc comment says its "use is generally discouraged except for specific use-cases
+where database read conflicts are expected, e.g. reading from an append-only table with immutable
+records". **Do not use it for matchmaking** — the queue is not append-only and a stale read would
+let you pair an already-paired player.
+
+### 4.8.2 Is a single "read two oldest, delete both, insert game" mutation safe?
+
+**Correctness: yes. Throughput/UX: no — do not run it from every client.**
+
+Because Convex is serializable and the read set includes the scanned index range on `queue`, two
+concurrent `findMatch` calls that both scan the same range **cannot both commit**. The loser aborts
+and is re-run from scratch, at which point it re-reads the queue and sees the rows the winner
+deleted. So double-pairing is impossible. What you get instead is contention: every client-issued
+pairing mutation reads a range that every other client's enqueue/pair mutation writes to, so under
+even light concurrency you get `occRetried`, and once retries are exhausted the user's "Find match"
+button rejects with a write-conflict error. The documented remediation is exactly this: "design data
+models to minimize frequent writes to the same document" and "ensure mutations only read necessary
+data" (docs `/error`).
+
+**Recommended pattern: split enqueue (per-client, narrow read set) from pairing (single writer).**
+
+- `enqueue` — public mutation, called by the player. Reads **only that user's own rows** via an
+  equality index range, so its read set does not overlap other players' rows.
+- `pairTick` — `internalMutation`, the **only** function that reads the whole queue and creates
+  games. Run it from a driver that guarantees one-at-a-time execution (§4.8.4).
+
+Scheduled mutations additionally get a stronger guarantee than client mutations — from the installed
+`Scheduler` docstring (pkg `dist/esm-types/server/scheduler.d.ts`):
+
+> **Scheduled mutations** are guaranteed to execute **exactly once**. They are automatically retried
+> on transient errors. **Scheduled actions** execute **at most once**. They are not retried and may
+> fail due to transient errors.
+
+So an OCC abort inside `pairTick` is retried by the platform and never reaches a user.
+
+```ts
+// convex/schema.ts (fragment)
+queue: defineTable({
+  userId: v.id("users"),
+  rating: v.number(),
+  joinedAt: v.number(),          // Date.now() at enqueue; used for window widening (FR-23)
+})
+  .index("by_user", ["userId"])
+  .index("by_joinedAt", ["joinedAt"]),
+```
+
+```ts
+// convex/matchmaking.ts
+import { v } from "convex/values";
+import { mutation, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+
+// FR-22 / FR-26: join the queue. Narrow read set = only this user's rows.
+export const enqueue = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity === null) throw new Error("Not signed in");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (user === null) throw new Error("No user row");
+
+    // FR-26: cannot queue while in an active game.
+    const active = await ctx.db
+      .query("games")
+      .withIndex("by_player_status", (q) =>
+        q.eq("playerIds", user._id).eq("status", "active"),
+      )
+      .first();
+    if (active !== null) throw new Error("Already in a game");
+
+    const existing = await ctx.db
+      .query("queue")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .unique();
+    if (existing !== null) return null;                 // idempotent re-click
+
+    await ctx.db.insert("queue", {
+      userId: user._id,
+      rating: user.rating,
+      joinedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+// FR-25: cancel. Also narrow.
+export const dequeue = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => { /* find own row by_user, ctx.db.delete("queue", row._id) */ return null; },
+});
+
+// FR-23 / FR-24: the ONLY writer that pairs. internalMutation => not callable from a client.
+export const pairTick = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const now = Date.now();
+    // Bounded scan: never .collect() an unbounded table (see limits in 4.8.6).
+    const waiting = await ctx.db
+      .query("queue")
+      .withIndex("by_joinedAt")
+      .order("asc")
+      .take(100);
+
+    const paired = new Set<string>();
+    for (let i = 0; i < waiting.length; i++) {
+      const a = waiting[i];
+      if (paired.has(a._id)) continue;
+      // FR-23: ±200 widening by 100 every 10s, derived from joinedAt — no per-player timer needed.
+      const windowA = 200 + 100 * Math.floor((now - a.joinedAt) / 10_000);
+      for (let j = i + 1; j < waiting.length; j++) {
+        const b = waiting[j];
+        if (paired.has(b._id)) continue;
+        const windowB = 200 + 100 * Math.floor((now - b.joinedAt) / 10_000);
+        // Symmetric test: both players must accept the other's rating.
+        const diff = Math.abs(a.rating - b.rating);
+        if (diff > Math.max(windowA, windowB)) continue;
+
+        // Re-read before writing: makes a duplicate run of this tick a no-op (idempotency, 4.8.5).
+        const [freshA, freshB] = await Promise.all([
+          ctx.db.get("queue", a._id),
+          ctx.db.get("queue", b._id),
+        ]);
+        if (freshA === null || freshB === null) continue;
+
+        const whiteFirst = Math.random() < 0.5;          // FR-23: random colours
+        await ctx.db.insert("games", {
+          whiteId: whiteFirst ? a.userId : b.userId,
+          blackId: whiteFirst ? b.userId : a.userId,
+          status: "active",
+          // ...fen, moves, lastHeartbeat, etc.
+        });
+        await ctx.db.delete("queue", freshA._id);
+        await ctx.db.delete("queue", freshB._id);
+        paired.add(a._id);
+        paired.add(b._id);
+        break;
+      }
+    }
+    return null;
+  },
+});
+```
+
+FR-24 ("both clients redirected to `/game/[id]` via subscription") needs no extra machinery: the
+clients subscribe with `useQuery(api.matchmaking.myMatch)` — a query that looks up an active `games`
+row for the signed-in user — and Convex pushes the new row to both.
+
+**`Math.random()` inside a mutation is allowed** — Convex seeds it deterministically per transaction
+so re-runs on OCC retry stay deterministic. (Do not use `Math.random()` to derive an idempotency key
+across *different* invocations.)
+
+### 4.8.3 `withIndex(...).order("asc").take(n)` + `delete` inside one mutation
+
+- `take(n)` is on the `OrderedQuery` interface: `take(n: number): Promise<Array<Doc>>` — "Execute the
+  query and return the first `n` results ... (or less if the query doesn't have `n` results)"
+  (pkg `dist/esm-types/server/query.d.ts` L191-197). Default order is ascending; `.order("asc")` is
+  explicit and harmless.
+- Every table automatically has the system indexes **`by_id: ["_id"]`** and
+  **`by_creation_time: ["_creationTime"]`** (pkg `dist/esm-types/server/system_fields.d.ts` L39-40),
+  so `.withIndex("by_creation_time").order("asc").take(2)` works without declaring an index. Prefer
+  an explicit `joinedAt` field + index anyway, so a re-queue after a cancelled match sorts correctly.
+- **Deleting a doc you read earlier in the same transaction is fine.** The mutation is one atomic
+  transaction; reads and writes are ordered within it, and the write set is applied together at
+  commit. There is no "cannot delete a row you read" restriction.
+- **Gotcha (verified in the installed types):** "Convex queries do not support `.delete()` directly on
+  query results. To delete multiple documents, `.collect()` them first, then delete each one
+  individually." (pkg `dist/esm-types/server/database.d.ts` L300-305). There is **no**
+  `.query(...).delete()`, no `deleteMany`, no bulk delete. Loop over the array.
+- v1.45 signatures (table-name form preferred in new code; the id-only form is kept for back-compat):
+  `ctx.db.get(table, id)`, `ctx.db.insert(table, value)`, `ctx.db.patch(table, id, partial)`,
+  `ctx.db.replace(table, id, value)`, `ctx.db.delete(table, id)` (pkg `database.d.ts` L199/226/267/293).
+- Read-set implication: `.take(100)` over `by_joinedAt` puts **that index range** in the read set, so
+  any insert into that range (a new player queuing) conflicts with the tick. That is exactly why the
+  tick must be a scheduled/cron mutation (auto-retried) rather than a client mutation.
+
+### 4.8.4 Driving the 10s loop: `crons.interval` vs `ctx.scheduler.runAfter` self-rescheduling
+
+**`crons.interval` — verified API and constraints**
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+
+const crons = cronJobs();
+crons.interval("matchmaking tick", { seconds: 10 }, internal.matchmaking.pairTick);
+crons.interval("forfeit absent players", { seconds: 15 }, internal.games.forfeitAbsent);
+export default crons;
+```
+
+- Schedule shape is a union — **exactly one** of `{ seconds }`, `{ minutes }`, `{ hours }`; supplying
+  zero or two throws `"Must specify one of seconds, minutes, or hours"` (pkg `src/server/cron.ts`
+  L317-331).
+- The only client-side validation is `validateIntervalNumber`: `Number.isInteger(n) && n > 0`, else
+  `"Interval must be an integer greater than 0"` (pkg `src/server/cron.ts` L197-201). **So
+  `{ seconds: 10 }` is valid — and so is `{ seconds: 1 }`.** No minimum interval is documented
+  anywhere in the package or on `/scheduling/cron-jobs` or `/production/state/limits`.
+- Convex's own docstring example uses a sub-minute interval:
+  `crons.interval("Clear presence data", {seconds: 30}, api.presence.clear)` (pkg `src/server/cron.ts`
+  L302) — sub-minute intervals are an intended use.
+- **The single-writer guarantee you want:** "At most one run of each cron job can be executing at any
+  moment." If a run overruns its interval, "following runs of the cron job may be skipped to avoid
+  execution from falling behind." (docs `/scheduling/cron-jobs`). This is the strongest serialization
+  primitive Convex documents, and it is what makes `pairTick` a true single writer.
+- Cron identifiers must be printable ASCII and unique per deployment; registering the same identifier
+  twice throws `Cron identifier registered twice: <id>` (pkg `src/server/cron.ts` L255-262, L288-290).
+- Crons run in UTC; `crons.cron()` takes standard five-field syntax. Named helpers:
+  `hourly({minuteUTC?})`, `daily({hourUTC, minuteUTC?})`, `weekly({dayOfWeek, hourUTC, minuteUTC?})`,
+  `monthly({day, hourUTC, minuteUTC?})` (pkg `src/server/cron.ts` L20-48). Note `weekly` uses
+  **`dayOfWeek: "monday"`** (a string), not a number — the docs summary that says `day: number` is
+  wrong for weekly; trust the installed types.
+
+**`ctx.scheduler` — verified API and constraints** (pkg `dist/esm-types/server/scheduler.d.ts`)
+
+- `runAfter(delayMs, fnRef, args?) => Promise<Id<"_scheduled_functions">>` — non-negative delay; `0`
+  means "immediately after this mutation commits".
+- `runAt(timestampMs | Date, fnRef, args?) => Promise<Id<"_scheduled_functions">>` — timestamp can't
+  be more than five years in the past or future.
+- Scheduling from a mutation is **transactional**: if the mutation rolls back, nothing is scheduled.
+- Execution guarantees (docstring, quoted above): scheduled **mutations = exactly once, auto-retried
+  on transient errors**; scheduled **actions = at most once, not retried**. Put your matchmaking and
+  forfeit logic in `internalMutation`s, never `internalAction`s.
+- **`ctx.scheduler.cancel(id)` guarantees** (docstring, verbatim paraphrase): for scheduled
+  **actions**, if it hasn't started it won't run; if it's already in progress it keeps running but
+  anything *it* schedules is cancelled; cancelling an already-completed one **throws an error**. For
+  scheduled **mutations**, the job is only ever `pending` / `completed` / `failed` — never
+  `inProgress` — and "canceling a mutation will atomically cancel it entirely or fail to cancel if it
+  has committed. It is a transaction that will either run to completion and commit or fully roll
+  back." So: **cancel is all-or-nothing for mutations, and you must tolerate it throwing** if the job
+  already ran. Wrap in try/catch when cancelling a heartbeat/forfeit timer.
+- The `_scheduled_functions` system table (read with `ctx.db.system.get("_scheduled_functions", id)`)
+  carries `name`, `args`, `scheduledTime`, `completedTime`, `state` ∈ Pending / InProgress (actions
+  only) / Success / Failed / Canceled. Results are retained **7 days**.
+- 1.42.0+ exposes the running job's own id as `scheduledFunctionId` from
+  `ctx.meta.getRequestMetadata()` (pkg `CHANGELOG.md`).
+
+**Recommendation for FR-23: use `crons.interval({ seconds: 10 })`, not a self-rescheduling
+`runAfter` loop.**
+
+Why:
+1. The cron gives you a documented **"at most one run executing at any moment"** guarantee for free.
+   A `runAfter` self-loop has no such guarantee — if anything ever double-schedules it (a retry, a
+   deploy, a manual dashboard run) you get two concurrent pairing writers and you're back to OCC
+   contention. Enforcing single-ness yourself requires a singleton lock document, which is itself a
+   hot contended row.
+2. Crons are declarative in `convex/crons.ts`, so a deploy can't leave an orphaned loop running with
+   stale arguments; a `runAfter` chain survives deploys and must be manually killed.
+3. Convex's own docstring blesses sub-minute intervals (`{seconds: 30}`), and `{ seconds: 10 }`
+   passes validation.
+4. FR-23's "widen by 100 every 10 seconds" needs **no timer at all** — derive the window from
+   `now - joinedAt` inside the tick (see `pairTick` above). The 10s cadence is only the *evaluation*
+   cadence, which is exactly what a cron is for.
+
+Use `ctx.scheduler.runAfter` instead only for **one-shot, per-entity deadlines** — e.g. FR-33's
+optional per-side clock flag-fall, or a "cancel this queue entry after 5 minutes" timeout — where
+each timer belongs to one document and there is no shared writer.
+
+**Latency caveat + optional hybrid.** A pure 10s cron means the first two players can wait up to ~10s
+to be paired, which is poor UX on an empty lobby. If you want sub-second pairing, add a *kick* from
+`enqueue`: `await ctx.scheduler.runAfter(0, internal.matchmaking.pairTick, {})`. Two concurrent
+enqueues then schedule two ticks that can run concurrently and conflict — but they are **scheduled
+mutations, so Convex auto-retries them and the user never sees the error**, and serializability still
+prevents double-pairing. Keep the 10s cron as the widening/liveness driver either way.
+
+**Cost note (arithmetic, not a documented figure):** a `{ seconds: 10 }` cron is 6 runs/min = 8,640
+runs/day ≈ 260k function calls/month, plus a second forfeit cron. Check this against your Convex plan's
+included function-call allowance before shipping; if it's tight, run the tick at `{ seconds: 30 }`
+and rely on the `runAfter(0, ...)` kick for latency, or make the tick a cheap early-return when the
+queue is empty (a `.take(2)` that returns `[]` is one tiny index read).
+
+### 4.8.5 Idempotency for pairing and for the FR-32 forfeit job
+
+Scheduled mutations are exactly-once, but you should still write these jobs so a duplicate run is a
+no-op — a deploy, a manual dashboard invocation, or your own `runAfter(0)` kick can all produce a
+second run.
+
+Rules that make a run idempotent:
+
+1. **Guard on the state you are about to leave, inside the same transaction as the write.**
+   Read the doc, check `status === "waiting"` / `status === "active"`, then write. Because the
+   mutation is serializable, that check-then-write is atomic — no separate lock is needed. This is
+   the whole idempotency story in Convex.
+2. **Re-`ctx.db.get` a doc before acting on it** if you read it earlier via a bulk query and the
+   transaction has done other work since (as `pairTick` does with `freshA`/`freshB`). A `null` means
+   someone else consumed it; `continue` rather than throwing.
+3. **Make queue membership unique per user** (`by_user` + `.unique()` in `enqueue`) so a double-click
+   or a client retry after a network blip cannot insert two rows for the same player.
+4. **Never key off wall-clock alone.** Compare against a stored timestamp field
+   (`lastHeartbeat`, `joinedAt`) so a second run in the same second sees an already-updated value.
+
+FR-32 forfeit job:
+
+```ts
+// convex/games.ts
+export const forfeitAbsent = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 60_000;                 // FR-32: absent for 60s
+    const active = await ctx.db
+      .query("games")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .take(200);                                       // bounded, not .collect()
+    for (const game of active) {
+      if (game.status !== "active") continue;           // (1) guard
+      const wDead = game.lastHeartbeat.w < cutoff;
+      const bDead = game.lastHeartbeat.b < cutoff;
+      if (!wDead && !bDead) continue;
+      if (wDead && bDead) {
+        await ctx.db.patch("games", game._id, { status: "abandoned" });
+        continue;
+      }
+      await ctx.db.patch("games", game._id, {
+        status: "abandoned",
+        winner: wDead ? "b" : "w",
+        endReason: "disconnect",
+      });
+      // Rating updates etc. are safe here precisely because the status guard above
+      // means a second run of this tick finds status !== "active" and skips.
+    }
+    return null;
+  },
+});
+```
+
+The heartbeat write itself (`patch("games", id, { lastHeartbeat: {...} })`) is a **per-game document
+write**, so it only conflicts with other writes to that same game — fine. But note the forfeit tick
+reads an index range over all active games while every playing client patches games in that range, so
+the tick will take OCC retries under load; keeping it a cron/scheduled mutation means those retries
+are automatic. Keep the heartbeat interval coarse (e.g. one patch every 10-15s per player, not per
+frame) — the docs' remediation for write conflicts is literally "avoid calling mutations an excessive
+number of times".
+
+### 4.8.6 Documented execution and transaction limits (docs `/production/state/limits`)
+
+| Limit | Value |
+|---|---|
+| **Query / mutation execution time** | **1 second of user code** (time spent in database operations is excluded) |
+| Convex-runtime action execution time | 30 minutes |
+| Node-runtime action execution time | 10 minutes |
+| Data read per transaction | 16 MiB |
+| Data written per transaction | 16 MiB |
+| **Documents scanned per transaction** | **32,000** |
+| Documents written per transaction | 16,000 |
+| Functions a single mutation can schedule | 1,000 |
+| Scheduled-function argument size | 4 MiB (16 MiB total across one mutation's schedules) |
+| Outstanding scheduled functions | 1,000,000 |
+| Function argument size | 16 MiB |
+| Concurrent scheduled jobs (by deployment class) | S16: 8 · S256: 256 · D1024: 512 · D2048: 1024 |
+
+Practical consequences for matchmaking:
+
+- The **1s user-code budget** is why `pairTick` must bound its candidate set. An O(n²) pairing scan
+  over `.collect()` of a large queue will blow the budget and, separately, put the entire table in the
+  read set. `.take(100)` keeps the scan at ≤ 4,950 comparisons and the read set to a bounded index
+  range.
+- Insights (`npx convex insights`) surfaces `bytesReadLimit` / `documentsReadLimit` /
+  `documentsReadThreshold` alongside OCC insights — watch these once the queue and games tables grow.
+
+---
+
+## Unverified / open questions (§4.8)
+
+- **Exact OCC retry count.** Docs say only "several retries" / "internally does several retries". No
+  number is published in the package or the docs. Do not build logic that assumes a specific count.
+- **Whether cron-triggered mutations get the same "exactly once / auto-retried on transient errors"
+  treatment as `ctx.scheduler`-scheduled mutations.** The guarantee is documented on the `Scheduler`
+  interface docstring; crons are implemented on top of scheduled functions, so it almost certainly
+  applies, but I could not find that stated for crons specifically.
+- **Documented minimum `crons.interval` frequency.** None found in `src/server/cron.ts`,
+  `/scheduling/cron-jobs`, or `/production/state/limits` — only `Number.isInteger(n) && n > 0`. There
+  may be an undocumented backend floor; `{ seconds: 10 }` is well inside the range Convex's own
+  example (`{seconds: 30}`) uses, but `{ seconds: 1 }` is untested here.
+- **Maximum number of cron jobs per deployment.** Not documented on the limits page.
+- **Convex plan function-call allowance** (used in the cost estimate above) — not verified; check
+  convex.dev/pricing for the current included quota before committing to a 10s tick.
+- **Whether `Math.random()` is deterministically seeded per transaction so OCC retries reproduce the
+  same colour assignment.** Convex's OCC design requires mutation determinism, which implies a seeded
+  RNG, but I could not find this stated explicitly in the installed package or the OCC page. If it
+  matters, derive the colour from a stable value instead (e.g. parity of `a._creationTime`).
+- **`ctx.db.vars.commitTs`** (a commit-timestamp placeholder resolving to an ordered `bigint`, pkg
+  `database.d.ts` L308-319) exists in 1.45 and could give a stricter queue ordering than
+  `_creationTime`, but I found no docs page describing its intended use — not used above.

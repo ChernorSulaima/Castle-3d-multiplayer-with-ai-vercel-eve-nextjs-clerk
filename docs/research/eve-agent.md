@@ -779,6 +779,9 @@ export async function directMove(input: { fen: string; history: string[]; diffic
 
 ## Unverified / open questions
 
+> **SUPERSEDED — see "Unverified / open questions (revised after Appendix A)" at the end of this
+> file.** Items 1, 3, 4 and 7 below were resolved by live testing; item 2 partially.
+
 1. `operationId` (create-once) is documented for the raw HTTP body but I did not find it on
    `SendTurnInput`/`SendTurnOptions` in `client/types.d.ts` — the TS client may not expose it;
    if TS rejects it, omit (use Convex to dedupe requests instead).
@@ -800,3 +803,533 @@ export async function directMove(input: { fen: string; history: string[]; diffic
 8. `eve init .` will attempt to add `@vercel/connect` — confirm it is harmless to remove.
 9. The Vercel-side `VERCEL_OIDC_TOKEN` in `.env.local` expires (~12 h typical) — refresh via
    `vercel env pull` / `eve link`; not verified against current Vercel docs.
+
+---
+
+# Appendix A — Verified: event ordering with per-turn `outputSchema` (live run, eve 0.52.2)
+
+**How this was verified.** A throwaway agent was scaffolded with the installed CLI
+(`node node_modules/eve/bin/eve.js init eve-probe --model openai/gpt-5.6-luna-fast`),
+given `agent/instructions.md` + two `defineTool` tools, run headless with
+`eve dev --no-ui` (server on `http://127.0.0.1:2000`, `localDev()` auth from the
+scaffolded `agent/channels/eve.ts`), and driven from Node with `new Client({ host })`
+from `eve/client`, iterating the `MessageResponse` async iterator and logging every
+`event.type` with a relative timestamp. Model credential was the project's existing
+`VERCEL_OIDC_TOKEN` copied into the probe's `.env.local`. Model:
+`openai/gpt-5.6-luna-fast` (the `eve init` default). Every claim below is either a
+live observation from those runs or a line read out of
+`node_modules/eve/dist/src/...`.
+
+> Everything here is model-behaviour-sensitive. The *mechanism* (Appendix A.1) is
+> framework code and is fixed; the *reliability* numbers (A.5) will move with the model.
+
+## A.1 Mechanism — `outputSchema` is implemented as a hidden `final_output` tool
+
+`dist/src/harness/final-output.d.ts` / `.js`:
+
+```ts
+export declare const FINAL_OUTPUT_TOOL_NAME = "final_output";
+// buildFinalOutputTool(schema) returns an AI SDK Tool with NO `execute`, whose
+// description is verbatim:
+//   "Deliver your final answer in the required structure by calling this tool.
+//    Call it exactly once, when you are done; do not answer in prose."
+// inputSchema === outputSchema === toInputSchema(loweredJsonSchema)
+```
+
+`dist/src/harness/tool-loop.js` wires it in:
+
+```js
+a.outputSchema !== undefined && (d[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(a.outputSchema));
+// and the set of tool names hidden from the action event stream:
+const n = new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME, ...runtimeActionToolNames]);
+await emitStreamContent(p, s, r.fullStream, { excludedActionToolNames: n, tools: u });
+```
+
+`dist/src/harness/emission.js` (`consumeStreamContent`) then does, for the model's
+raw AI SDK stream:
+
+| AI SDK chunk | eve event emitted |
+| --- | --- |
+| `text-delta` | `message.appended` |
+| `reasoning-delta` | `reasoning.appended` |
+| `tool-input-start` | **skipped entirely if `excludedActionToolNames.has(toolName)`** — the call id is deleted from the tracking map |
+| `tool-input-delta` | `action.input.appended` **only if the call id is still in the map** |
+| `tool-call` | `actions.requested` (again gated on `excludedActionToolNames`) |
+
+**Consequence, confirmed live: a turn that fulfils an `outputSchema` emits no
+incremental text at all.** `final_output` is on the exclusion list, so its
+streamed JSON input produces neither `action.input.appended` nor
+`actions.requested`, and the model is explicitly told not to write prose, so no
+`text-delta`/`message.appended` either. The structured object appears only in one
+`result.completed` event at the very end.
+
+## A.2 Observed event orderings (verbatim, with relative timings)
+
+### (a) `outputSchema` + one real tool call — 2 steps
+
+```
+[+   28ms] POST /eve/v1/session returned; response.sessionId = wrun_01M22Y6R9Y36BYXWXST9FZRY8A
+[+  100ms] session.started
+[+  101ms] turn.started
+[+  101ms] message.received
+[+  101ms] step.started
+[+ 1519ms] action.input.appended  tool=list_legal_moves delta="{\""      <- 43 of these
+   ...                             (streaming JSON of the REAL tool's input)
+[+ 2356ms] actions.requested       actions=[{callId, kind:"tool-call", toolName:"list_legal_moves", input:{fen:"..."}}]
+[+ 2395ms] action.result           status="completed"
+[+ 2396ms] step.completed          finishReason="tool-calls"  usage={costUsd,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens}
+[+ 2415ms] step.started
+           ---- 4.1 SECONDS OF COMPLETE SILENCE (model is emitting final_output's JSON) ----
+[+ 6501ms] step.completed          finishReason="tool-calls"
+[+ 6503ms] result.completed        result={"move":"e4","commentary":"I answer in the most direct way…"}
+[+ 6505ms] turn.completed
+[+ 6505ms] session.waiting
+```
+
+Counts for that turn: `message.appended: 0`, `message.completed: 0`,
+`reasoning.appended: 0`, `action.input.appended: 43` (**all** `toolName ===
+"list_legal_moves"`, none for `final_output`).
+
+### (b) Control — identical prompt, **no** `outputSchema`, "reply as JSON"
+
+```
+[+  86ms] session.started / turn.started / message.received / step.started
+[+2297ms] actions.requested (list_legal_moves)
+[+2364ms] action.result
+[+2395ms] step.completed        finishReason="tool-calls"
+[+2414ms] step.started
+[+6861ms] message.appended      <- FIRST text delta (40 total)
+[+7350ms] message.completed     finishReason="stop"  message="{\"move\":\"e4\",\"commentary\":…}"
+[+7351ms] step.completed        finishReason="stop"
+[+7353ms] turn.completed
+[+7355ms] session.waiting
+```
+
+So the deltas *do* flow normally — they are suppressed specifically by the
+`final_output` mechanism, not by the model or the transport.
+
+### (c) `outputSchema`, single step, no tool call (the recommended shape — see A.6)
+
+```
+[+  87ms] session.started
+[+  87ms] turn.started
+[+  88ms] message.received
+[+  88ms] step.started
+          ---- ~1.9 s of silence ----
+[+2011ms] step.completed        finishReason="tool-calls"
+[+2013ms] result.completed      result={"move":"e5","commentary":"…"}
+[+2016ms] turn.completed
+[+2018ms] session.waiting
+```
+
+Exactly 8 events, `[...new Set(types)]` =
+`session.started, turn.started, message.received, step.started, step.completed,
+result.completed, turn.completed, session.waiting`.
+
+### Ordering rules that held in every run
+
+- `result.completed` always arrives **after** the final `step.completed` and
+  **before** `turn.completed`.
+- `turn.completed` is always immediately followed by `session.waiting` (the turn is
+  parked for the next message, not terminated).
+- There is **no** `message.completed` on a turn that fulfilled the schema.
+- `result.completed.data.result` is the **parsed JSON object** (typed `JsonValue`),
+  not a string — verified by `JSON.stringify` round-tripping it directly.
+
+## A.3 `finishReason` values seen
+
+`AssistantStepFinishReason = "content-filter" | "error" | "length" | "other" | "stop" | "tool-calls"`
+(`dist/src/protocol/message.d.ts`).
+
+| Situation | `step.completed.data.finishReason` |
+| --- | --- |
+| step that called a real tool | `"tool-calls"` |
+| **step that called `final_output`** | `"tool-calls"` (**not** `"stop"`) |
+| step that answered in prose (no `outputSchema`) | `"stop"` |
+| `message.completed.data.finishReason` on a prose answer | `"stop"` |
+| `message.completed` flushed *before* a tool call (partial prose) | `"tool-calls"` (hard-coded in `emission.js` `flushCurrentMessage`) |
+
+`finishReason` therefore **cannot** be used to detect "the structured result is
+ready". Detect `result.completed`, or check `MessageResult.data !== undefined`.
+
+## A.4 `MessageResult` under `outputSchema` — measured
+
+`await response.result()` on a successful structured turn returned exactly these keys
+(`Object.keys`): `["data", "events", "inputRequests", "message", "sessionId", "status"]`.
+
+- `data` — **the parsed object** `{ move, commentary }`. Typed to the schema's output
+  type; the client does *not* re-validate (`client/types.d.ts`: "The server is
+  authoritative for validation").
+- `message` — **`undefined`** on a structured turn (verified `r.message === undefined`).
+  It is only populated from a terminal `message.completed`, which never fires.
+- `status` — **`"waiting"`**, both on success *and* on schema failure. See A.5.
+- `sessionId` — always populated.
+- `events` — 8 events for the single-step case; 121 for a prose turn.
+
+## A.5 RELIABILITY — the schema is *not* enforced; it is a prompt hint
+
+This is the most important operational finding for FR-36.
+
+`dist/src/harness/tool-loop.js`:
+
+```js
+const OUTPUT_SCHEMA_NOT_FULFILLED = {
+  code: "OUTPUT_SCHEMA_NOT_FULFILLED",
+  message: "The agent could not produce a result matching the requested schema.",
+};
+function extractFinalOutput(r) {
+  return (r.toolCalls ?? []).find(c => c.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(c))?.input;
+}
+// finishConversationTurn: if extractFinalOutput() is undefined ->
+//   session.outputSchema = undefined;
+//   emitRecoverableFailedTurn(..., { ...OUTPUT_SCHEMA_NOT_FULFILLED, continuationToken });
+//   settledTurn = { isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message }
+```
+
+If the model just writes prose instead of calling `final_output`, the turn ends
+**recoverably**: a `step.failed` with `code: "OUTPUT_SCHEMA_NOT_FULFILLED"`, then
+`session.waiting`. `MessageResult.status` is still `"waiting"` and `data` is
+`undefined`.
+
+**Measured, 5 consecutive turns, instructions saying "write two or three sentences of
+commentary" (no mention of the output tool):**
+
+```
+run 0: status=waiting dataOk=true   msgAppended=0   resultCompleted=1  fail=none
+run 1: status=waiting dataOk=false  msgAppended=53  resultCompleted=0  fail=step.failed:OUTPUT_SCHEMA_NOT_FULFILLED
+run 2: status=waiting dataOk=false  msgAppended=41  resultCompleted=0  fail=step.failed:OUTPUT_SCHEMA_NOT_FULFILLED
+run 3: status=waiting dataOk=false  msgAppended=47  resultCompleted=0  fail=step.failed:OUTPUT_SCHEMA_NOT_FULFILLED
+run 4: status=waiting dataOk=false  msgAppended=44  resultCompleted=0  fail=step.failed:OUTPUT_SCHEMA_NOT_FULFILLED
+```
+
+**4 out of 5 failed.** Rewriting `agent/instructions.md` to say, verbatim:
+
+```md
+- Never answer in prose. Deliver every answer by calling the `final_output`
+  tool exactly once, with `move` set to the SAN move and `commentary` set to
+  two or three sentences of colourful explanation.
+```
+
+gave **5/5 success** on the same 5-turn probe, and 8/8 on a later run. Two hard
+rules for the implementation:
+
+1. `agent/instructions.md` **must** contain an explicit "never answer in prose,
+   call `final_output` exactly once" clause. Any instruction that tells the agent
+   to "write commentary" without naming the tool competes with it and loses.
+2. The route handler **must** treat `result.data === undefined` as a failure and
+   fall back to Stockfish (NFR-5), regardless of `status`. Do not branch on
+   `status === "completed" | "waiting" | "failed"` — a schema miss reports
+   `"waiting"`.
+
+Recommended guard:
+
+```ts
+const result = await response.result();
+const parsed = MoveSchema.safeParse(result.data);        // re-validate: eve does not
+if (!parsed.success) {
+  const miss = result.events.find(
+    (e) => (e.type === "step.failed" || e.type === "turn.failed") &&
+           e.data.code === "OUTPUT_SCHEMA_NOT_FULFILLED",
+  );
+  return fallbackToStockfish(miss ? "schema_not_fulfilled" : "invalid_shape");
+}
+```
+
+## A.6 FR-37 (streamed commentary) — verdict and the three options
+
+**FR-37 "streamed if possible" is NOT achievable with per-turn `outputSchema`.**
+The framework code path deletes the `final_output` call id on `tool-input-start`,
+so its JSON never becomes `action.input.appended`, and the tool description forbids
+prose so `message.appended` never fires. Observed: 0 text deltas, a 1.9–4.1 s
+silent window, then the whole object at once.
+
+| Option | Streams commentary? | Cost | Structured `{move, commentary}`? |
+| --- | --- | --- | --- |
+| **A. `outputSchema` only** (recommended) | No — render the panel after `result.completed` | 1 model call | Yes, `result.data` |
+| **B. A real `commit_move` tool** with `inputSchema: z.object({ move, commentary })`, **no** `outputSchema` | **Yes** — `action.input.appended` streams its JSON incrementally | 3 model calls (the model runs again after the tool result) | Yes, from `actions.requested.data.actions[0].input` |
+| **C. Both** (`commit_move` tool **and** `outputSchema`) | Yes | 3 steps, ~7.8 s measured | Yes, but the two can disagree |
+
+Measured for option B (a `commit_move` tool, no `outputSchema`):
+
+```
+[+2063ms] actions.requested  list_legal_moves
+[+2125ms] step.completed     fr=tool-calls
+[+2150ms] step.started
+[+4786ms] FIRST commit_move input delta      <- streaming starts here
+[+5624ms] actions.requested  commit_move
+          input={"move":"e4","commentary":"I answer the king's pawn with a bold central thrust, …"}
+[+5696ms] step.completed     fr=tool-calls
+[+5722ms] step.started       <- a THIRD model call the harness still runs
+[+8773ms] step.failed        (empty model response, because instructions said "do not answer in prose")
+[+8777ms] turn.failed
+```
+
+Reassembling the deltas gave the exact JSON:
+`{"move":"e4","commentary":"I answer the king's pawn with a bold central thrust, meeting White's ambition head-on…"}`
+— so partial-JSON streaming into the commentary panel genuinely works. But note the
+trailing third step: **eve has no "terminal tool" flag** (`dist/src/tools/definition.d.ts`
+exposes only `description`, `inputSchema`, `execute`, `execution`, `approval`,
+`approvalKey`, `toModelOutput` — nothing like `endsTurn`). After the tool result the
+loop calls the model again, which both costs ~3 s and can fail with an empty response.
+
+**Recommendation for this project: Option A.** Render the commentary panel on
+`result.completed` with a typing/fade-in animation client-side. It is one model call,
+the cheapest, the fastest, and the only one whose structured payload is authoritative.
+Note in the FR-37 acceptance that "streamed if possible" was investigated and the
+framework does not permit it under FR-36's structured-output requirement.
+
+If a genuinely streamed feel is a hard requirement, use Option B and derive the move
+from `actions.requested.data.actions[0].input` (already parsed by eve), accepting the
+extra step — and add `- After calling commit_move, reply with the single word "done".`
+to `instructions.md` so the third step does not fail on an empty response.
+
+## A.7 Measured latency — sizing FR-38 (<3 s) and NFR-5 (10 s timeout)
+
+Local `eve dev` server, `openai/gpt-5.6-luna-fast`, one AI-Gateway hop, times are
+POST→`session.waiting` wall clock from the Node client.
+
+| Shape | n | min | p50 | max | mean |
+| --- | --- | --- | --- | --- | --- |
+| **1 step, `outputSchema`, no tool call** (legal moves in the message) | 8 | **2016 ms** | **2237 ms** | 5055 ms | 2668 ms |
+| 1 step, `outputSchema`, no tool call (earlier batch of 5) | 5 | 1854 ms | 2053 ms | 2508 ms | 2116 ms |
+| **2 steps** (`list_legal_moves` tool + `final_output`) | 3 | 4185 ms | 4966 ms | 6506 ms | ~5.2 s |
+| 3 steps (`commit_move` tool + `final_output`) | 1 | — | 7817 ms | — | — |
+| Follow-up turns on the same session (`session.send`) | 3 | 3195 ms | 3319 ms | 4281 ms | ~3.6 s |
+| POST `/eve/v1/session` → `MessageResponse` returned | many | 28 ms | ~90 ms | 133 ms | — |
+| POST → first stream event (`session.started`) | many | 82 ms | ~90 ms | 256 ms | — |
+
+**Implications:**
+
+- **FR-38's 3 s budget is only reachable with a single-step turn.** Every tool
+  round-trip costs ~2–2.5 s. **Do not give the agent a `get_legal_moves` /
+  `analyse_position` tool it must call before moving** — compute the legal move list
+  with `chess.js` on the server and put it in the message (or `clientContext`). That
+  alone took the p50 from ~5.0 s to ~2.2 s.
+- p50 ≈ 2.2 s but p100 hit 5.1 s on an identical prompt, so **FR-38 must be stated as
+  a p50/p90 target, not a hard cap** — or the UI must show a "thinking" state.
+- Context growth costs real time: turn 0 of a session was 2.4 s, turns 1–3 on the same
+  session were 3.2–4.3 s. Consider `session.clear()` / `compact()` between games, or a
+  fresh session per game (already the plan) plus sending the FEN rather than relying on
+  accumulated history.
+- **NFR-5's 10 s budget leaves ~4–5 s of headroom over the 2-step p100.** Enforce it
+  with `AbortSignal.timeout(10_000)` — see A.8.
+
+## A.8 Cancellation / timeout behaviour (NFR-5) — measured
+
+`SendTurnOptions.signal` is honoured on `sessions.create(...)`:
+
+```ts
+const { response } = await client.sessions.create({
+  message, outputSchema, signal: AbortSignal.timeout(10_000),
+});
+```
+
+Aborting **rejects the `sessions.create()` promise** with a
+`DOMException` (`name: "TimeoutError"`, message `"The operation was aborted due to
+timeout"`) — measured firing at 903 ms for a 900 ms signal. Catch it, do **not**
+assume it produced a `MessageResult`.
+
+`response.cancel()` returned `{ sessionId, status: "accepted" }` — but cancellation
+is **cooperative and racy**: in the probe the turn still completed. Re-attaching with
+`client.sessions.attach(sessionId, { streamIndex: 0 })` and calling `snapshot()`
+showed the tail as `… step.completed, result.completed, turn.completed,
+session.waiting` — i.e. the cancel lost the race. So:
+
+- For the NFR-5 hard 10 s deadline, race the client promise yourself
+  (`Promise.race([response.result(), timeout])`) and fall back to Stockfish; treat the
+  eve turn as fire-and-forget rather than waiting for `turn.cancelled`.
+- Abandoning a turn does **not** poison the session: the terminal event is
+  `session.waiting` and the next `session.send()` works.
+- `snapshot()` returns `{ events, session: { sessionId, streamIndex } }` — useful for
+  reconciling a turn whose HTTP stream was dropped (server restart, serverless
+  recycle) without re-running the model.
+
+## A.9 `clientContext` — verified working
+
+`session.send(msg, { outputSchema, clientContext: { toneHint: "speak like a pirate", difficulty: "grandmaster" } })`
+produced commentary beginning *"Arrr, Black develops with 3…Nf6…"*. So a plain
+`JsonObject` `clientContext` is JSON-serialised into a user-role model-context message
+and **is** visible to the model, is not persisted to session history, and is the right
+place for the per-turn persona/difficulty knobs (FR: 5 personas) without polluting the
+durable transcript.
+
+## A.10 Answers to the previously open questions 1, 3, 4
+
+### Q1 — `operationId` on `SendTurnInput` / `SendTurnOptions`: **NO on the TS client, YES on the wire.**
+
+`dist/src/client/types.d.ts` `SendTurnOptions` has exactly:
+`turnPolicy`, `clientContext`, `outputSchema`, `streamReconnectPolicy`, `signal`,
+`headers`. `SendTurnInput` adds only `message`. There is **no** `operationId`
+(`grep -r operationId dist/src` only hits subagents / memory / OpenAPI connections —
+unrelated).
+
+It **does** exist on `POST /eve/v1/session` (`docs/channels/eve.mdx`), and the
+create-once semantics were verified live through the client's own authenticated
+escape hatch:
+
+```ts
+const r = await client.fetch("/eve/v1/session", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ message, outputSchema: toJSONSchema(zodSchema), operationId: "chess-game-42-move-7" }),
+});
+// 202 {"ok":true,"sessionId":"wrun_…","status":"accepted"}
+```
+
+Results:
+
+```
+first  (t=0):  202 {"sessionId":"wrun_01M22YHC5JV01NHBAMKA0DN26V"}
+retry  (t=6s): 202 {"sessionId":"wrun_01M22YHC5JV01NHBAMKA0DN26V"}   <- same session
+retry2 (t=8s): 202 {"sessionId":"wrun_01M22YHC5JV01NHBAMKA0DN26V"}   <- same session
+```
+
+but two **back-to-back** posts (no delay) returned **different** session ids, exactly
+as documented ("the create route does not wait for a concurrently starting request to
+publish ownership"). Practical guidance: `operationId` is a retry-safety net, not a
+concurrency lock. For this project, dedupe move requests in Convex (by
+`gameId + plyNumber`) and treat `operationId` as belt-and-braces if you use raw
+`client.fetch`. `client.sessions.create()` cannot send it.
+
+Also note `client.fetch(path, init)` applies the same auth/header cascade as
+`health()`/`info()`/sessions — it is the supported escape hatch
+(`dist/src/client/client.d.ts`).
+
+### Q3 — the session-id property on `ClientSession`: **`session.state.sessionId`.**
+
+`dist/src/client/session.d.ts` exposes `get state(): ClientSessionState`, and
+`ClientSessionState = { readonly sessionId: string; readonly streamIndex: number }`
+(`client/types.d.ts`). There is no `session.id` or `session.sessionId`. Verified live:
+`session.state` printed `{"sessionId":"wrun_01M22Y6R9Y36BYXWXST9FZRY8A","streamIndex":0}`,
+and `streamIndex` advanced 0 → 15 → 22 across three turns.
+
+Three equivalent sources for the id, all verified equal:
+`response.sessionId` (available as soon as the POST returns, before any event),
+`session.state.sessionId`, and `(await response.result()).sessionId`.
+
+Re-attach later with `client.sessions.attach(sessionId, { streamIndex })` — no I/O,
+per the doc comment on `ClientSessions.attach`.
+
+### Q4 — `HttpBasicCredentials`: **`{ readonly username: string; readonly password: string }`.**
+
+Verbatim from `dist/src/public/channels/auth.d.ts`:
+
+```ts
+export interface HttpBasicCredentials {
+    readonly username: string;
+    readonly password: string;
+}
+export declare function httpBasic(
+  credentials: HttpBasicCredentials,
+  options?: HttpBasicAuthOptions,   // { readonly realm?: string }  — defaults to "eve"
+): AuthFn<Request>;
+export declare function verifyHttpBasic(
+  authorizationHeader: string | null,
+  credentials: HttpBasicCredentials,
+): VerifyResult;                     // { ok: true, sessionAuth } | { ok: false }
+```
+
+Both values are normalised to Unicode **NFC** before comparison and the password is
+compared with constant-time hash equality. Note the *client* side is shaped
+differently — `ClientAuth`'s basic variant is
+`{ basic: { username: string; password: TokenValue } }` where
+`TokenValue = string | (() => string | Promise<string>)`, so the client (not the
+server) may supply a lazily-resolved password.
+
+So for the chess app's server-to-server call:
+
+```ts
+// agent/channels/eve.ts
+export default eveChannel({ auth: [vercelOidc(), localDev(),
+  httpBasic({ username: "chess-app", password: process.env.EVE_SERVER_SECRET! })] });
+
+// src/app/api/ai-move/route.ts
+const client = new Client({
+  host: process.env.EVE_HOST!,
+  auth: { basic: { username: "chess-app", password: () => process.env.EVE_SERVER_SECRET! } },
+  redirect: "manual",   // credential-bearing clients should use "manual" or "error"
+});
+```
+
+(`redirect: "manual"` per the `ClientRedirectPolicy` doc comment: "Credential-bearing
+clients should use `manual` or `error` so custom auth headers can't follow a
+cross-origin redirect.")
+
+## A.11 Reference: the probe files (reproduce or extend)
+
+Left in the scratch dir
+`/private/tmp/claude-501/-Users-sonnysangha-Documents-Builds-chess-3d-ai-clerk-game/2a759b92-204c-48e4-bbb8-4d22d7ae13d4/scratchpad/eve-probe/`
+(`probe.mjs` … `probe11.mjs`, `dev.log`, `run2.log`). To re-run:
+`node node_modules/eve/bin/eve.js dev --no-ui` then `node probe11.mjs`. Note the
+scratch dir is session-scoped and will be garbage-collected — copy anything you need.
+
+Minimal reproduction of the decisive test:
+
+```js
+import { Client } from "eve/client";
+import { z } from "zod";
+const client = new Client({ host: "http://127.0.0.1:2000" });
+const { response } = await client.sessions.create({
+  message: "FEN: …\nLegal moves: e5, c5, Nf6\nWhite played e4.",
+  outputSchema: z.object({ move: z.string(), commentary: z.string() }),
+});
+for await (const ev of response) console.log(ev.type, JSON.stringify(ev.data).slice(0, 120));
+```
+
+## A.12 Net changes to the implementation plan (sections 2, 3.3, 3.4, 9 above)
+
+1. **Drop the mandatory `analyse_position` / legal-moves tool from the move turn.**
+   Compute legal SAN moves with `chess.js` in the route handler and put them in the
+   message. This is the single biggest FR-38 win (~5.0 s → ~2.2 s p50).
+2. **Section 3.4 (streaming commentary) is not implementable as written.** Replace it
+   with "render commentary on `result.completed`", or adopt Option B in A.6 with its
+   documented 3-step cost.
+3. **`agent/instructions.md` must name `final_output` and forbid prose** (A.5) — the
+   5-persona instructions in section 9 need that clause added to each persona block or,
+   better, once in a shared `# Output` section.
+4. **The route handler's success test is `result.data !== undefined` plus a local Zod
+   re-parse**, not `result.status`.
+5. Budget the eve call at ~2.2 s p50 / ~5 s p100 for a single-step turn; keep the
+   `AbortSignal.timeout(10_000)` and Stockfish fallback (NFR-5) — they are load-bearing,
+   not belt-and-braces.
+
+---
+
+## Unverified / open questions (revised after Appendix A)
+
+**Resolved by Appendix A:** #1 (`operationId` — not on the TS client, present on the
+HTTP body, idempotency verified), #3 (`session.state.sessionId`), #4
+(`HttpBasicCredentials = { username, password }`), #7 (no text deltas under
+`outputSchema`; FR-37 streaming is not achievable that way). #2 is **partially**
+resolved: `clientContext` is definitely visible to the *model* (A.9); whether a hook
+or tool can read it is still unverified.
+
+Still open:
+
+1. Whether a `turn.started` hook or a tool `execute` can read the turn's
+   `clientContext` (only model visibility was verified). Design so tools do not need it.
+2. Name of the `defineAgent` field that disables auto-added default tools
+   ("Defaults to true", `shared/agent-definition.d.ts` ~line 272) and the exact
+   `disableTool()` slot pattern in `docs/concepts/built-in-tools.md`. Relevant because
+   the probe agent still had `bash`/`web_fetch` etc. advertised, which inflates input
+   tokens (~2.5 k input tokens per step were observed) and therefore latency.
+3. Whether `withEve` adds cold-start latency on Vercel for the separate eve service, and
+   whether Fluid compute must be toggled. **All latency numbers in A.7 are from a warm
+   local `eve dev` server** — a cold Vercel function will be slower, so FR-38 needs
+   re-measuring against a real deployment before the 3 s number is committed to.
+4. `eve init .` adds `@vercel/connect` — confirm it is harmless to remove.
+5. `VERCEL_OIDC_TOKEN` in `.env.local` expires (the one used for these probes had a
+   ~12 h window: issued/expiring `2026-09-09T22:49:20Z`). Refresh via `vercel env pull`
+   / `eve link`.
+6. Whether a **different model** (e.g. `openai/gpt-5.6-sol`, or an Anthropic model via
+   the gateway) changes the `final_output` compliance rate in A.5 or the silent-window
+   length in A.2. Only `openai/gpt-5.6-luna-fast` was measured. Re-run `probe6.mjs`
+   after any `eve set --model …`.
+7. Whether `reasoning: "low" | "minimal" | "none"` on `defineAgent` shortens the
+   1.9–4.1 s silent window. No `reasoning.appended` events appeared at all in these
+   runs, so the default effort for this model appears to emit no visible reasoning —
+   but the field was never varied.
+8. Behaviour of `turnPolicy: "steer"` (the default for follow-ups) when the user makes
+   a second move while an AI turn is in flight — documented as "buffers the message,
+   cooperatively cancels the active turn, starts a replacement turn with a new turn ID",
+   but not exercised here. Relevant if the UI ever allows a take-back mid-think.

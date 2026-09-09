@@ -583,8 +583,11 @@ Frame-time watchdog (FR-31): drop `tier` state; because `multisampling`, N8AO `q
    feature bullets (EffectGroup, mergeMode, createEffectComponent public, SSAO live props, N8AO `enabled`,
    Outline/GodRays autoClear warnings, Pixelation/ShockWave blendFunction removal) as confirmed by source, the
    dates as unreliable.
-4. Whether Next.js 16 / Turbopack needs `transpilePackages` for `postprocessing` or `n8ao` (both ship ESM with
-   `type: module`). Not tested; expected to work without config.
+4. ~~Whether Next.js 16 / Turbopack needs `transpilePackages` for `postprocessing` or `n8ao`~~ **RESOLVED: no.**
+   Verified empirically in this repo - both pure-ESM packages resolve in the browser bundle *and* during the Node
+   prerender of a `"use client"` page with zero config, and an `EffectComposer` + `N8AO` + `Bloom` + `ToneMapping`
+   stack compiles 18 shader programs and renders a correct frame. See `docs/research/nextjs16-shadcn.md` →
+   "Verified build smoke test (three + postprocessing + worker + wasm)", §3 and §8.
 5. The React Compiler (`babel-plugin-react-compiler` is in devDependencies): the wrappers mutate effect objects in
    layout effects and rely on array identity for `selection`; no known incompatibility, but untested here.
 6. Whether `OutlineEffect` needs the composer's depth buffer for `xRay={false}` occlusion in this exact setup

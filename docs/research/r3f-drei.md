@@ -572,12 +572,12 @@ Selected-piece lift + outline: damp `position.y` to ~0.3 and render `<Outlines t
 ## Unverified / open questions
 
 - **fiber ErrorBoundary vs renderer creation**: verified from source that `configure()` runs in an un-caught async `run()`; not tested empirically whether Next's dev overlay surfaces the unhandled rejection. Wrap the pre-mount probe regardless.
-- **`transpilePackages: ['three']`**: r3f docs still recommend it for Next ≥13.1; whether Next 16.3 + Turbopack needs it for `three/examples/jsm/*` was not tested in this repo.
+- ~~**`transpilePackages: ['three']`**~~: **RESOLVED (empirically, in this repo)** - Next 16.3.4 + Turbopack needs **no** `transpilePackages` for `three`, `three/examples/jsm/*` or drei's `three-stdlib`; adding it is inert. See `docs/research/nextjs16-shadcn.md` → "Verified build smoke test" §3. Caveat §5: `three-stdlib` is **not** importable from app code under pnpm (transitive dep only) - `pnpm add three-stdlib` if you need it directly.
 - **`smoothTime` ↔ perceived duration**: camera-controls uses SmoothDamp; "≈800 ms" for the flip with `smoothTime 0.35–0.4` is an estimate (asymptotic; the `rest` event / promise resolves when speed < `restThreshold`). Tune on stream.
 - **MeshReflectorMaterial `mixBlur` default**: code default is `0`, drei docs comment says "default = 1"; code wins for 10.7.8.
 - **`Environment ground` + `blur`**: source shows ground mode builds a `GroundProjectedEnv` mesh via `EnvironmentMap`; whether `backgroundBlurriness` still visually applies in that mode was not verified.
 - **`ContactShadows` `frames={1}` re-bake trigger**: source shows a `count` guard vs `frames`; the recommended re-key (`key={moveNumber}`) approach is inferred, not run.
 - **Draco decoder version**: drei 10.7.8 uses `https://www.gstatic.com/draco/versioned/decoders/1.5.5/`; the docs page says `v1/decoders/` — the installed code path is authoritative. Self-hosted decoders must match the DRACOLoader version in `three-stdlib@2.36.1`.
-- **`@types/three@0.185.4`** is only a transitive dep; TS resolution of `import ... from 'three'` types from app code with pnpm strictness was not compiled here — add it as a devDependency if `tsc` reports implicit `any` for three.
+- ~~**`@types/three@0.185.4`** is only a transitive dep…~~ **RESOLVED: it is REQUIRED.** `next build` fails with `TS7016: Could not find a declaration file for module 'three'` without it. `pnpm add -D @types/three` (0.185.4) has been run in this repo. See "Verified build smoke test" §2.
 - **NeutralToneMapping/AgX visual choice** vs FR-29 "ACES": FR-29 says ACES; both alternatives exist in r185 if the HDRI backgrounds look too desaturated under ACES.
 - drei `Html`, `Text` (troika) and `Clouds` performance on the "smallest supported phone" (NFR-6) not measured.

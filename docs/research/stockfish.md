@@ -347,8 +347,263 @@ Caveats:
 
 - **Official Stockfish UCI wiki page** (`github.com/official-stockfish/Stockfish/wiki/UCI-&-Commands`) could not be fetched (JS-rendered / 404 on raw mirrors). Option ranges above were verified directly from the engine's `uci` output and the `sf_18` source (`engine.cpp`, `search.h`, `search.cpp`); the "score is side-to-move relative" rule was confirmed empirically (negative scores with Black to move) and via `uci.cpp:format_score`, not from prose docs.
 - **Exact minimum Safari/iOS version**: the build uses `-msimd128`, so WASM SIMD is required; README claims iOS 16+/macOS 11+. Not tested on Safari here.
-- **Next.js dev/prod and Vercel serving `.wasm` from `/public` with `Content-Type: application/wasm`**: expected (standard mime tables; a `serve-handler` mime table in Next includes `application/wasm`) but not exercised through `next dev` in this session — verify on first run; the wrapper has no non-streaming fallback.
+- ~~**Next.js dev/prod … serving `.wasm` from `/public` with `Content-Type: application/wasm`**~~ **RESOLVED for local dev and prod.** Verified empirically in this repo: both `next dev` and `next build && next start` (Next 16.3.4) return `Content-Type: application/wasm` for `/stockfish/stockfish-18-lite-single.wasm`, so `instantiateStreaming` works and the missing fallback is a non-issue. A live Chrome tab reached `uciok` in **103-108 ms (dev)** / **274-346 ms (prod, cold 7.3 MB fetch)** and answered `go depth 8` with `bestmove e2e4 ponder e7e6`, with `crossOriginIsolated === false` and no `SharedArrayBuffer`. The `headers()` cache rule of §3.3 was also verified to apply in dev and prod. **Still unverified: Vercel's CDN** - re-check with `curl -I` on the first preview deploy. Also newly confirmed: `new Worker(new URL(...))` under Turbopack appends a `#params=[...]` fragment carrying the chunk list, which collides head-on with the glue's hash-based wasm-path override - another concrete reason to keep the classic `/public` worker. See `docs/research/nextjs16-shadcn.md` → "Verified build smoke test" §4b and §6.
 - **`ULTRA_LITE_NET` build**: upstream `build.js` supports it, but no artifact is in the npm package; size/strength unknown. Requires emscripten 3.1.7 to build.
 - **Vercel function bundle limits** with the 7.3 MB wasm included (should be well under the 250 MB unzipped limit) — not measured.
 - Full multi-threaded build (`stockfish-18.js`) was not executed in Node (needs `worker_threads` + SAB; the postinstall default symlink points at it). Only `lite-single` and `single` were executed.
 - `go movetime` accuracy under ASYNCIFY in the browser on low-end mobiles (FR-38 < 3 s) — measured only on this Mac (depth 10, MultiPV 2: ~110 ms of search).
+
+---
+
+# 11. NFR-3 gap study: is there ANY npm Stockfish WASM under 2 MB gzipped?
+
+*Added in a follow-up research pass. Everything in this section was verified by actually
+downloading the registry tarball (`npm pack <pkg>@<version> --pack-destination …`), extracting it,
+measuring with `gzip -9 -c <file> | wc -c` (and `zlib.brotliCompressSync` at quality 11), parsing the
+wasm binary's import/memory/type/code sections with a hand-written Node parser, and — for the
+shortlist — **running the engine** (Node, and a real Chromium page served over HTTP on a
+non-cross-origin-isolated origin).*
+
+**Answer: yes. Two builds clear 2 MB gzipped and support `Skill Level` + `MultiPV`.**
+The recommended one (`stockfish@11.0.0`) is **669 KB gzipped / 533 KB brotli** and was verified
+end-to-end in a browser with `crossOriginIsolated === false` and `typeof SharedArrayBuffer === "undefined"`.
+
+## 11.1 Measured candidate table
+
+Sizes are the bytes actually needed at runtime (glue `.js` + `.wasm` + external net where applicable).
+"SAB?" = does the module require `SharedArrayBuffer` (i.e. COOP+COEP cross-origin isolation)?
+Determined by parsing the wasm import/memory section: a `shared: true` **imported** memory ⇒ yes.
+
+| Package @ version | Runtime files | Raw | gzip -9 | brotli q11 | SAB / COOP+COEP? | WASM SIMD? | Eval | `Skill Level` | `MultiPV` | License |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **`stockfish@11.0.0`** (nmrugg) | `src/stockfish.js` + `src/stockfish.wasm` | 3.74 MB | **669 KB** | **533 KB** | **No** (`env.memory` imported, `shared:false`, min=max=1024 pages = 64 MB fixed) | **No** (0 v128 locals) | SF11 classical (HCE) | ✅ 0–20 | ✅ 1–500 | GPL-3.0 |
+| `stockfish@10.0.2` (nmrugg) | `src/stockfish.js` + `src/stockfish.wasm` | 429 KB | **137 KB** | **110 KB** | **No** (same, 64 MB fixed) | No | SF10 classical | ✅ 0–20 | ✅ 1–500 | GPL-3.0 |
+| `stockfish.js@10.0.2` (lichess-org / niklasf) | `stockfish.wasm.js` + `stockfish.wasm` | 655 KB | **192 KB** | **148 KB** | **No** (`env.memory`, `shared:false`, min=max=512 pages = 32 MB) | No | SF10 multi-variant (ddugovic) | ✅ 0–20 | ✅ 1–500 | GPL-3.0 |
+| `stockfish.js@10.0.2` pure-JS fallback | `stockfish.js` (asm.js) | 1.58 MB | 328 KB | — | No | n/a | SF10 multi-variant | ✅ | ✅ | GPL-3.0 |
+| `stockfish.js@9.0.0` | `stockfish.wasm.js` + `stockfish.wasm` | 664 KB | 190 KB | — | No | No | SF9 multi-variant | (not run) | (not run) | GPL-3.0 |
+| **`@lichess-org/stockfish-web@0.5.0` `sf_19_smallnet`** | `sf_19_smallnet.js` + `.wasm` + external `nn-61e7af4bb97d.nnue` | 1.71 MB | **1.13 MB** | **1.05 MB** | **YES** (`a.a` imported, `shared:true`, min 1024 max 32768 pages) | Yes (20 fns w/ v128) | **SF19 NNUE (small net)** | ✅ 0–20 | ✅ 1–256 | AGPL-3.0-or-later |
+| `@lichess-org/stockfish-web@0.5.0` `sf_19` (big net) | `.js` + `.wasm` + `nn-1a298aa575a0.nnue` | ~79 MB | ~79 MB | — | YES | Yes | SF19 NNUE big | ✅ | ✅ | AGPL-3.0 |
+| `lila-stockfish-web@0.0.11` `sf16-7` | `sf16-7.js` + `.wasm` + `nn-ecb35f70ff2a.nnue` | 7.0 MB | 5.44 MB | — | YES | Yes | SF16 linrock | ✅ | ✅ | AGPL-3.0 |
+| `lila-stockfish-web@0.0.11` `sf171-79` | `.js` + `.wasm` + `nn-1c0000000000` + `nn-37f18f62d772` | huge | > 2 MB | — | YES | Yes | SF17.1 dual-net | ✅ | ✅ | AGPL-3.0 |
+| `stockfish.wasm@0.10.0` (niklasf) | `stockfish.js` + `.wasm` + `stockfish.worker.js` | 381 KB | 140 KB | — | **YES** (`a.a` shared, max 32768) | No | SF_classical | ✅ | ✅ | GPL-3.0 |
+| `stockfish-mv.wasm@0.6.1` | same 3 files | 587 KB | 184 KB | — | **YES** | No | SF_classical multi-variant | ✅ | ✅ | GPL-3.0 |
+| `stockfish@12.0.0` (nmrugg) | `src/stockfish.js` + `.wasm` (+ 21 MB net) | 21.5 MB | > 2 MB | — | **YES** (shared, min=max=16384 pages = **1 GB**) | — | SF12 NNUE | ✅ | ✅ | GPL-3.0 |
+| `stockfish@14.1.0 / 15.0.0 / 16.0.0` | `.js` + `.wasm` + `.nnue` | 40–47 MB | ≫ 2 MB | — | (n/a) | Yes | NNUE, net is a **separate 40–47 MB file** | ✅ | ✅ | GPL-3.0 |
+| `stockfish@17.1.0` | lite-single 7.3 MB wasm; full = 6 × 13 MB parts | 7.3–79 MB | ≫ 2 MB | — | lite-single: No | Yes | NNUE embedded | ✅ | ✅ | GPL-3.0 |
+| **`stockfish@18.0.8` lite-single (currently installed)** | `stockfish-18-lite-single.js` + `.wasm` | 7.32 MB | **5.64 MB** | — | No | Yes | SF18 NNUE small net (embedded) | ✅ | ✅ | GPL-3.0 |
+| `stockfish-nnue.wasm@1.0.0-alpha.…smolnet` | `stockfish.js` + `stockfish.wasm` | 12.9 MB | 7.16 MB | — | YES | Yes | SF14 NNUE | ✅ | ✅ | GPL-3.0 |
+| `fairy-stockfish-nnue.wasm@1.1.12` | `stockfish.js` + `.wasm` (+ external nets) | 1.70 MB | 512 KB | — | **YES** | Yes | Fairy-SF14 | ✅ | ✅ | GPL-3.0 |
+| `@se-oss/stockfish@1.0.1` | `stockfish-17.1-8e4d048.wasm` | 78.9 MB | 64.8 MB | — | YES | Yes | SF17.1 big net | ✅ | ✅ | (see pkg) |
+| `chess-study-stockfish@0.1.0` | *(no engine bytes — it is a vendoring script for `stockfish@18` + a max-pages byte-patch)* | — | — | — | — | — | — | — | — | AGPL |
+
+Notes on the table:
+- **`stockfish-16.1-lite` does not exist on npm** (`E404`). Neither does any published **`ULTRA_LITE_NET`** artifact — `stockfish@18.0.8/bin/` contains exactly 5 flavours (`-18`, `-18-single`, `-18-lite`, `-18-lite-single`, `-18-asm`) and nothing smaller (`ls` verified). `stockfish@17.1.0` (183 MB unpacked, file list read from `https://unpkg.com/stockfish@17.1.0/?meta`) has the same 5 flavours plus 6-part split wasms.
+- **Every small NNUE build on npm requires `SharedArrayBuffer`.** Verified individually: `stockfish.wasm@0.10.0`, `stockfish-mv.wasm@0.6.1`, `lila-stockfish-web` (`sf16-7`, `sf171-79`, `fsf14`), `@lichess-org/stockfish-web@0.5.0` (all five targets), `stockfish-nnue.wasm`, `fairy-stockfish-nnue.wasm`, `@se-oss/stockfish`, `stockfish@12.0.0` — all import a `shared:true` memory. The *only* non-shared builds under 2 MB gz are the pre-NNUE (SF9/10/11 classical) ones.
+- **NNUE net sizes** (`curl -sIL https://tests.stockfishchess.org/api/nn/<name>.nnue`, then downloaded and re-measured): `nn-61e7af4bb97d` (sf_19 smallnet) 1,166,381 raw / **966,992 br / 975,309 gz**; `nn-37f18f62d772` (SF17.1 small) 3,519,630 raw / 2,876,624 gz; `nn-ecb35f70ff2a` (sf16-7) 6,531,398 raw / 5,269,118 gz; `nn-1a298aa575a0` (sf_19 big) ~79 MB. NNUE weights barely compress (~83 % of raw).
+- **SIMD detection method**: parsed every function body's local declarations and counted `v128` (`0x7B`) locals. `stockfish@10/@11` and `stockfish.js@10` → **0** v128 locals (no SIMD; works on pre-SIMD Safari/older Android). `stockfish-18-lite-single.wasm` → 13 functions / 39 v128 locals; `sf16-7.wasm` → 20 / 72. So the classical builds are *more* portable than the SF18 build the project currently plans to ship.
+
+## 11.2 Live verification of `stockfish@11.0.0`
+
+**Browser** (Chromium, page served by `python3 -m http.server`, plain `http://127.0.0.1`, **no** COOP/COEP):
+
+```
+crossOriginIsolated=false | typeof SharedArrayBuffer=undefined
+uciok after 108 ms
+id name Stockfish 11 WASM by T. Romstad, M. Costalba, J. Kiiski, G. Linscott, D. Dugovic, F. Fichter, N. Fiekas, Chess.com, et al.
+option name Threads type spin default 1 min 1 max 1
+option name MultiPV type spin default 1 min 1 max 500
+option name Skill Level type spin default 20 min 0 max 20
+info depth 13 seldepth 23 multipv 1 score cp -22 nodes 560401 nps 890939 time 629 pv e7e6 d2d4 …
+info depth 13 seldepth 15 multipv 2 score cp -48 …
+info depth 13 seldepth 19 multipv 3 score cp -50 …
+bestmove e7e5 ponder g1f3
+TOTAL 748 ms
+```
+
+Test page used exactly this (nothing else — no wrapper, no polyfill):
+
+```js
+const w = new Worker('/engine/stockfish.js');   // stockfish.wasm sits next to it
+w.onmessage = (e) => { /* e.data is a plain UCI string */ };
+w.postMessage('uci');
+w.postMessage('setoption name MultiPV value 3');
+w.postMessage('setoption name Skill Level value 5');
+w.postMessage('position startpos moves e2e4');
+w.postMessage('go depth 13');
+```
+
+**Full UCI option list** (verbatim from `uci`, Node run):
+
+```
+option name Debug Log File type string default
+option name Contempt type spin default 24 min -100 max 100
+option name Analysis Contempt type combo default Both var Both var Off var White var Black
+option name Threads type spin default 1 min 1 max 1
+option name Hash type spin default 16 min 16 max 16
+option name Clear Hash type button
+option name Ponder type check default false
+option name MultiPV type spin default 1 min 1 max 500
+option name Skill Level type spin default 20 min 0 max 20
+option name Move Overhead type spin default 30 min 0 max 5000
+option name Minimum Thinking Time type spin default 20 min 0 max 5000
+option name Slow Mover type spin default 84 min 10 max 1000
+option name nodestime type spin default 0 min 0 max 10000
+option name UCI_Chess960 type check default false
+option name UCI_Variant type combo default chess var chess
+option name UCI_AnalyseMode type check default false
+option name Skill Level Maximum Error type spin default 200 min 0 max 5000
+option name Skill Level Probability type spin default 128 min 1 max 1000
+```
+
+**Behaviour checks** (Node 24.14.1, this Mac):
+
+| Check | Result |
+|---|---|
+| `MultiPV 4` at `go depth 14` from startpos | 4 distinct `multipv 1..4` lines (`e2e4 / g1f3 / d2d4 / c2c4`), 375 ms, **2.39 M nps** |
+| Same in Chromium worker, depth 13, MultiPV 3 | 748 ms total, **891 k nps** (browser is ~2.5× slower than Node here) |
+| `go movetime 1000` | `bestmove` at **1012 ms** — time control honoured |
+| `go infinite` + `stop` after 400 ms | `bestmove` at **579 ms** (~180 ms to react to `stop`) |
+| `Skill Level 20`, 4 repeats of `go depth 8` | always `e2e4` (deterministic) |
+| `Skill Level 3`, 4 repeats | `h2h4 / d2d4 / e2e4` (randomised — weakening works) |
+| `Skill Level 0`, 4 repeats | `e2e3 / d2d4 / e2e4` |
+| `setoption name UCI_LimitStrength value true` | ❌ engine replies **`No such option: UCI_LimitStrength`** |
+| `setoption name UCI_Elo value 1500` | ❌ **`No such option: UCI_Elo`** |
+
+⚠️ **Breaking difference vs `stockfish@18.0.8`:** SF11 has **no `UCI_LimitStrength` / `UCI_Elo`**. Difficulty must be driven by
+`Skill Level` (0–20) + `go depth` alone — plus, if finer granularity is wanted, the ddugovic/chess.com extras
+`Skill Level Maximum Error` (0–5000 cp, default 200) and `Skill Level Probability` (1–1000, default 128),
+which control how far from best and how often the engine deliberately errs. `Threads` and `Hash` are hard-pinned
+to 1 and 16 MB (min == max), so sending them is a no-op.
+
+## 11.3 How the JS finds its `.wasm` (verified from the shipped minified glue + two live browser runs)
+
+`src/stockfish.js` ends with:
+
+```js
+if (isNode) {
+  if (require.main === module) { /* readline UCI REPL */ }
+  else module.exports = STOCKFISH;                       // STOCKFISH(wasmPath) -> Module
+} else if (typeof onmessage !== "undefined" && typeof window === "undefined") {
+  stockfish = self.location.hash ? STOCKFISH(self.location.hash.substr(1)) : STOCKFISH();
+  onmessage = (e) => stockfish.postMessage(e.data, true);
+  stockfish.onmessage = (line) => postMessage(line);     // plain strings out
+}
+```
+
+and resolution is `wasmBinaryFile = Module.wasmBinaryFile || locateFile("stockfish.wasm")`, where in a
+Worker `scriptDirectory = self.location.href` truncated at the last `/`. Therefore:
+
+- `new Worker('/stockfish/stockfish.js')` → fetches **`/stockfish/stockfish.wasm`** (same directory). ✅ verified.
+- `new Worker('/stockfish/stockfish.js#/any/other/path/sf11.wasm')` → fetches the hash path. ✅ verified
+  (separate test page: worker booted to `uciok` with the wasm renamed and moved to `/wasmdir/sf11.wasm`).
+- `instantiateStreaming` is used but wrapped in a `.catch` that falls back to `instantiateArrayBuffer`,
+  so a wrong `Content-Type` degrades gracefully instead of failing. (Python's `http.server` did serve
+  `Content-Type: application/wasm`.)
+- Node: `require('.../src/stockfish.js')` exports `STOCKFISH`; call `STOCKFISH(absolutePathToWasm)`.
+  ⚠️ On Node ≥ 18 you must `delete globalThis.fetch` first, otherwise the 2020-era Emscripten glue takes
+  the `typeof fetch === "function"` branch and dies with `TypeError: Failed to parse URL from /abs/path/stockfish.wasm`.
+  (A browser Worker is unaffected.) Verified on Node 24.14.1.
+
+## 11.4 Recommendation
+
+### (a) Ship `stockfish@11.0.0` — NFR-3 is met, no deviation needed
+
+**Files to copy to `public/stockfish/` (2 files, 3.74 MB raw / 669 KB gz / 533 KB br):**
+
+| Source | Destination |
+|---|---|
+| `node_modules/stockfish11/src/stockfish.js` | `public/stockfish/stockfish.js` |
+| `node_modules/stockfish11/src/stockfish.wasm` | `public/stockfish/stockfish.wasm` |
+| `node_modules/stockfish11/license.txt` (GPL-3.0) | `public/stockfish/license.txt` |
+
+Install it side-by-side with the existing dependency using an npm alias — **verified working with pnpm 11.24.0**:
+
+```bash
+pnpm add "stockfish11@npm:stockfish@11.0.0"
+# -> package.json: "stockfish11": "npm:stockfish@11.0.0"
+# -> node_modules/stockfish11/src/{stockfish.js,stockfish.wasm,stockfish.asm.js}
+```
+
+…or simply `pnpm remove stockfish` and commit the two files into `public/stockfish/` (that also removes
+~490 MB from `node_modules`, since `stockfish@18.0.8/bin` alone is 490 MB on disk).
+
+Loading is a one-liner and needs **no** `next.config.ts` changes, no COOP/COEP, no `outputFileTracing*` entries:
+
+```ts
+// AI-mode client component only, guarded by typeof Worker !== "undefined"
+const w = new Worker("/stockfish/stockfish.js");
+w.onmessage = (e: MessageEvent<string>) => handleUciLine(e.data);  // plain strings, no wrapper object
+w.postMessage("uci");
+```
+
+Keep everything else from §5 (UCI sequence), §7 (wrapper) and §7.1 (difficulty table) — the message
+API is *simpler* than SF18's (no `{progressPort}` object, no queueing glue, no `stockfish-18-lite-single.js`
+path juggling), and the difficulty table works unchanged **except** that the `UCI_Elo` fallback mentioned
+in §8/§9 is unavailable.
+
+Why this over the currently-planned SF18 lite-single:
+
+| | `stockfish@11.0.0` | `stockfish@18.0.8` lite-single |
+|---|---|---|
+| Transfer (gz) | **669 KB** | 5.64 MB (8.4× more) |
+| NFR-3 (< 2 MB gz) | ✅ met | ❌ 2.8× over |
+| Boot to `uciok` | **108 ms** (Chromium, cold) | ~350 ms+ (§4.1) |
+| WASM memory reserved | **64 MB** fixed | **128 MB** growable to 2 GB |
+| Requires WASM SIMD | **No** | Yes (excludes older Safari/Android) |
+| Requires SAB / COOP+COEP | No | No |
+| `Skill Level` / `MultiPV` | ✅ / ✅ | ✅ / ✅ |
+| `UCI_Elo` / `UCI_LimitStrength` | ❌ | ✅ |
+| Eval | SF11 handcrafted | SF18 NNUE (stronger, better cp scores) |
+
+The only real loss is absolute playing strength and evaluation quality. For a game whose hardest
+setting is "Grandmaster = Skill Level 20, depth 18", SF11 at ~0.9 M nps in the browser is already far
+beyond any human opponent, and FR-38's "< 3 s per move" is comfortably met (depth 13 + MultiPV 3 in
+748 ms measured in-browser).
+
+### (b) If NNUE-quality evaluation is judged essential later
+
+`@lichess-org/stockfish-web@0.5.0` → `sf_19_smallnet.js` + `sf_19_smallnet.wasm` + `nn-61e7af4bb97d.nnue`
+is **1.13 MB gzipped / 1.05 MB brotli total** and is real Stockfish 19 with `Skill Level 0–20`,
+`MultiPV 1–256`, `UCI_Elo 1320–3190` and `Threads 1–1024` (verified by running it in Node, ESM,
+`await Sf_19_Smallnet_Web({listen, onError})` then `sf.setNnueBuffer(new Uint8Array(net), 0)`;
+`sf.getRecommendedNnue(0)` returns `"nn-61e7af4bb97d.nnue"`; depth 14 / MultiPV 3 / Threads 1 in **124 ms**).
+
+**But it imports a `shared: true` memory**, so the page must be cross-origin isolated
+(`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp`), which is
+very likely to break the Clerk widgets, Convex websocket and any cross-origin HDRI/asset loads unless
+every one of them ships `Cross-Origin-Resource-Policy`. Do not take this path without a dedicated
+spike. It is also **AGPL-3.0-or-later**, a materially heavier licence obligation than GPL-3.0.
+
+### (c) Not recommended: shipping SF18 lite-single lazily
+
+The previous §2.1 conclusion ("nothing under 2 MB exists, raise NFR-3 to ≤ 6 MB") is **superseded** —
+it was scoped to the `stockfish` package alone. §11.1 shows three sub-2 MB, no-SAB, `Skill Level` +
+`MultiPV` capable builds on npm. Keep SF18 lite-single only as an *optional* "maximum strength"
+download the user opts into.
+
+### GPL-3.0 obligation (applies to (a) as well)
+
+Serving the compiled `stockfish.js`/`stockfish.wasm` to browsers distributes a GPL-3.0 program.
+Ship `license.txt` alongside them in `public/stockfish/` and put a visible link to the exact upstream
+source (`https://github.com/nmrugg/stockfish.js` at the `v11.0.0` tag) in the app's about/credits page.
+
+## 11.5 Unverified / open questions (section 11)
+
+- **Elo estimates were not measured.** No claim here about SF11-classical vs SF18-NNUE strength in Elo;
+  only nps/depth/latency were measured, on this Mac (Apple Silicon, Chromium). Low-end mobile numbers
+  are unmeasured — but SF11 needs no SIMD and only 64 MB, so it should degrade better than SF18 lite-single.
+- **`stockfish.js@9.0.0` was measured but not executed** (its 190 KB gz is no better than `stockfish@10.0.2`'s 137 KB).
+- **`stockfish@11.0.0` was not run in a Node `worker_threads` Worker** (the SF18 glue refuses to
+  initialise there — §8.1). Untested for SF11; if the Eve tool ever needs a server-side engine, test that
+  first, or keep the client-computed-candidates plan from FR-35.
+- **Safari / iOS was not tested.** The no-SIMD, no-SAB, 64 MB-fixed profile should be the widest-compatible
+  option of everything surveyed, but this was verified only in Chromium.
+- **`Cross-Origin-Embedder-Policy: credentialless`** (the softer isolation mode that would make option (b)
+  survivable next to Clerk) — its Safari support was not verified in this pass.
+- **`stockfish@17.1.0`'s file list** came from `unpkg.com/stockfish@17.1.0/?meta`, not from an extracted
+  tarball (183 MB unpacked); jsDelivr's API refuses the package for exceeding its 150 MB limit.
+- **`chess-study-stockfish@0.1.0`** was inspected (README + `src/*.mjs`) but its patch was not applied or
+  run; it ships no engine bytes of its own — it only rewrites `stockfish-18-lite`'s imported-memory
+  maximum from 32768 to 8192 pages. Irrelevant to the size question, potentially relevant if the
+  threaded SF18 build is ever revisited.
+- **Long-game stability / TT behaviour of SF11** across many `ucinewgame` cycles was not stress-tested.

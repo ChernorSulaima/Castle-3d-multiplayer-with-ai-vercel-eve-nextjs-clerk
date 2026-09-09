@@ -288,3 +288,409 @@ NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/play
 - `paths.*` in the instance config are documented in the schema only as "Display config paths"; whether they also feed `<ClerkProvider>` defaults (in addition to Account Portal) was not confirmed. Prefer the `NEXT_PUBLIC_CLERK_*_URL` env vars, which are verified in the installed SDK.
 - The `clerk api --fapi` hang may be an agent-mode bug in CLI 3.3.0; not investigated further.
 - Password `min_length: 15` was left as-is; product owner may want to relax it.
+
+---
+
+# Section 8: sign-in/sign-up routes and username capture
+
+Researched 2026-09-09 against the **installed** `@clerk/nextjs@7.9.1` (which resolves
+`@clerk/react@6.15.1`, `@clerk/shared@4.31.0`, `@clerk/backend@3.17.1` under `node_modules/.pnpm/`),
+the live dev instance FAPI (`https://flowing-wildcat-1401.clerk.accounts.dev`), the Clerk Backend API,
+the shipped `@clerk/clerk-js@5` bundle, and clerk.com docs. Closes: FR-1/FR-2 route + username gaps,
+`nextjs16-shadcn.md` open question 4 (catch-all convention), `convex-clerk-nextjs.md` open question 3
+(`afterSignOutUrl`), and `clerk-setup.md`'s own "progressive sign-up was inferred, not tested" item.
+
+## 8.1 The catch-all route IS still required — and it is now enforced at runtime
+
+**Verdict: keep `src/app/sign-in/[[...sign-in]]/page.tsx` and `src/app/sign-up/[[...sign-up]]/page.tsx`.
+A plain non-catch-all `src/app/sign-in/page.tsx` will throw in dev.**
+
+Verified in the installed package, not from docs:
+`node_modules/@clerk/nextjs/dist/esm/client-boundary/uiComponents.js` wraps every `<SignIn/>` /
+`<SignUp/>` in `useEnforceCorrectRoutingProps(...)`
+(`dist/esm/client-boundary/hooks/useEnforceRoutingProps.js`), which calls
+`useEnforceCatchAllRoute` (`dist/esm/client-boundary/hooks/useEnforceCatchAllRoute.js`). That hook,
+**in non-production only** (`if (isProductionEnvironment()) return;`), issues a real
+`fetch(`${origin}${pathname}/${component}_clerk_catchall_check_${Date.now()}`)` and, on a `404`,
+throws:
+
+> `Clerk: The <SignIn/> component is not configured correctly. … 1. The "/sign-in" route is not a catch-all route. It is recommended to convert this route to a catch-all route, eg: "/sign-in/[[...rest]]/page.tsx". Alternatively, you can update the <SignIn/> component to use hash-based routing by setting the "routing" prop to "hash". 2. … all routes under "/sign-in" are protected by the middleware … consider adding "(.*)" to the end of the route pattern, eg: "/sign-in(.*)"`
+
+Two things fall out of that error text, both load-bearing for us:
+
+1. **The catch-all segment name is arbitrary.** Clerk's own suggestion is `[[...rest]]`; the docs use
+   `[[...sign-in]]`. `usePathnameWithoutCatchAll` derives the base path by stripping every array-valued
+   entry of `useParams()` off the end of `usePathname()`, so any optional-catch-all name works
+   identically. Use `[[...sign-in]]` / `[[...sign-up]]` to match Clerk's Next.js docs
+   (verified 2026-09-09 at https://clerk.com/docs/nextjs/guides/development/custom-sign-in-or-up-page,
+   which shows `app/sign-in/[[...sign-in]]/page.tsx`).
+2. **The middleware must not protect these routes.** If `clerkMiddleware` returns a redirect/404 for
+   `/sign-in/<anything>`, the probe fetch fails the same way. Any route matcher must be
+   `'/sign-in(.*)'`, not `'/sign-in'`.
+
+Note the flag `requireSessionBeforeCheck`: it is `true` for `<UserProfile/>`/`<OrganizationProfile/>`
+but **`false` for `<SignIn/>` and `<SignUp/>`** — so the probe runs for signed-out visitors too, i.e.
+you will hit this on the very first dev page load.
+
+### Minimal correct route files
+
+```tsx
+// src/app/sign-in/[[...sign-in]]/page.tsx
+import { SignIn } from '@clerk/nextjs'
+export default function Page() {
+  return <SignIn />
+}
+```
+
+```tsx
+// src/app/sign-up/[[...sign-up]]/page.tsx
+import { SignUp } from '@clerk/nextjs'
+export default function Page() {
+  return <SignUp />
+}
+```
+
+No `path`/`routing` props are needed — see 8.2. These are client-rendered Clerk components; the page
+files themselves do **not** need `'use client'` (the SDK's `client-boundary/*` modules carry it).
+
+## 8.2 Exact `<SignIn />` / `<SignUp />` props in Core 3 (`@clerk/shared@4.31.0` `dist/types/clerk.d.ts`)
+
+### Routing
+
+```ts
+// clerk.d.ts:1463
+type RoutingStrategy = 'path' | 'hash' | 'virtual';
+
+// clerk.d.ts:1589 — this is what SignInProps/SignUpProps actually extend
+type RoutingOptions =
+  | { path: string | undefined; routing?: Extract<RoutingStrategy, 'path'> }
+  | { path?: never;             routing?: Extract<RoutingStrategy, 'hash'> };
+```
+
+Gotchas, all type-level facts from the installed `.d.ts`:
+
+- **`routing="virtual"` is NOT assignable to `<SignIn/>` / `<SignUp/>`.** `'virtual'` exists on
+  `RoutingStrategy` but `RoutingOptions` narrows to `'path' | 'hash'`; `'virtual'` is used internally
+  by the modal variants (`SignInModalProps = WithoutRouting<SignInProps> & …`).
+- `path` and `routing:'hash'` are **mutually exclusive** — passing both throws
+  `incompatibleRoutingWithPathProvidedError` at runtime.
+- Default is **`'path'`**, and `path` is auto-filled. From `@clerk/react/dist/internal.mjs`
+  (`useRoutingProps`): `const path = props.path || routingOptions?.path;` and
+  `if ((props.routing || routingOptions?.routing || 'path') === 'path') { if (!path) throw noPathProvidedError(...) }`.
+  The Next.js SDK supplies `routingOptions.path` from `usePathnameWithoutCatchAll()`, so **`<SignIn />`
+  with zero props is correct** and self-configures to `routing:'path', path:'/sign-in'`.
+
+### `SignInProps` (clerk.d.ts:1597)
+
+| Prop | Type | Notes |
+|---|---|---|
+| `path` / `routing` | see above | leave unset in Next.js |
+| `forceRedirectUrl` | `string \| null` | after successful sign-in; **wins over everything** (env vars, search params, fallback) |
+| `fallbackRedirectUrl` | `string \| null` | used only when no other redirect source is present |
+| `signInUrl` | `string` | fills the "Sign in" link |
+| `signUpUrl` | `string` | fills the "Sign up" link |
+| `signUpForceRedirectUrl` / `signUpFallbackRedirectUrl` | `string \| null` | via `SignUpForceRedirectUrl & SignUpFallbackRedirectUrl` |
+| `afterSignOutUrl` | `string \| null` | via `AfterSignOutUrl` — **yes, it is on `SignInProps`** |
+| `appearance` | `ClerkAppearanceTheme` | merged over the `<ClerkProvider appearance>` global |
+| `initialValues` | `SignInInitialValues & SignUpInitialValues` | prefill |
+| `withSignUp` | `boolean` | enables the combined sign-in-or-up flow in one component |
+| `transferable` | `boolean` (default `true`) | when `false`, an OAuth sign-in with an unknown email will **not** silently become a sign-up |
+| `oauthFlow` | `'auto' \| 'redirect' \| 'popup'` | how Google/GitHub buttons open |
+| `oidcPrompt` | `string` | OIDC `prompt` param |
+| `waitlistUrl` | `string` | n/a for us |
+| `unsafeMetadata` | `SignUpUnsafeMetadata` | |
+| `__experimental` | `{ newComponents?: boolean }` | do not use |
+
+### `SignUpProps` (clerk.d.ts:1750)
+
+Same shape, mirrored: `forceRedirectUrl`, `fallbackRedirectUrl`, `signInUrl`,
+`signInForceRedirectUrl`, `signInFallbackRedirectUrl`, `afterSignOutUrl`, `appearance`,
+`unsafeMetadata`, `initialValues?: SignUpInitialValues`, `waitlistUrl`, `oauthFlow`, `oidcPrompt`,
+`__experimental`. **`SignUpProps` has no `signUpUrl`, no `withSignUp`, and no `transferable`.**
+
+### Env vars actually read by the installed SDK
+
+`grep -roh "NEXT_PUBLIC_CLERK_[A-Z_]*" node_modules/@clerk/nextjs/dist/{esm,cjs}` →
+`PUBLISHABLE_KEY, SIGN_IN_URL, SIGN_UP_URL, SIGN_IN_FORCE_REDIRECT_URL, SIGN_IN_FALLBACK_REDIRECT_URL,
+SIGN_UP_FORCE_REDIRECT_URL, SIGN_UP_FALLBACK_REDIRECT_URL, DOMAIN, IS_SATELLITE, PROXY_URL, JS_URL,
+JS_VERSION, UI_URL, UI_VERSION, PREFETCH_UI, KEYLESS_DISABLED, CHECKOUT_CONTINUE_URL, TELEMETRY_*,
+UNSAFE_DISABLE_DEVELOPMENT_MODE_CONSOLE_WARNING`.
+**There is no `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL`, `_AFTER_SIGN_UP_URL` or `_AFTER_SIGN_OUT_URL`.**
+
+> ⚠️ **Action item:** `.env.example` lists `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`,
+> `_SIGN_UP_URL=/sign-up`, `_SIGN_IN_FALLBACK_REDIRECT_URL=/play`, `_SIGN_UP_FALLBACK_REDIRECT_URL=/play`,
+> but **`.env.local` currently contains only `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+> `CLERK_SECRET_KEY`.** Without `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `clerkMiddleware`'s redirect for a
+> protected route (FR-4) falls back to the instance `display_config.sign_in_url`, which on this dev
+> instance is the hosted Account Portal `https://flowing-wildcat-1401.accounts.dev/sign-in`, not our
+> own page. Add all four lines to `.env.local` before building `/play`.
+
+## 8.3 `afterSignOutUrl` — settles `convex-clerk-nextjs.md` open question 3
+
+Grepped `@clerk/shared@4.31.0/dist/types/{clerk,redirects}.d.ts`:
+
+```ts
+// redirects.d.ts
+type AfterSignOutUrl = { afterSignOutUrl?: string | null };
+// clerk.d.ts:1282
+type ClerkOptions = … & AfterSignOutUrl & AfterMultiSessionSingleSignOutUrl & { … };
+// clerk.d.ts:2749
+type IsomorphicClerkOptions = Without<ClerkOptions, 'isSatellite'> & { … };
+// @clerk/react/dist/types-8bkUI4Jw.d.mts:10894
+type ClerkProviderProps<TUi> = Omit<IsomorphicClerkOptions, 'appearance'|'publishableKey'|…> & { … };
+// @clerk/nextjs/dist/types/types.d.ts
+type NextClerkProviderProps<TUi> = Without<ClerkProviderProps<TUi>, 'publishableKey'> & { … };
+```
+
+Conclusions (all three verified from the type graph above):
+
+- ✅ **`<ClerkProvider afterSignOutUrl="/">` is valid in v7** — it reaches `ClerkOptions` through
+  `IsomorphicClerkOptions`. This is the app-wide setting to use.
+- ✅ `afterSignOutUrl` is also valid on `<SignIn />` and `<SignUp />`.
+- ❌ **`afterSignOutUrl` is NOT a prop of `<UserButton />` in Core 3.** The full `UserButtonProps`
+  (clerk.d.ts:1948) is: `userProfileUrl`/`userProfileMode` (a discriminated pair — `'navigation'`
+  requires the URL, `'modal'` forbids it), `showName?: boolean`, `defaultOpen?: boolean`,
+  `signInUrl?: string`, `afterSwitchSessionUrl?: string`, `appearance?`, `userProfileProps?`,
+  `customMenuItems?: CustomMenuItem[]`, `__experimental_asStandalone?`. Passing `afterSignOutUrl` to
+  `<UserButton>` is a TS error.
+- For a one-off sign-out target use `<SignOutButton redirectUrl="/" />`
+  (`SignOutButtonProps = { redirectUrl?: string; sessionId?: string; signOutOptions?: SignOutOptions /* deprecated */; children? }`,
+  `@clerk/react/dist/index.d.mts:256`).
+
+**Recommended for this app** — in `src/app/layout.tsx`:
+
+```tsx
+<ClerkProvider afterSignOutUrl="/">{children}</ClerkProvider>
+```
+
+### Related Core 3 breaking change (bites the board/lobby header)
+
+`@clerk/nextjs/dist/esm/removedControlComponents.js` — `<SignedIn>`, `<SignedOut>` and `<Protect>`
+now **throw at render**: `Clerk: <SignedIn> is not available in @clerk/nextjs Core 3.` Use the
+exported `<Show>` instead:
+
+```ts
+// @clerk/shared/dist/types/authorization.d.ts:61-86
+type ShowWhenCondition = 'signed-in' | 'signed-out' | ShowProtectParams
+                       | ((has: CheckAuthorizationWithCustomPermissions) => boolean);
+type ShowProps = PendingSessionOptions & { when: ShowWhenCondition; fallback?: unknown };
+```
+
+```tsx
+import { Show, SignInButton, UserButton } from '@clerk/nextjs'
+<Show when="signed-out"><SignInButton /></Show>
+<Show when="signed-in"><UserButton showName /></Show>
+```
+
+## 8.4 Google + GitHub: nothing to do beyond the providers already being on
+
+Re-pulled the live instance config (`clerk config pull`, config_version `v1_9bec58c5`):
+
+```jsonc
+"connection_oauth_google": { "enabled": true, "authenticatable": true,
+  "client_id": "", "client_secret": "", "block_email_subaddresses": true,
+  "show_account_selector_prompt": false },
+"connection_oauth_github": { "enabled": true, "authenticatable": true,
+  "client_id": "", "client_secret": "", "block_email_subaddresses": false }
+```
+
+Exact CLI key names, for the record: **`connection_oauth_google`** and **`connection_oauth_github`**
+(singular `connection_`, not `connections_`; `connections_oauth_custom` is a separate array key).
+Both were already `enabled: true` from Section 2's push — **no change was needed and none was made.**
+Empty `client_id`/`client_secret` = Clerk's **shared development credentials**.
+
+The FAPI `/v1/environment` confirms the components will render both buttons:
+
+```jsonc
+"user_settings.social": {
+  "oauth_google": { "enabled": true, "authenticatable": true, "not_selectable": false,
+                    "strategy": "oauth_google", "name": "Google" },
+  "oauth_github": { "enabled": true, "authenticatable": true, "not_selectable": false,
+                    "strategy": "oauth_github", "name": "GitHub" }
+}
+```
+
+**Proved end-to-end (live FAPI calls, 2026-09-09).** `POST /v1/client/sign_ups` with
+`strategy=oauth_google` and with `strategy=oauth_github` both returned
+`status: "missing_requirements"` and a real provider authorize URL:
+
+- Google → `https://accounts.google.com/o/oauth2/auth?…client_id=787459168867-….apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fclerk.shared.lcl.dev%2Fv1%2Foauth_callback&scope=openid userinfo.email userinfo.profile`
+- GitHub → `https://github.com/login/oauth/authorize?…client_id=456274a3f3e4821d16e4&redirect_uri=https%3A%2F%2Fclerk.shared.lcl.dev%2Fv1%2Foauth_callback&scope=user:email read:user`
+
+So **FR-1 needs zero extra app code or dashboard work for the dev instance** — the `<SignIn/>` /
+`<SignUp/>` components render the buttons from `user_settings.social`. Real OAuth apps are only
+needed for the production instance (already tracked in Section 7 step 2).
+
+### Bot protection will block any scripted/custom sign-up
+
+`user_settings.sign_up = { progressive: true, mode: "public", captcha_enabled: true,
+captcha_widget_type: "smart", legal_consent_enabled: false, custom_action_required: false }`.
+A raw `POST /v1/client/sign_ups` without a captcha token fails with
+`{"code":"captcha_missing_token","message":"Authentication unsuccessful due to failed security validations."}`.
+Implications:
+
+- The **prebuilt** `<SignUp/>` handles this itself (renders the Turnstile widget) — nothing to do.
+- If anyone later builds a **custom** sign-up with `useSignUp()`, they must render
+  `<div id="clerk-captcha" />` in the form or the same error appears.
+- For **automated tests / scripts**, mint a testing token and pass it as a FAPI query param:
+  `POST https://api.clerk.com/v1/testing_tokens` (Bearer `CLERK_SECRET_KEY`) →
+  `{"object":"testing_token","token":"…","expires_at":…}`, then append
+  `&__clerk_testing_token=<token>` to the FAPI URL. Verified working — this is how 8.5 was proved.
+
+## 8.5 Username after OAuth: the "continue" step is automatic — now proved, not inferred
+
+Instance state (FAPI `/v1/environment`, `user_settings`):
+
+```jsonc
+"sign_up":   { "progressive": true, "mode": "public", "captcha_enabled": true, "mfa": {"required": false} },
+"attributes.username":      { "enabled": true, "required": true, "used_for_first_factor": true,
+                              "verify_at_sign_up": false, "immutable": false },
+"attributes.email_address": { "enabled": true, "required": true, "used_for_first_factor": true,
+                              "first_factors": ["email_code"], "verify_at_sign_up": true },
+"attributes.password":      { "enabled": true, "required": true, "used_for_first_factor": false },
+"attributes.first_name":    { "enabled": false, "required": false },
+"attributes.last_name":     { "enabled": false, "required": false },
+"username_settings": { "min_length": 3, "max_length": 20,
+                       "allow_numeric_usernames": false, "allow_extended_special_characters": false },
+"password_settings": { "min_length": 15, "enforce_hibp_on_sign_in": true, … }
+```
+
+**Proof 1 — the server really does defer the username (live FAPI, testing token used to bypass
+captcha).** `POST /v1/client/sign_ups` with only `email_address` + `password`:
+
+```jsonc
+{ "status": "missing_requirements",
+  "missing_fields":   ["username"],
+  "required_fields":  ["email_address", "username", "password"],
+  "optional_fields":  ["oauth_github", "oauth_google"],
+  "unverified_fields":["email_address"],
+  "created_session_id": null, "created_user_id": null }
+```
+
+That is progressive sign-up: the attempt is **created and persisted** in `missing_requirements`
+state with `missing_fields: ["username"]` instead of being rejected. `optional_fields` listing
+`oauth_google`/`oauth_github` confirms an OAuth connection is an accepted way to satisfy the same
+attempt (this is the "transfer" path a Google/GitHub button takes).
+
+**Proof 2 — clerk-js navigates to the continue step off exactly that field.** Grepped the shipped
+`@clerk/clerk-js@5` bundle (`cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.headless.js`). Inside
+`_handleRedirectCallback` (the OAuth return handler) it builds:
+
+```js
+o = { status: i.status, missingFields: i.missingFields, externalAccountStatus: a.status, … }
+g = c(e.continueSignUpUrl || e0({ base: r.signUpUrl, hashPath: "/continue" }, { stringify: true }))
+_ = ({ missingFields: t }) => t.length ? g() : (({ signUp, verifyEmailP… }))
+```
+
+i.e. **after the Google/GitHub round-trip, if `signUp.missingFields` is non-empty, clerk-js navigates
+to `<signUpUrl>/continue`** (`/sign-up/continue` for us) and the mounted `<SignUp/>` renders the
+missing-field form there. Nothing to wire up — **but this is precisely why the catch-all in 8.1 is
+mandatory**: `/sign-up/continue` must resolve to the same page, and so must `/sign-up/sso-callback`
+and `/sign-up/verify-email-address`.
+
+Clerk's docs describe the same lifecycle for the à-la-carte primitives — `<SignUp.Step name="continue">`
+is documented as "triggered when a user initiates a sign-up but has not provided all required fields,
+such as when using a social connection", with `username` as the worked example
+(clerk-docs `guides/customizing-clerk/elements/{guides,reference}/sign-up.mdx`). The prebuilt
+`<SignUp/>` implements that step internally.
+
+**Conclusion for FR-2: every player, however they sign up, ends with a non-null `username` of 3–20
+chars, no numeric-only, no extended special characters.** The defensive derived-username fallback in
+Convex stays optional.
+
+Two caveats an implementer should know:
+
+- The username picked at `/sign-up/continue` is user-chosen, **not** derived from the Google/GitHub
+  profile — expect a real extra form step in the OAuth flow. Budget for it in the UX.
+- `username_settings.immutable: false`, so players can later change it in `<UserProfile/>`. Convex's
+  `players` record must therefore be keyed on the Clerk **user id** (`sub`), never on the username,
+  and the leaderboard should refresh `username` from the token / a `user.updated` webhook.
+
+## 8.6 `identity.nickname` for a non-password (OAuth-shaped) user — verified
+
+The existing `convex` JWT template (`jtmp_3J5WhMRDDwh8FuS83KACkOHJV3H`, fetched live via
+`GET https://api.clerk.com/v1/jwt_templates`) is unchanged:
+
+```jsonc
+{ "aud": "convex", "name": "{{user.full_name}}", "email": "{{user.primary_email_address}}",
+  "picture": "{{user.image_url}}", "nickname": "{{user.username}}",
+  "given_name": "{{user.first_name}}", "family_name": "{{user.last_name}}",
+  "updated_at": "{{user.updated_at}}", "email_verified": "{{user.email_verified}}" }
+```
+
+Section 3's proof used an email+password user. To cover the OAuth case as closely as possible without
+real Google/GitHub credentials, a **password-less** user was created via the Backend API
+(`POST /v1/users` with `username` + `email_address` + `skip_password_requirement: true`), a session
+minted (`POST /v1/sessions`), and a token issued (`POST /v1/sessions/{sid}/tokens/convex`). Decoded
+payload:
+
+```jsonc
+{ "aud": "convex", "iss": "https://flowing-wildcat-1401.clerk.accounts.dev",
+  "sub": "user_3J5Z53p0RLpPvCOzLsRuutZZUBw",
+  "nickname": "oauthproxy",                      // ← username resolves
+  "email": "oauthproxy+clerk_test@example.com", "email_verified": true,
+  "picture": "https://img.clerk.com/eyJ0eXBlIjoiZGVmYXVsdCIs…",   // ← never null
+  "name": null, "given_name": null, "family_name": null,
+  "updated_at": 1788952716, "exp": …, "iat": …, "nbf": …, "jti": … }
+```
+
+*(The throwaway user was deleted afterwards; `GET /v1/users` now returns `[]`.)*
+
+Takeaways for the Convex side:
+
+- `nickname` is resolved from the **user attribute**, independent of how the account was created —
+  password, OAuth or Backend API. Since `username.required_for_sign_up: true`, `identity.nickname`
+  is safe to treat as always-present. ✅
+- `picture` (`identity.pictureUrl` in Convex) is always populated: a provider avatar for OAuth users,
+  a Clerk-generated `img.clerk.com` default otherwise. Good enough for FR-2's avatar on board / lobby /
+  leaderboard — **do not** render `<img>` unguarded on `name`.
+- ⚠️ **`name` / `given_name` / `family_name` are `null` on this instance** because
+  `user_model.first_name.enabled` and `.last_name.enabled` are both `false`. Any UI or Convex code
+  reading `identity.name` (or `givenName`/`familyName`) must fall back to `identity.nickname`.
+  Whether an OAuth sign-up back-fills `first_name`/`last_name` from the Google/GitHub profile even
+  while those attributes are disabled is **not verified** (see open questions).
+
+## 8.7 Copy-paste checklist for the implementation agent
+
+1. Add the four missing Clerk URL vars to `.env.local` (8.2):
+   `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up`,
+   `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/play`,
+   `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/play`.
+2. Create `src/app/sign-in/[[...sign-in]]/page.tsx` and `src/app/sign-up/[[...sign-up]]/page.tsx`
+   exactly as in 8.1 — **optional catch-all, no props**.
+3. In `proxy.ts` (Next 16's middleware), make the public matcher `'/sign-in(.*)'` / `'/sign-up(.*)'`,
+   never the bare paths, or the dev-mode catch-all probe 404s and `<SignIn/>` throws.
+4. `<ClerkProvider afterSignOutUrl="/">` in `src/app/layout.tsx`; **do not** put `afterSignOutUrl` on
+   `<UserButton>`.
+5. Replace any `<SignedIn>/<SignedOut>/<Protect>` with `<Show when="signed-in" | "signed-out">`.
+6. Expect a `/sign-up/continue` username step after Google/GitHub. Do not build a custom one.
+7. Read the display name from `identity.nickname` (Convex) / `user.username` (client), and the avatar
+   from `identity.pictureUrl` / `user.imageUrl`. Never from `identity.name`.
+8. Password sign-up on this instance needs **≥15 characters** and is HIBP-checked — a weak demo
+   password returns `form_password_pwned`. Mention this if you write a QA script.
+
+## Unverified / open questions (Section 8)
+
+- **The post-callback half of the OAuth flow was not driven in a browser.** Everything up to the
+  provider redirect was executed live (8.4), and the clerk-js code that reacts to `missingFields` on
+  return was read from the shipped bundle (8.5), but no one actually logged into Google/GitHub. The
+  claim "after OAuth, `<SignUp/>` shows a username step" is therefore code-and-API-proved rather than
+  click-proved. Confirm with one manual sign-up once `/sign-up/[[...sign-up]]` exists.
+- The exact set of internal sub-paths the catch-all must cover is only partly confirmed:
+  `/sign-up/continue` is verified from the clerk-js bundle; `sso-callback`,
+  `verify-email-address`, `factor-one` are the conventional siblings and were **not** individually
+  located in the bundle (Core 3 moved the UI out of clerk-js into a separate `@clerk/ui` CDN bundle,
+  which was not downloaded). The catch-all covers all of them regardless, so this is informational.
+- Whether an OAuth sign-up populates `first_name`/`last_name` (and therefore `name`/`given_name`/
+  `family_name` in the Convex JWT) while `user_model.first_name.enabled = false` — untested. Treat
+  those claims as possibly-null either way.
+- Whether Clerk sets `has_image: true` / a provider avatar URL for Google/GitHub users on a shared-dev-
+  credentials instance — untested (the Backend-API-created proxy user got the default `img.clerk.com`
+  avatar with `has_image: false`).
+- `instance.paths.{sign_in,sign_up}` are still `null` and were deliberately **not** changed; the
+  `NEXT_PUBLIC_CLERK_*_URL` env vars are the verified mechanism. The earlier open question about
+  whether `paths.*` also feeds `<ClerkProvider>` defaults remains open (it feeds
+  `display_config.sign_in_url`, which is the fallback the SDK uses when the env var is absent — that
+  much is confirmed by `display_config` returning the accounts.dev URLs).
+- `oauthFlow: 'auto' | 'redirect' | 'popup'` — the actual default behaviour of `'auto'` (which
+  conditions choose popup) was not determined; leaving the prop unset is fine.
