@@ -42,3 +42,7 @@ next-env.d.ts
 
 # keep the env template
 !.env.example
+
+# eve local state / build output
+.eve/
+.output/
