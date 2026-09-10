@@ -81,7 +81,12 @@ export function GameStatusPill({
             Check
           </span>
         }
-        label={<span className="hidden sm:inline">{turnLabel} to move</span>}
+        label={
+          <>
+            <span className="sr-only">· </span>
+            <span className="sr-only sm:not-sr-only">{turnLabel} to move</span>
+          </>
+        }
       />
     );
   }
@@ -93,7 +98,7 @@ export function GameStatusPill({
       dot
       className={cn("shrink-0", className)}
       value={`Move ${Math.max(1, moveNumber)}`}
-      label={<span className="hidden sm:inline">· {turnLabel} to move</span>}
+      label={<span className="sr-only sm:not-sr-only">· {turnLabel} to move</span>}
     />
   );
 }

@@ -181,6 +181,9 @@ export function GameChat({
           <ChatMessage
             key={item.id}
             variant="ai"
+            // e2e hook: a PERSISTED commentary bubble, as opposed to the live
+            // "thinking"/streaming ones below. Attribute only.
+            data-testid="chat-ai-message"
             personaName={item.personaName}
             moveLabel={item.moveLabel}
             tag={item.tag}

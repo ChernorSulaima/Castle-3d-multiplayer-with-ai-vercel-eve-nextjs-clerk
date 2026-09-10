@@ -1,15 +1,24 @@
 // e2e/auth.spec.ts
-// The flows behind `src/proxy.ts`. Skipped in full unless E2E_CLERK_USER_USERNAME and
-// E2E_CLERK_USER_PASSWORD are set, so `pnpm e2e` stays runnable with no credentials.
+// The flows behind `src/proxy.ts`. Skipped in full unless E2E_CLERK_USER_EMAIL (or
+// E2E_CLERK_USER_USERNAME + E2E_CLERK_USER_PASSWORD) is set, so `pnpm e2e` stays
+// runnable with no credentials.
 //
 // Serial: the app allows one active game per player (`already-in-game`), so these
 // tests share a resource and each one hands the account back clean.
+//
+// Retargeted at the UI_REDESIGN §5/§6 markup: /play sets both games up INLINE on the
+// mode cards (no dialogs), and the game screen keeps its verbs in one labelled action
+// bar with the move list behind the sidebar's "Moves" tab.
 import { expect, test } from "@playwright/test";
 import {
   abandonActiveGame,
+  actionBar,
+  chatPanel,
   clerkUsername,
   hasClerkTestUser,
   moveHistory,
+  openChatTab,
+  openMovesTab,
   playMove,
   resign,
   sanMoves,
@@ -17,6 +26,7 @@ import {
   signIn,
   square,
   turnIndicator,
+  turnPhraseNow,
 } from "./helpers/app";
 
 const PLAYER_TWO = "E2E Rival";
@@ -26,7 +36,7 @@ test.describe.configure({ mode: "serial" });
 test.describe("authenticated flows", () => {
   test.skip(
     !hasClerkTestUser,
-    "Set E2E_CLERK_USER_USERNAME and E2E_CLERK_USER_PASSWORD (Clerk development instance) to run these.",
+    "Set E2E_CLERK_USER_EMAIL (or E2E_CLERK_USER_USERNAME and E2E_CLERK_USER_PASSWORD) to run these.",
   );
 
   test.beforeEach(async ({ page }) => {
@@ -37,31 +47,35 @@ test.describe("authenticated flows", () => {
     await abandonActiveGame(page);
 
     // --- create ------------------------------------------------------------
-    await page.getByRole("button", { name: "Set up a local game" }).click();
-    const setup = page.getByRole("dialog", { name: "Two players, one device" });
-    await expect(setup).toBeVisible();
-    await setup.getByLabel("Player 2 name (optional)").fill(PLAYER_TWO);
-    await setup.getByRole("button", { name: "Start game" }).click();
+    // §6: the "Pass and play" card carries its own Player 2 field — no dialog.
+    await page.getByLabel("Player 2 name").fill(PLAYER_TWO);
+    await page.getByRole("button", { name: "Start the game" }).click();
 
     await expect(page).toHaveURL(/\/game\/[a-z0-9]+$/i);
+    // §5.1: the move list is a tab, and it leads in a non-AI game — but ask for it
+    // by name rather than relying on that default.
+    await openMovesTab(page);
     await expect(moveHistory(page)).toBeVisible();
 
     // --- 1. e4 on the 2D board --------------------------------------------
     await setBoardView(page, "2D");
-    const whiteToMove = (await turnIndicator(page).innerText()).trim();
+    const whiteToMove = await turnPhraseNow(page);
     expect(whiteToMove).toMatch(/to move$/);
 
     await playMove(page, "e2", "e4");
 
-    await expect(moveHistory(page).getByRole("button", { name: "e4", exact: true })).toBeVisible();
-    expect(await sanMoves(page)).toEqual(["e4"]);
+    // `games.makeMove` is a server round trip; wait for the subscription to deliver
+    // the move before reading the list synchronously.
+    await expect.poll(() => sanMoves(page)).toEqual(["e4"]);
+    // The cell is a real control in the list — `MoveList` names it "Move 1, e4".
+    await expect(moveHistory(page).getByRole("button", { name: "Move 1, e4" })).toBeVisible();
     // The board itself moved the piece, not just the list: e4 now announces a pawn.
     await expect(square(page, "e4")).toHaveAttribute("aria-label", /white pawn/i);
 
-    // The turn indicator names whoever is to move; in a local game that is the
-    // other seat's name, so it must have changed.
+    // The status pill names whoever is to move; in a local game that is the other
+    // seat's name, so it must have changed.
     await expect(turnIndicator(page)).toContainText(`${PLAYER_TWO} to move`);
-    expect((await turnIndicator(page).innerText()).trim()).not.toBe(whiteToMove);
+    expect(await turnPhraseNow(page)).not.toBe(whiteToMove);
 
     // --- 3D and back, with the game state intact (FR-14) -------------------
     await setBoardView(page, "3D");
@@ -71,9 +85,11 @@ test.describe("authenticated flows", () => {
     await expect(turnIndicator(page)).toContainText(`${PLAYER_TWO} to move`);
 
     // --- take back one half-move (FR-43) -----------------------------------
-    await page.getByRole("button", { name: "Undo move" }).click();
+    const undo = actionBar(page).getByRole("button", { name: "Undo move" });
+    await expect(undo).toBeEnabled();
+    await undo.click();
     await expect(moveHistory(page).getByText("No moves yet.")).toBeVisible();
-    expect(await sanMoves(page)).toEqual([]);
+    await expect.poll(() => sanMoves(page)).toEqual([]);
     await expect(turnIndicator(page)).toContainText(whiteToMove);
 
     await resign(page);
@@ -83,50 +99,44 @@ test.describe("authenticated flows", () => {
     await abandonActiveGame(page);
 
     // --- create ------------------------------------------------------------
-    await page.getByRole("button", { name: "Choose an opponent" }).click();
-    const setup = page.getByRole("dialog", { name: "Play against the computer" });
-    await expect(setup).toBeVisible();
-
-    // The difficulty <Select/>; its popup is portalled outside the dialog.
-    await setup.locator('[data-slot="select-trigger"]').click();
-    await page.getByRole("option", { name: /^Beginner/ }).click();
-    // Pip is the Beginner persona, so the submit button confirms the selection.
-    const start = setup.getByRole("button", { name: "Play Pip" });
+    // §6: the personas are chips on the "Play the AI" card. Pip is Beginner, so the
+    // submit button ("Play Pip") confirms the selection.
+    await page
+      .getByRole("group", { name: "Opponent" })
+      .getByRole("button", { name: "Pip", exact: true })
+      .click();
+    const start = page.getByRole("button", { name: "Play Pip" });
     await expect(start).toBeVisible();
     await start.click();
 
     await expect(page).toHaveURL(/\/game\/[a-z0-9]+$/i);
     await setBoardView(page, "2D");
 
-    // The colour radio defaults to White, so the player opens.
+    // The colour chips default to White, so the player opens.
     await expect(turnIndicator(page)).toContainText("You to move");
     // In AI games the board stays locked until the engine worker is ready (Stockfish 18
     // is a 5.6 MB first download), so wait for the squares to enable before moving.
     await expect(square(page, "e2")).toBeEnabled({ timeout: 90_000 });
 
     await playMove(page, "e2", "e4");
-    // `games.makeMove` is a server round trip; wait for the subscription to deliver the
-    // move before reading the list synchronously (the local-game test does the same).
-    await expect(moveHistory(page).getByRole("button", { name: "e4", exact: true })).toBeVisible();
-    expect(await sanMoves(page)).toEqual(["e4"]);
+    await expect.poll(() => sanMoves(page), { timeout: 30_000 }).toEqual(["e4"]);
 
     // --- the AI answers ----------------------------------------------------
     // Stockfish loads in a worker, the agent (or the engine fallback) picks a move,
     // and `games.makeAiMove` writes it plus a commentary row.
     await expect
       .poll(async () => (await sanMoves(page)).length, {
-        timeout: 25_000,
+        timeout: 45_000,
         intervals: [500],
         message: "the AI never replied",
       })
       .toBeGreaterThanOrEqual(2);
 
-    const commentary = page.locator('[data-slot="commentary-panel"]');
-    await expect(commentary).toBeVisible();
-    await expect(commentary.getByText(/will comment once the game is under way/)).toBeHidden({
-      timeout: 25_000,
-    });
-    await expect(commentary.locator("ul > li")).not.toHaveCount(0);
+    // §5.1: commentary is a chat bubble in the Chat tab, not a side panel.
+    await openChatTab(page);
+    const chat = chatPanel(page);
+    await expect(chat.getByText(/will say something once the game is under way/)).toBeHidden();
+    await expect(chat.getByTestId("chat-ai-message").first()).toBeVisible({ timeout: 45_000 });
 
     await resign(page);
   });
