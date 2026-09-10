@@ -383,3 +383,27 @@ the scene work (exact camera fit, sharp backdrops, table, curated rooms). None b
 7. **Mobile bar naming.** The bar shows "Hint" with the count on its face; the accessible name
    stays "Ask for a hint · N left" everywhere. Flip lives in the More sheet on phones so five
    buttons fit 390 px without truncating.
+
+## 8. Castle Pro and the tutor (2026-09-11)
+
+Shipped per `docs/PRO_TUTOR.md`; verified end to end (Clerk checkout with the test card, a real
+model turn, the browser-side Stockfish tool round trip, annotations on both boards). Residues:
+
+1. **Conversation is not persisted** (§9, by design) and is also lost when the panel moves between
+   surfaces: resizing across 1024 or 1280, or entering and leaving fullscreen. Within one surface
+   it survives collapsing.
+2. **Overlay semantics at 1024–1279.** The tutor overlay is `aria-modal="true"` with a working
+   focus trap, but the board behind it is deliberately NOT `inert`, because §3 puts the panel over
+   the board's left half so the drawing stays visible and playable. A stricter resolution needs a
+   spec decision.
+3. **Dev harness badge at phone width** (`src/app/dev/game/harness.tsx`): the scenario badge sits
+   over the left of the chat-peek expander at 390. No free corner exists at every phone size; the
+   fix is a dismiss control or auto-hide. Development only.
+4. **Gateway credentials.** The tutor route reports 503 `tutor-unavailable` when no AI Gateway
+   credential is present (an expired local `VERCEL_OIDC_TOKEN` counts as absent; `vercel env pull`
+   refreshes it). Production uses the same mechanism as the opponent's agent.
+5. **Free plan copy lives in Clerk config**, not source: `clerk config patch` set the `free_user`
+   description on 2026-09-11. The Pro plan's price is never written in the repo.
+6. **The e2e test user `castle-e2e` is now a Pro subscriber** (dev gateway, test card), so
+   `e2e/pro.spec.ts` skips the checkout branch and annotates the run; cancel the subscription
+   from the Clerk dashboard to re-exercise checkout.

@@ -91,7 +91,10 @@ Panel anatomy (all states must render in the dev harness):
    the tutor." with the Go Pro button), `quota` ("The tutor has answered 40 questions in this
    game. Start a new game to keep going."), network/model errors ("The tutor did not answer. Try
    again." with a retry), engine unavailable ("The engine is busy with the opponent's move; the
-   tutor will answer without analysis." — still answer).
+   tutor will answer without analysis." — still answer). Added at integration (2026-09-11):
+   `tutor-unavailable` (HTTP 503 — the deployment has no usable AI Gateway credential, so no
+   turn was charged) renders "The tutor is not available right now." with **no** retry, because
+   a retry would fail identically; the composer is disabled with the same line.
 6. **Empty state** (unlocked, no messages): one tutor bubble: "Ask me about any position. I will
    explain and mark the board."
 

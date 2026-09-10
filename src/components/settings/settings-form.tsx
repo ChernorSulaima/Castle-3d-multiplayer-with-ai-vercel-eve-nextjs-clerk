@@ -10,14 +10,19 @@
 // change. `SettingsWorkbench` (settings-workbench.tsx) is the /settings page's
 // two-column arrangement of this same form.
 import { useUser } from "@clerk/nextjs";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useClerk } from "@clerk/nextjs";
+import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Attributions } from "@/components/settings/attributions";
 import { BoardViewPicker, GraphicsPicker } from "@/components/settings/quality-picker";
 import { RoomPicker } from "@/components/settings/room-picker";
+import { useClerkAppearance } from "@/lib/clerk-appearance";
+import { useTutorAccess } from "@/components/tutor/access";
 import { useSettingsWriter } from "@/hooks/use-settings-sync";
+import { cn, focusRing } from "@/lib/ui";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { ENGINE_BUILD_LABEL } from "@/lib/constants";
 import type { PlayerSettings } from "@/lib/types";
@@ -98,6 +103,79 @@ function EngineSection() {
   );
 }
 
+/**
+ * The "Plan" row of PRO_TUTOR.md §7. Three states, because `has` is undefined until
+ * Clerk's session claims land and rendering "Free" in that gap would offer a member
+ * they already paid something they already have.
+ *
+ * Managing and cancelling both live in Clerk's own user profile (its Billing section),
+ * opened as a modal with the app's palette — there is no second billing UI to keep in
+ * step, and no place here where a card number could be typed.
+ */
+function PlanSection() {
+  const { hasTutor } = useTutorAccess();
+  const clerk = useClerk();
+  const appearance = useClerkAppearance();
+
+  return (
+    <Section
+      id="settings-plan"
+      title="Plan"
+      description="Castle is free. Pro adds the tutor — the coach that explains a position and marks the board."
+    >
+      {hasTutor === undefined ? (
+        <div className="flex items-center justify-between gap-4" aria-busy>
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-9 w-36 rounded-lg" />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[12px] font-medium",
+                  hasTutor
+                    ? "border border-primary/40 text-primary"
+                    : "bg-bg-sunken text-muted-foreground",
+                )}
+              >
+                {hasTutor ? "Pro" : "Free"}
+              </span>
+              <span aria-hidden className="text-muted-foreground">·</span>
+              {hasTutor ? "your membership is active" : "the tutor is locked"}
+            </p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+              {hasTutor
+                ? "Billing and cancellation both live in your account."
+                : "Everything else — rated games, the AI opponents, the rooms — stays free."}
+            </p>
+          </div>
+
+          {hasTutor ? (
+            <Button
+              variant="outline"
+              size="lg"
+              className="min-h-11"
+              onClick={() => clerk.openUserProfile({ appearance })}
+            >
+              Manage in your account
+            </Button>
+          ) : (
+            <Link
+              prefetch={false}
+              href="/pro"
+              className={cn(buttonVariants({ size: "lg" }), "min-h-11 px-4", focusRing)}
+            >
+              Go Pro
+            </Link>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function AccountSection() {
   const { isLoaded, user } = useUser();
   return (
@@ -126,6 +204,9 @@ function AccountSection() {
 }
 
 export interface SettingsFormProps {
+  /** The /settings page shows the "Plan" row; the in-game Room drawer does not —
+   *  nobody wants a subscription pitch beside a live board. */
+  showPlan?: boolean;
   /** The ONE debounced `players.updateSettings` writer for this tree. The form does
    *  not own it: the game shell persists the 2D/3D toggle through the same writer
    *  (FR-15), and two writers would fire two mutations per change. */
@@ -141,7 +222,7 @@ export interface SettingsFormProps {
  * localStorage and merged `players.me`, the store still holds SSR defaults, and
  * rendering those as "selected" would flash the wrong choices.
  */
-export function SettingsForm({ save }: SettingsFormProps) {
+export function SettingsForm({ save, showPlan = false }: SettingsFormProps) {
   const hydrated = useUiStore((s) => s.hydrated);
   const boardFlipEnabled = useUiStore((s) => s.boardFlipEnabled);
   const setBoardFlipEnabled = useUiStore((s) => s.setBoardFlipEnabled);
@@ -205,6 +286,7 @@ export function SettingsForm({ save }: SettingsFormProps) {
       </Section>
 
       <EngineSection />
+      {showPlan ? <PlanSection /> : null}
       <AccountSection />
 
       <Section
@@ -221,5 +303,5 @@ export function SettingsForm({ save }: SettingsFormProps) {
 /** The /settings page has no other settings writer to share, so it owns one here. */
 export function StandaloneSettingsForm() {
   const save = useSettingsWriter();
-  return <SettingsForm save={save} />;
+  return <SettingsForm save={save} showPlan />;
 }

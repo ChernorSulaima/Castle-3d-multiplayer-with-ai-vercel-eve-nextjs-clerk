@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { preloadRoomAssets } from "@/components/settings/room-picker";
 import { useHint } from "@/components/ai/use-hint";
+import { TutorPanel } from "@/components/tutor/tutor-panel";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { useAiTurn } from "@/hooks/use-ai-turn";
 import { useGameController } from "@/hooks/use-game-controller";
@@ -23,6 +24,7 @@ import { ABANDON_TIMEOUT_MS, MAX_HINTS_PER_GAME } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { errorCopyFor } from "@/lib/errors";
 import { useAiStore } from "@/lib/stores/ai-store";
+import { useTutorStore } from "@/lib/stores/tutor-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import type { BoardView, Colour, GameId, GameView } from "@/lib/types";
 import { GameShellView, type GameShellMeta } from "./game-shell-view";
@@ -82,6 +84,14 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
   );
 
   useHeartbeat(gameId, active === true);
+
+  // docs/PRO_TUTOR.md §4: the tutor's marks belong to ONE game. Cleared here, in
+  // the container, rather than in a cleanup inside the panel: this effect runs
+  // after every child's, so it can never race the panel's own "put the newest
+  // answer on the board" — and a brand-new screen has no answers to lose.
+  useEffect(() => {
+    useTutorStore.getState().clearAnnotations();
+  }, [gameId]);
 
   // P5 owns the pipeline; the game page is where it has to be mounted.
   // Spectators must never drive it — `games.makeAiMove` requires a participant.
@@ -237,6 +247,18 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
     playAgainPending,
     onPlayAgain: playAgain,
     onRetryEngine: aiTurn.retryEngine,
+    // docs/PRO_TUTOR.md §1: the tutor is offered in EVERY game a member plays or
+    // watches. The panel itself decides locked from unlocked (`useTutorAccess`),
+    // and the route refuses anything a client-side flag could have got wrong.
+    tutor: (
+      <TutorPanel
+        gameId={gameId}
+        fen={controller.board.fen}
+        moves={game?.moves ?? []}
+        ply={controller.reviewPly ?? (game?.moves.length ?? 0)}
+        reviewing={controller.reviewPly !== null}
+      />
+    ),
     roomSettings: <SettingsForm save={saveSettings} />,
     onRoomOpenChange,
   };

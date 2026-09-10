@@ -22,6 +22,7 @@ import {
   MAX_LIVE_GAMES,
   MAX_LOCAL_NAME_LENGTH,
   MAX_RECENT_GAMES,
+  MAX_TUTOR_TURNS_PER_GAME,
   PRESENCE_GC_LIMIT,
   PRESENCE_TTL_MS,
   SPECTATOR_REFRESH_LIMIT,
@@ -732,6 +733,63 @@ export const useHint = mutation({
     const hintsUsed = game.hintsUsed + 1;
     await ctx.db.patch("games", game._id, { hintsUsed });
     return { hintsUsed, remaining: MAX_HINTS_PER_GAME - hintsUsed };
+  },
+});
+
+/**
+ * docs/PRO_TUTOR.md §5.3. The tutor's per-game spend guard — NOT the Pro gate.
+ *
+ * Clerk cannot put `pla`/`fea` in a custom JWT template, so Convex never sees the
+ * caller's plan (docs/research/clerk-billing.md). Pro is enforced in the Next.js
+ * route with `has({ feature: "tutor" })`; this counter only caps what one game can
+ * cost, and is charged with the caller's own token before the model call.
+ *
+ * Unlike `useHint` there is no seat check and no `status` check: §5.2 says a member
+ * may ask the tutor about a game they are SPECTATING, and about one that is already
+ * over. But "no seat check" is not "no check". A `mutation` is public API, game ids
+ * are published by `listLive` to the spectate list and the landing ticker, and the
+ * counter never resets — so without this, any signed-in member could call it 40 times
+ * on a stranger's game and permanently switch a PAID feature off for the two people
+ * actually playing it. The rule is §5.2's, and the same one `heartbeat` already
+ * applies (CONVEX-AUTHZ-07):
+ *
+ *  - participants always, in every mode;
+ *  - anyone else only on an ONLINE game — `ai` and `local` games have no audience at
+ *    all, so a stranger can never touch someone's private board;
+ *  - and while that online game is still ACTIVE, only if they are really in the room:
+ *    a `presence` row, which is what §5.2's "spectator with access" means. That is the
+ *    case the attack needs — a game in progress whose players would be left with the
+ *    quota copy for the rest of it. Once the game is over there is no live feature
+ *    left to break, and §1 sells the tutor for "replay" as well as for spectating, so
+ *    a member reviewing a finished game they did not play is not asked for presence
+ *    (`heartbeat` stops writing rows the moment a game ends).
+ */
+export const useTutorTurn = mutation({
+  args: { gameId: v.id("games") },
+  returns: v.object({ tutorTurnsUsed: v.number(), remaining: v.number() }),
+  handler: async (ctx, args) => {
+    const player = await requirePlayer(ctx);
+    const game = await loadGame(ctx, args.gameId);
+
+    if (colourOf(game, player._id) === null) {
+      if (game.mode !== "online") throw new Error("not-a-participant");
+      if (game.status === "active") {
+        const watching = await ctx.db
+          .query("presence")
+          .withIndex("by_gameId_and_playerId", (q) =>
+            q.eq("gameId", game._id).eq("playerId", player._id),
+          )
+          .unique();
+        if (watching === null) throw new Error("not-a-participant");
+      }
+    }
+
+    const used = game.tutorTurnsUsed ?? 0;
+    if (used >= MAX_TUTOR_TURNS_PER_GAME) throw new Error("tutor-limit");
+
+    const tutorTurnsUsed = used + 1;
+    await ctx.db.patch("games", game._id, { tutorTurnsUsed });
+    return { tutorTurnsUsed, remaining: MAX_TUTOR_TURNS_PER_GAME - tutorTurnsUsed };
   },
 });
 

@@ -1,6 +1,6 @@
 // e2e/public.spec.ts
 // The routes a signed-out visitor can reach (ARCHITECTURE.md §G): `/`, `/leaderboard`,
-// `/sign-in`, plus the development-only harnesses of UI_REDESIGN §8 — `/dev/board3d`,
+// `/pro`, `/sign-in`, plus the development-only harnesses of UI_REDESIGN §8 — `/dev/board3d`,
 // `/dev/game` and `/dev/ui-kit`. Nothing in this file needs Clerk credentials, so
 // `pnpm e2e` runs it anywhere.
 //
@@ -309,9 +309,11 @@ test.describe("public routes", () => {
 
     // Outside development the sweep ends on "/", whose hero is the showcase board the
     // assertion below looks for; locally it ends on /dev/pages as described there.
+    // `/pro` is public (PRO_TUTOR §7) and mounts Clerk's pricing table, so it belongs
+    // in the standing sweep everywhere, deployed included.
     const routes = IS_LOCAL
-      ? ["/", "/leaderboard", "/sign-in", "/dev/board3d", "/dev/game?scenario=ai-midgame", "/dev/ui-kit", "/dev/pages"]
-      : ["/leaderboard", "/sign-in", "/"];
+      ? ["/", "/leaderboard", "/pro", "/sign-in", "/dev/board3d", "/dev/game?scenario=ai-midgame", "/dev/ui-kit", "/dev/pages"]
+      : ["/leaderboard", "/pro", "/sign-in", "/"];
     for (const route of routes) {
       await page.goto(route);
       // Let hydration, Convex's websocket and Clerk's script settle before moving on.

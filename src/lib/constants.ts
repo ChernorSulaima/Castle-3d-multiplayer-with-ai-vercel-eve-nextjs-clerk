@@ -167,3 +167,15 @@ export const SETTINGS_STORAGE_KEY = "chess3d:settings";
 export const PIECE_VALUES: Record<"p" | "n" | "b" | "r" | "q" | "k", number> = {
   p: 1, n: 3, b: 3, r: 5, q: 9, k: 0,
 };
+
+/** docs/PRO_TUTOR.md §5.3: the tutor answers at most this many questions per game. */
+export const MAX_TUTOR_TURNS_PER_GAME = 40;
+
+/**
+ * The Clerk feature slug carried by the `pro` plan (docs/PRO_TUTOR.md §1,
+ * docs/research/clerk-billing.md). Written here, in a module with no React and no
+ * server imports, because BOTH sides of the gate ask about it: the panel through
+ * `has({ feature })` in the browser, and the route through `has({ feature })` on the
+ * server. One string, so a typo can only ever be in one place.
+ */
+export const TUTOR_FEATURE = "tutor";

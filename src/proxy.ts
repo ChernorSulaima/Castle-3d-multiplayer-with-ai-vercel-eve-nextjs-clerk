@@ -9,9 +9,11 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 
-// NOTE: /api/ai is deliberately NOT here (ARCHITECTURE.md §G, verbatim). `auth.protect()`
-// answers 404 for API requests, which masks the difference between "not signed in" and
-// "no such route". The AI routes gate themselves with `auth()` and answer 401.
+// NOTE: /api/ai and /api/tutor are deliberately NOT here (ARCHITECTURE.md §G, verbatim;
+// docs/PRO_TUTOR.md §5). `auth.protect()` answers 404 for API requests, which masks the
+// difference between "not signed in" and "no such route". Both gate themselves with
+// `auth()` and answer 401 — and the tutor route answers 402 without the Pro feature,
+// which `auth.protect()` could not express either.
 const PROTECTED_PREFIXES = ["/play", "/game", "/settings", "/profile"];
 
 function isProtected(req: NextRequest): boolean {

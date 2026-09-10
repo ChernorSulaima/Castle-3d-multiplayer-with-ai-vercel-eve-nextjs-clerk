@@ -14,7 +14,9 @@ export function SettingsWorkbench() {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start xl:grid-cols-[minmax(0,1fr)_24rem]">
       <div className="min-w-0">
-        <SettingsForm save={save} />
+        {/* `showPlan`: PRO_TUTOR §7's Plan row belongs to the settings PAGE. The
+            in-game Room drawer renders the same form without it. */}
+        <SettingsForm save={save} showPlan />
       </div>
 
       {/* Second in the DOM so a narrow screen reads the controls first; the

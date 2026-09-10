@@ -10,6 +10,7 @@
 // the pointer to make it happen.
 //
 // Pure and free of three/fiber, so it can be unit-tested without a WebGL context.
+import { annotationsKey } from "@/lib/tutor/annotations";
 import type { BoardViewProps, CameraPresetId, RoomColors } from "@/lib/types";
 
 /**
@@ -54,6 +55,10 @@ export function boardFrameKey(board: BoardViewProps, view?: BoardViewSettings): 
     promotion ? `${promotion.from}${promotion.to}` : "-",
     board.interactive ? "i" : "-",
     board.animate ? "a" : "-",
+    // The tutor's drawings are part of what the scene shows (PRO_TUTOR §4), and a new
+    // drawing arrives without the position changing — so the FEN cannot stand in for
+    // it. `annotationsKey` is that fingerprint, and "-" when the board is clean.
+    annotationsKey(board.annotations),
   ];
 
   if (view) {

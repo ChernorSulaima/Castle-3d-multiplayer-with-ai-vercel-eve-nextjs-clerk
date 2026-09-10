@@ -12,7 +12,14 @@
 // is the SAME element in the default and focus layouts, only its classes differ.
 // Remounting it would tear down the WebGL context and re-download the room.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDownIcon, EyeIcon, MessagesSquareIcon, MinimizeIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  EyeIcon,
+  GraduationCapIcon,
+  MessagesSquareIcon,
+  MinimizeIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -31,11 +38,15 @@ import {
   ShortcutsDialog,
   StatPill,
 } from "@/components/ui-kit";
+import { TutorTab } from "@/components/tutor/tutor-panel";
+import { useFocusTrap } from "@/components/tutor/use-focus-trap";
+import { useTutorSurface } from "@/components/tutor/use-tutor-surface";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { formatGameResult, pgnResult } from "@/lib/format";
 import { resolveRoom } from "@/lib/rooms";
+import { useTutorStore } from "@/lib/stores/tutor-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/ui";
 import type { Colour, GameController, ViewerRole } from "@/lib/types";
@@ -72,6 +83,12 @@ export interface GameShellMeta {
   playAgainPending: boolean;
   onPlayAgain(): void;
   onRetryEngine?(): void;
+  /**
+   * The tutor panel (docs/PRO_TUTOR.md §3), already wired to its access and its
+   * conversation. Absent — a game with no tutor at all — and this screen is
+   * exactly what it was before Pro: two columns, five buttons on the phone.
+   */
+  tutor?: React.ReactNode;
   /** Contents of the Room drawer — `<SettingsForm/>` in the app. */
   roomSettings?: React.ReactNode;
   onRoomOpenChange?(open: boolean): void;
@@ -218,6 +235,37 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   }, [focusChatOpen]);
   const [dismissedNote, setDismissedNote] = useState<string | null>(null);
 
+  /* ---------------------------------------------------------------- tutor */
+
+  // PRO_TUTOR §3: one panel, three shapes. A third grid track from 1280, an
+  // overlay over the board's left half from 1024, a 60dvh sheet below that —
+  // and the same overlay in the focus layout, opened from the HUD.
+  const tutorNode = meta.tutor ?? null;
+  const tutorSurface = useTutorSurface();
+  const tutorOpen = useTutorStore((s) => s.panelOpen);
+  const setTutorOpen = useTutorStore((s) => s.setPanelOpen);
+  const tutorInColumn = tutorNode !== null && tutorSurface === "column" && !focus;
+  const tutorAsOverlay = tutorNode !== null && (focus || tutorSurface === "overlay");
+  const tutorOverlayOpen = tutorAsOverlay && tutorOpen;
+  const tutorTrap = useFocusTrap<HTMLDivElement>(tutorOverlayOpen);
+  /** The mobile bar's "Tutor" button, so closing the sheet can hand focus back. */
+  const tutorOpener = useRef<HTMLButtonElement | null>(null);
+
+  // §3: anywhere the panel is a LAYER — below 1280, and in the focus layout —
+  // it starts collapsed, because it opens over the board and so has to be asked
+  // for. Written when the shape changes, never on every render, so a member who
+  // opened it keeps it open for as long as that shape holds.
+  useEffect(() => {
+    if (tutorSurface !== "column" || focus) useTutorStore.getState().setPanelOpen(false);
+  }, [tutorSurface, focus]);
+
+  // Read by the Escape handler, which is registered once (see `focusChatOpenRef`).
+  const tutorOverlayRef = useRef(tutorOverlayOpen);
+  useEffect(() => {
+    tutorOverlayRef.current = tutorOverlayOpen;
+  }, [tutorOverlayOpen]);
+
+
   const presenceChips = usePresenceChips(meta.opponentOnline);
   const drawChips = useDrawChips(
     controller.drawOfferFrom,
@@ -304,6 +352,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       // first. `useShortcuts` only skips Escape for real popups (`[data-open]`), and
       // this panel is a plain div, so without this branch Escape tore down the whole
       // fullscreen layout out from under an open conversation.
+      if (tutorOverlayRef.current) {
+        useTutorStore.getState().setPanelOpen(false);
+        return;
+      }
       if (focusChatOpenRef.current) {
         setFocusChatOpen(false);
         return;
@@ -525,7 +577,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   return (
     <div
       className={cn(
-        "flex w-full flex-col bg-background",
+        "relative flex w-full flex-col bg-background",
         // The board never scrolls (§5.1) — at every width the screen is exactly
         // one viewport tall and the board takes whatever height is left over.
         focus ? "fixed inset-0 z-50 h-[100dvh]" : "h-[calc(100dvh-3.5rem)] overflow-hidden",
@@ -550,9 +602,38 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
           "grid min-h-0 flex-1",
           focus
             ? "grid-cols-1"
-            : "lg:grid-cols-[minmax(0,1fr)_23.75rem] xl:grid-cols-[minmax(0,1fr)_25rem]",
+            : tutorNode === null
+              ? "lg:grid-cols-[minmax(0,1fr)_23.75rem] xl:grid-cols-[minmax(0,1fr)_25rem]"
+              : // PRO_TUTOR §3: tutor | board | sidebar from 1280. Collapsed, the
+                // first track is the 44px rail; the board box's container query
+                // re-fits the square either way, with no JS and no remount.
+                tutorInColumn && tutorOpen
+                ? "lg:grid-cols-[2.75rem_minmax(0,1fr)_23.75rem] xl:grid-cols-[22rem_minmax(0,1fr)_25rem]"
+                : "lg:grid-cols-[2.75rem_minmax(0,1fr)_23.75rem] xl:grid-cols-[2.75rem_minmax(0,1fr)_25rem]",
         )}
       >
+        {/* ------------------------------------------------- tutor column
+            From 1024 the track is the 44px rail; from 1280 it can hold the panel
+            itself. Below 1024 it is display:none and the same panel node moves
+            into the sheet, so it is never in two places at once. */}
+        {focus || tutorNode === null ? null : (
+          <div className="hidden min-h-0 min-w-0 lg:flex">
+            <div
+              className={cn(
+                "min-h-0 min-w-0 flex-1 flex-col border-r border-border",
+                // Hidden, not unmounted: collapsing the column must not throw
+                // away the conversation the member is having.
+                tutorInColumn && tutorOpen ? "flex" : "hidden",
+              )}
+            >
+              {tutorInColumn ? tutorNode : null}
+            </div>
+            {tutorInColumn && tutorOpen ? null : (
+              <TutorTab expanded={tutorOverlayOpen} onOpen={() => setTutorOpen(true)} />
+            )}
+          </div>
+        )}
+
         {/* ------------------------------------------------- board column */}
         <div className="flex min-h-0 min-w-0 flex-col lg:border-r lg:border-border">
           {/* The plates and the board travel together. Below `lg` the square is
@@ -682,6 +763,20 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                 // Outside the fading layer on purpose: the way out, and the way
                 // to find out what the keys do, are the two things that must
                 // never be a guess on a screen with no header (§5.2).
+                persistentLead={
+                  tutorNode === null ? null : (
+                    <Button
+                      variant="ghost"
+                      className="bg-card shadow-soft"
+                      aria-label="Tutor"
+                      aria-expanded={tutorOverlayOpen}
+                      onClick={() => setTutorOpen(!tutorOverlayOpen)}
+                    >
+                      <GraduationCapIcon aria-hidden />
+                      <span aria-hidden>Tutor</span>
+                    </Button>
+                  )
+                }
                 persistent={
                   <>
                     {/* §4.5: every one of these floats, so each keeps the soft
@@ -734,6 +829,54 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                 bottom={<GameActionBar {...barProps} variant="focus" />}
               />
             ) : null}
+
+            {/* --------------------------------------------- tutor overlay
+                §3: from 1024, and in the focus layout, the panel is a layer over
+                the board's LEFT HALF — inside the board box, so it never covers a
+                nameplate or a single button of the action bar. The soft shadow
+                alone, no hairline (DESIGN.md's only-floating-things rule); Escape
+                closes it and Tab stays inside while it is open. */}
+            {tutorNode !== null && tutorAsOverlay ? (
+              <div
+                ref={tutorTrap}
+                tabIndex={-1}
+                role="dialog"
+                // The layer is focus-trapped (§3), so it has to be a dialog to
+                // assistive tech as well: without `aria-modal` a virtual cursor
+                // walked the board and the action bar behind a layer a Tab could
+                // not leave — one boundary for the keyboard and none for a screen
+                // reader. The board's UNCOVERED half stays pointer-reachable on
+                // purpose: §3 puts the panel over the left half precisely so the
+                // drawing it just made is still there to look at.
+                aria-modal="true"
+                aria-label="Tutor"
+                onKeyDown={(event) => {
+                  // §3: "Escape closes". The global shortcut handler cannot do it
+                  // here — it returns early for INPUT/TEXTAREA targets, and the
+                  // composer is exactly where a member stands. `preventDefault`
+                  // keeps that handler from also acting on the same key.
+                  if (event.key !== "Escape" || event.defaultPrevented) return;
+                  event.preventDefault();
+                  useTutorStore.getState().setPanelOpen(false);
+                }}
+                className={cn(
+                  // Half the board box, not 92% of it: at 1024 a 24rem panel stood
+                  // on 64% of a 600px board and hid the whole numbered line the
+                  // answer beside it was describing. §3 says "the board's left
+                  // half", and a reading column is what the panel is.
+                  "absolute top-0 left-0 z-40 w-[min(24rem,50%)] flex-col",
+                  "rounded-r-xl bg-card shadow-soft outline-none",
+                  // Hidden rather than unmounted, so closing the layer to look at
+                  // the board does not throw away the conversation behind it.
+                  tutorOpen ? "flex" : "hidden",
+                  // In focus the action bar floats at the bottom of this very box,
+                  // so the layer stops short of it rather than covering the way out.
+                  focus ? "bottom-20" : "bottom-0",
+                )}
+              >
+                {tutorNode}
+              </div>
+            ) : null}
           </div>
 
           {focus ? null : (
@@ -778,6 +921,21 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                     {...barProps}
                     panelTab={tab}
                     onOpenPanel={() => setSheetOpen(true)}
+                    // §3: the bar keeps FIVE buttons at 390px, so the tutor takes
+                    // Fullscreen's place and Fullscreen moves into "More". The
+                    // sidebar still has exactly three tabs — the tutor is never
+                    // a fourth one.
+                    onOpenTutor={
+                      tutorNode === null
+                        ? undefined
+                        : (event) => {
+                            // Held so Escape can put focus back where it came from:
+                            // Base UI's non-modal drawer drops it on <body>, which
+                            // throws a keyboard member to the top of the document.
+                            tutorOpener.current = event.currentTarget;
+                            setTutorOpen(true);
+                          }
+                    }
                   />
                 </>
               ) : (
@@ -865,6 +1023,38 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               <ChevronDownIcon aria-hidden />
             </DrawerClose>
             <div className="flex min-h-0 flex-1 flex-col">{sidebar}</div>
+          </DrawerContent>
+        </Drawer>
+      ) : null}
+
+      {/* --------------------------------------------------- tutor sheet */}
+      {tutorNode !== null && tutorSurface === "sheet" && !focus ? (
+        <Drawer
+          open={tutorOpen}
+          onOpenChange={(open) => {
+            setTutorOpen(open);
+            // The panel's own "Hide tutor" already restores focus; Escape and a swipe
+            // do not, so the opener is refocused here — the same restore the overlay's
+            // `useFocusTrap` performs when it unmounts.
+            if (!open) tutorOpener.current?.focus();
+          }}
+          modal={false}
+          showSwipeHandle
+        >
+          <DrawerContent
+            aria-label="Tutor"
+            className="transition-[transform,opacity,filter]"
+            // §3: 60dvh, the same fixed-height sheet the game panel uses, so the
+            // newest answer is never laid out below the fold.
+            style={{ "--drawer-height": "60dvh" } as React.CSSProperties}
+          >
+            <DrawerHeader className="sr-only">
+              <DrawerTitle>Tutor</DrawerTitle>
+              <DrawerDescription>
+                Ask about the position and see it marked on the board.
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="flex min-h-0 flex-1 flex-col">{tutorNode}</div>
           </DrawerContent>
         </Drawer>
       ) : null}

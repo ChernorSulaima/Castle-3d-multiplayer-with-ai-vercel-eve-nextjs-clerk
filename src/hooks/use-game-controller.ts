@@ -29,6 +29,7 @@ import {
   type PieceTrackerState,
 } from "@/lib/piece-tracker";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { useTutorStore } from "@/lib/stores/tutor-store";
 import type {
   BoardPiece,
   BoardView,
@@ -148,6 +149,10 @@ export function useGameController(
 
   const reducedMotion = useUiStore((s) => s.reducedMotion);
   const boardFlipEnabled = useUiStore((s) => s.boardFlipEnabled);
+  // docs/PRO_TUTOR.md §4/§6: the tutor panel WRITES this store, both boards render it
+  // as props. Reading it here (and nowhere inside a board) is what keeps Board2D and
+  // Board3D pure functions of `BoardViewProps`.
+  const annotations = useTutorStore((s) => s.annotations);
 
   const game = view?.game ?? null;
   const moves = game?.moves ?? NO_MOVES;
@@ -513,6 +518,7 @@ export function useGameController(
     captured,
     promotion,
     reviewPly,
+    annotations,
     onSquareSelect: selectSquare,
     onMove: (from, to) => {
       void move(from, to);

@@ -14,6 +14,8 @@ export type Difficulty =
 
 /* ---------------------------------------------------------------- gameplay */
 export const MAX_HINTS_PER_GAME = 3; // FR-40
+/** docs/PRO_TUTOR.md §5.3. Twin of MAX_TUTOR_TURNS_PER_GAME in src/lib/constants.ts. */
+export const MAX_TUTOR_TURNS_PER_GAME = 40;
 export const MAX_LOCAL_NAME_LENGTH = 24;
 export const MAX_COMMENTARY_LENGTH = 400;
 export const MAX_ROOM_IMAGE_BYTES = 5 * 1024 * 1024; // FR-21k

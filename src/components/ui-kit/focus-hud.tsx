@@ -21,6 +21,14 @@ export interface FocusHudProps extends React.ComponentProps<"div"> {
    * touch screen, where there is no hover to bring it back.
    */
   persistent?: React.ReactNode;
+  /**
+   * Rendered at the FRONT of the persistent cluster, before `persistent`.
+   *
+   * Additive slot for a control that must stay reachable but is not the way out:
+   * docs/PRO_TUTOR.md §3 puts the "Tutor" pill here, so a fullscreen player can
+   * open the panel without the exit ever moving.
+   */
+  persistentLead?: React.ReactNode;
   /** Top-centre slot, also outside the fading layer — for anything that is
    *  waiting on an answer (the status pill, a draw offer). */
   topCenter?: React.ReactNode;
@@ -57,6 +65,7 @@ export function FocusHud({
   topRight,
   bottom,
   persistent,
+  persistentLead,
   topCenter,
   aside,
   autoHide = false,
@@ -141,8 +150,9 @@ export function FocusHud({
           {topCenter}
         </div>
       ) : null}
-      {persistent ? (
+      {persistent || persistentLead ? (
         <div className="pointer-events-auto absolute top-3 right-3 z-20 flex items-center gap-1">
+          {persistentLead}
           {persistent}
         </div>
       ) : null}

@@ -1,5 +1,6 @@
 // src/lib/types.ts
 // The single source of truth for every type shared across packages.
+import type { BoardAnnotations } from "./tutor/annotations";
 import type { Square } from "chess.js";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
@@ -201,6 +202,12 @@ export interface BoardViewProps {
   promotion: PromotionPrompt | null;
   /** null = live; a number = reviewing that ply (0-based index into moves). */
   reviewPly: number | null;
+  /**
+   * The tutor's drawings (docs/PRO_TUTOR.md §4): square tints, arrows and a numbered
+   * candidate line. Optional and null when the board is clean; both boards render it
+   * above their own highlights and below the pieces.
+   */
+  annotations?: BoardAnnotations | null;
 
   onSquareSelect(square: SquareId): void;
   onMove(from: SquareId, to: SquareId): void;

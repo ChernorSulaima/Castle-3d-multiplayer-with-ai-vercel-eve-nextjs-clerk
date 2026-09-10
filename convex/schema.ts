@@ -84,6 +84,10 @@ export default defineSchema({
     rated: v.boolean(), // false for local, and flipped to false by the first take-back (FR-49)
     undoCount: v.number(), // FR-45
     hintsUsed: v.number(), // FR-40, max 3
+    // docs/PRO_TUTOR.md §5.3: a spend guard on the tutor, capped by
+    // MAX_TUTOR_TURNS_PER_GAME. Optional so every row written before the tutor
+    // existed stays valid; `?? 0` is the only way it is read.
+    tutorTurnsUsed: v.optional(v.number()),
     spectatorCount: v.optional(v.number()), // denormalised by the presence cron
 
     eveSessionId: v.optional(v.string()), // durable Eve session for this game (eve-agent.md §3.3)

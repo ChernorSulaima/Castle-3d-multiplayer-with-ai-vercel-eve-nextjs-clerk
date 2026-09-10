@@ -7,8 +7,10 @@ import { useCallback, useMemo, useState } from "react";
 import { FILES, RANKS, gridPosition, isLightSquare, squareIndices } from "@/lib/constants";
 import { resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { isEmptyAnnotations } from "@/lib/tutor/annotations";
 import { cn } from "@/lib/utils";
 import type { BoardViewProps, Colour, SquareId } from "@/lib/types";
+import { Annotations2D } from "./annotations-2d";
 import { Piece2D } from "./piece-2d";
 import { Square2D } from "./square-2d";
 import { pieceName } from "./pieces-svg";
@@ -33,6 +35,7 @@ export function Board2D(props: BoardViewProps) {
     legalTargets,
     lastMove,
     checkSquare,
+    annotations,
     onSquareSelect,
     onDeselect,
   } = props;
@@ -174,6 +177,12 @@ export function Board2D(props: BoardViewProps) {
           </div>
         ))}
       </div>
+
+      {/* The tutor's drawings (docs/PRO_TUTOR.md §4) sit above the squares and their
+          highlights, and below the pieces — a tint never hides the piece it is about. */}
+      {annotations && !isEmptyAnnotations(annotations) ? (
+        <Annotations2D annotations={annotations} orientation={orientation} animate={animate} />
+      ) : null}
 
       {/* Pieces float above the grid; clicks fall through to the squares. */}
       <div className="pointer-events-none absolute inset-0" aria-hidden>

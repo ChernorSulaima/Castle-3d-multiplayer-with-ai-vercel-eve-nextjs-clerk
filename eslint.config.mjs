@@ -22,6 +22,11 @@ const eslintConfig = defineConfig([
     // Agent tooling that happens to live in the repo: bundled browser scripts we
     // neither wrote nor ship. They were the only source of `pnpm lint` warnings.
     ".agents/**",
+    // Playwright's own HTML report and trace viewer: bundled third-party JS written
+    // by `playwright test`, gitignored, and not ours to lint.
+    "playwright-report/**",
+    "test-results/**",
+    "playwright/.cache/**",
     ".claude/**",
     ".codex/**",
   ]),

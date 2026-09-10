@@ -31,6 +31,7 @@ import type {
   RoomPresetId,
   SquareId,
 } from "@/lib/types";
+import type { BoardAnnotations } from "@/lib/tutor/annotations";
 import { Board3DLoader } from "./board-3d-loader";
 import type { Board3DShowcase } from "./showcase";
 
@@ -129,6 +130,41 @@ const SHOWCASE_ROOMS: RoomPresetId[] = [...ROOM_ORDER];
 /** No report for this long means the render loop is not running. */
 const FPS_STALE_MS = 900;
 
+/**
+ * A sample of every drawing the tutor can make (docs/PRO_TUTOR.md §4), for iterating on
+ * the 3D annotation meshes without a Pro session, a game or a model call.
+ *
+ * The squares are deliberately laid out as four columns of one tone each, with one LIGHT
+ * and one DARK square in every column (c4/f5/d5/e4 are light; c5/d4/e5/f4 are dark), so
+ * one screenshot answers the §8 contrast question for all four tones on both square
+ * colours. On the opening position they also sit under real pieces, which is the other
+ * thing to check: a tint must never hide the piece it is about.
+ */
+const SAMPLE_ANNOTATIONS: BoardAnnotations = {
+  squares: [
+    { square: "c5", tone: "good" },
+    { square: "c4", tone: "good" },
+    { square: "d4", tone: "bad" },
+    { square: "d5", tone: "bad" },
+    { square: "e5", tone: "threat" },
+    { square: "e4", tone: "threat" },
+    { square: "f4", tone: "idea" },
+    { square: "f5", tone: "idea" },
+  ],
+  arrows: [
+    { from: "g1", to: "f3", tone: "good" },
+    { from: "b8", to: "c6", tone: "bad" },
+    { from: "h5", to: "f7", tone: "threat" },
+    { from: "a1", to: "a4", tone: "idea" },
+  ],
+  line: [
+    { from: "e2", to: "e4", san: "e4" },
+    { from: "e7", to: "e5", san: "e5" },
+    { from: "d1", to: "h5", san: "Qh5" },
+    { from: "g8", to: "f6", san: "Nf6" },
+  ],
+};
+
 interface DevBoardState {
   moves: string[];
   fen: string;
@@ -163,6 +199,7 @@ export function Board3DDevPreview() {
   const [orientation, setOrientation] = useState<Colour>("w");
   const [flipping, setFlipping] = useState(false);
   const [interactive, setInteractive] = useState(true);
+  const [tutorNotes, setTutorNotes] = useState(false);
 
   /* ------------------------------------------------- §10.4 showcase mode */
   const [showcaseOn, setShowcaseOn] = useState(false);
@@ -385,6 +422,15 @@ export function Board3DDevPreview() {
 
         <Button
           size="sm"
+          variant="outline"
+          aria-pressed={tutorNotes}
+          onClick={() => setTutorNotes((value) => !value)}
+        >
+          Tutor notes: {tutorNotes ? "on" : "off"}
+        </Button>
+
+        <Button
+          size="sm"
           variant={showcaseOn ? "default" : "outline"}
           aria-pressed={showcaseOn}
           onClick={() => setShowcaseOn((value) => !value)}
@@ -484,6 +530,7 @@ export function Board3DDevPreview() {
           captured={state.captured}
           promotion={promotion}
           reviewPly={null}
+          annotations={tutorNotes ? SAMPLE_ANNOTATIONS : null}
           onSquareSelect={onSquareSelect}
           onMove={(from, to) => applyMove(from, to)}
           onPromotionChoice={(piece) =>

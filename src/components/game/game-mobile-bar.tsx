@@ -11,6 +11,7 @@ import {
   DownloadIcon,
   EllipsisIcon,
   ExpandIcon,
+  GraduationCapIcon,
   Grid2x2Icon,
   HandshakeIcon,
   InfoIcon,
@@ -66,6 +67,17 @@ export interface GameMobileBarProps {
   onToggleView(): void;
   onToggleFocus(): void;
   onOpenPanel(): void;
+  /**
+   * docs/PRO_TUTOR.md §3: opens the tutor sheet. Present only when the game has a
+   * tutor at all — and when it is, the tutor takes Fullscreen's place on the bar
+   * (measured at 390px: six captions leave 57px each and "Fullscreen" needs 62,
+   * so it truncates to nothing readable; five keep every cap whole). Fullscreen
+   * moves into "More", beside the other board controls.
+   *
+   * It is handed its own button so the shell can put focus back on it when the
+   * sheet closes — Base UI's non-modal drawer drops focus on <body>.
+   */
+  onOpenTutor?(event: React.MouseEvent<HTMLButtonElement>): void;
   onOpenRoom(): void;
   onOpenShortcuts(): void;
   className?: string;
@@ -100,7 +112,7 @@ function BarButton({
   srLabel?: string;
   /** A mono count that sits under the label, e.g. "2 left". */
   count?: string;
-  onClick(): void;
+  onClick(event: React.MouseEvent<HTMLButtonElement>): void;
   disabled?: boolean;
   tone?: "default" | "primary";
   className?: string;
@@ -181,6 +193,7 @@ export function GameMobileBar({
   onToggleView,
   onToggleFocus,
   onOpenPanel,
+  onOpenTutor,
   onOpenRoom,
   onOpenShortcuts,
   className,
@@ -206,12 +219,16 @@ export function GameMobileBar({
           if (is3d || !noWebgl) onToggleView();
         }}
       />
-      <BarButton
-        icon={focus ? MinimizeIcon : ExpandIcon}
-        label={focus ? "Exit" : "Fullscreen"}
-        srLabel={focus ? "Exit fullscreen" : "Fullscreen"}
-        onClick={onToggleFocus}
-      />
+      {onOpenTutor ? (
+        <BarButton icon={GraduationCapIcon} label="Tutor" onClick={onOpenTutor} />
+      ) : (
+        <BarButton
+          icon={focus ? MinimizeIcon : ExpandIcon}
+          label={focus ? "Exit" : "Fullscreen"}
+          srLabel={focus ? "Exit fullscreen" : "Fullscreen"}
+          onClick={onToggleFocus}
+        />
+      )}
       {hint.available ? (
         // §4.8 item 6: the hint action keeps ONE accessible name, "Ask for a hint",
         // on every surface. On a 390px bar five buttons share 324px, so the visible
@@ -267,6 +284,13 @@ export function GameMobileBar({
                 Fullscreen kept landing on it (critique, 2026-09-10). */}
             <p className="eyebrow pt-1">Board</p>
             <MoreItem icon={RefreshCwIcon} label="Flip the board" onClick={flip} />
+            {onOpenTutor ? (
+              <MoreItem
+                icon={focus ? MinimizeIcon : ExpandIcon}
+                label={focus ? "Exit fullscreen" : "Fullscreen"}
+                onClick={onToggleFocus}
+              />
+            ) : null}
             {is3d && !noWebgl ? (
               <>
                 <p className="eyebrow pt-2">Camera</p>

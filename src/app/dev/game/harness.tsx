@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { GameShellView, type GameShellMeta } from "@/components/game/game-shell-view";
+import { TutorAccessProvider } from "@/components/tutor/access";
+import { TutorPanelView } from "@/components/tutor/tutor-panel";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { MAX_HINTS_PER_GAME } from "@/lib/constants";
 import { errorCopyFor } from "@/lib/errors";
@@ -15,6 +17,7 @@ import {
   isMockScenarioId,
   useMockGameController,
 } from "@/lib/mock/game-controller";
+import type { TutorUIMessage } from "@/lib/tutor/tools";
 import { useAiStore } from "@/lib/stores/ai-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn, focusRing } from "@/lib/ui";
@@ -28,13 +31,23 @@ const DEFAULT_SCENARIO = "ai-midgame";
 function ScenarioSwitcher({ current }: { current: string }) {
   const [open, setOpen] = useState(false);
   return (
-    // Top-centre, not top-left: the §5.2 focus HUD puts its player chip in the
-    // top-left corner and a dev control must never sit on top of the thing under
-    // review. It stays in the header's row even at 390, where it overlaps the site
-    // nav: the alternative — dropping below the 56px header — lands it on the game's
-    // own nameplate and status pill, and covering the chrome is better than
-    // covering the subject.
-    <div className="fixed top-1.5 left-1/2 z-60 -translate-x-1/2 text-[12px]">
+    // Top-centre from 640 up, not top-left: the §5.2 focus HUD puts its player chip
+    // in the top-left corner and a dev control must never sit on top of the thing
+    // under review.
+    //
+    // BELOW 640 it moves out of the header band entirely, to the bottom-left above
+    // the mobile bar. It used to stay in the header's row, where at 390 it landed on
+    // "Sign in" and clipped whatever was under it — which made every phone-width
+    // harness screenshot unreadable in its top 56px, and the harness exists to be
+    // looked at. The bottom-left corner is the one place at 390 that carries neither
+    // game chrome nor the bar's five buttons.
+    <div
+      className={cn(
+        "fixed z-60 text-[12px]",
+        "bottom-24 left-3",
+        "sm:top-1.5 sm:bottom-auto sm:left-1/2 sm:-translate-x-1/2",
+      )}
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -48,7 +61,7 @@ function ScenarioSwitcher({ current }: { current: string }) {
         ◆ {current}
       </button>
       {open ? (
-        <ul className="mt-1 flex w-56 flex-col gap-0.5 rounded-xl bg-card p-1.5 shadow-soft">
+        <ul className="absolute bottom-full left-0 mb-1 flex w-56 flex-col gap-0.5 rounded-xl bg-card p-1.5 shadow-soft sm:static sm:mt-1 sm:mb-0">
           {MOCK_SCENARIO_IDS.map((id) => (
             <li key={id}>
               <Link
@@ -78,6 +91,30 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
   const id = isMockScenarioId(requested) ? requested : DEFAULT_SCENARIO;
   const scenario = MOCK_SCENARIOS[id];
   const controller = useMockGameController(scenario);
+
+  // §8: the harness fakes Clerk's answer from the scenario and feeds the scripted
+  // conversation straight into the PURE view. Nothing here talks to /api/tutor —
+  // sending appends the member's own bubble so the composer, the "you" bubble and
+  // the auto-scroll are the real ones.
+  const tutor = scenario.tutor ?? null;
+  // Adjusted during render rather than in an effect (the same rule the shell's own
+  // `usePresenceChips` follows): switching scenario is a new conversation.
+  const [conversation, setConversation] = useState<{ id: string; messages: TutorUIMessage[] }>({
+    id: scenario.id,
+    messages: tutor?.messages ?? [],
+  });
+  if (conversation.id !== scenario.id) {
+    setConversation({ id: scenario.id, messages: tutor?.messages ?? [] });
+  }
+  const askTutor = useCallback((text: string) => {
+    setConversation((current) => ({
+      ...current,
+      messages: [
+        ...current.messages,
+        { id: `harness-${current.messages.length}`, role: "user", parts: [{ type: "text", text }] },
+      ],
+    }));
+  }, []);
 
   // Seed the client stores. These are plain zustand writes, not React state, so
   // they are legal inside an effect (§D.12 rule 6).
@@ -139,6 +176,21 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
     },
     rating: scenario.rating,
     playAgainPending: false,
+    tutor:
+      tutor === null ? undefined : (
+        <TutorPanelView
+          messages={conversation.messages}
+          // §8: the scenario decides which of §3's states the panel is standing in.
+          status={tutor.status ?? "ready"}
+          error={tutor.error ?? null}
+          moves={scenario.moves}
+          ply={scenario.reviewPly ?? scenario.moves.length}
+          reviewing={scenario.reviewPly !== null}
+          gameId={`mock-${scenario.id}`}
+          onSend={askTutor}
+          onRetry={() => undefined}
+        />
+      ),
     onPlayAgain: () => {
       window.location.reload();
     },
@@ -156,11 +208,17 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
   return (
     <>
       <ScenarioSwitcher current={id} />
-      <GameShellView
-        controller={controller}
-        viewerRole={scenario.viewerRole}
-        meta={meta}
-      />
+      <TutorAccessProvider value={{ hasTutor: tutor === null ? undefined : tutor.access === "pro" }}>
+        {/* A scenario switch is a different game entirely — the mock controller
+            seeds its state once, and the tutor panel its conversation once, so the
+            harness remounts the screen rather than trying to reconcile the two. */}
+        <GameShellView
+          key={scenario.id}
+          controller={controller}
+          viewerRole={scenario.viewerRole}
+          meta={meta}
+        />
+      </TutorAccessProvider>
     </>
   );
 }

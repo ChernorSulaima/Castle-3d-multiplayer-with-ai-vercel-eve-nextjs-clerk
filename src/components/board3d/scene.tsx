@@ -17,6 +17,7 @@ import { Highlights } from "./highlights";
 import { Pieces } from "./pieces";
 import { Room } from "./room";
 import { Squares } from "./squares";
+import { TutorAnnotations } from "./tutor-annotations";
 import { Board3DTable } from "./table";
 import { CONTACT_SHADOW_Y, PLINTH_SIZE } from "./layout";
 
@@ -136,6 +137,12 @@ export function Scene({
         checkSquare={board.checkSquare}
         animate={board.animate}
       />
+
+      {/* The tutor's drawings (docs/PRO_TUTOR.md §4), a hair above the highlights and
+          below every piece: they explain the position, they never hide it. */}
+      {board.annotations ? (
+        <TutorAnnotations annotations={board.annotations} animate={board.animate} />
+      ) : null}
 
       <Pieces
         position={board.position}

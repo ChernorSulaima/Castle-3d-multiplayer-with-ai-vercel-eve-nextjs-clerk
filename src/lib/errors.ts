@@ -21,6 +21,8 @@
  * and fails if a newly thrown code has no copy here.
  */
 
+import { MAX_TUTOR_TURNS_PER_GAME } from "./constants";
+
 /** Every machine code thrown by `convex/**` (excluding the test harness). */
 export const CONVEX_ERROR_CODES = [
   "Not authenticated",
@@ -44,6 +46,7 @@ export const CONVEX_ERROR_CODES = [
   "not-your-turn",
   "promotion-required",
   "stale-ai-move",
+  "tutor-limit",
   "undo-not-allowed",
   "upload-not-found",
 ] as const;
@@ -79,6 +82,9 @@ const COPY: Record<ConvexErrorCode, string> = {
   "not-your-turn": "It is not your turn.",
   "promotion-required": "Choose a promotion piece first.",
   "stale-ai-move": "The position moved on — nothing was applied.",
+  // docs/PRO_TUTOR.md §3.5, with the cap read from the constant so the sentence and
+  // the mutation can never disagree about the number.
+  "tutor-limit": `The tutor has answered ${MAX_TUTOR_TURNS_PER_GAME} questions in this game. Start a new game to keep going.`,
   "undo-not-allowed": "Take-backs are disabled in online matches.",
   "upload-not-found": "The upload did not finish. Try picking the file again.",
 };

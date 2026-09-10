@@ -37,6 +37,12 @@ Two claims future work must protect (owner's choice):
    spectating, draw offers, disconnect forfeits and a live leaderboard, all enforced server-side
    (the client never writes a position). The 3D and the AI sit on top of a correct game.
 
+Added 2026-09-11 (docs/PRO_TUTOR.md): **the tutor draws on the board.** Castle Pro's tutor
+answers a question about the position in any game the member plays or watches, and marks the
+squares, arrows and candidate line it is talking about on the same board they are playing on —
+in 2D and in 3D. It is the first thing in the product that is paid for, and the only thing
+Pro buys. No claim beyond that: no accuracy figure, no comparison to a coach or another site.
+
 ## Operating Context
 
 - Runs in the browser at https://chess-3d-ai-clerk-game.vercel.app; the 3D board needs WebGL2
@@ -45,6 +51,11 @@ Two claims future work must protect (owner's choice):
 - The AI turn runs a Stockfish engine in the browser (Stockfish 18 by default, Stockfish 11 as an
   automatic fallback on browsers without WASM SIMD) and a Vercel Eve agent on the server that
   chooses among the engine's candidate moves and writes the commentary.
+- Castle Pro is Clerk Billing on the same Clerk development instance, with Clerk's shared test
+  payment gateway; subscriptions and cancellation happen in Clerk's own components, and no card
+  detail is ever typed into a Castle page. The tutor's answers come from a model called
+  server-side through the Vercel AI Gateway; the analysis it reasons from is the same Stockfish
+  engine, running in the member's own browser.
 - Demonstrated live on stream; the build itself (Next.js 16, Clerk, Convex, React Three Fiber,
   Eve) is part of what viewers are looking at, but the interface must never explain the stack
   to a player.
@@ -68,6 +79,18 @@ Capabilities (shipped):
 - Elo ratings (overall, vs humans, vs AI), win/loss/draw records, top-100 leaderboard with three
   pools, profile with rating history.
 - Hints (3 per game) at Beginner and Casual.
+- **Castle Pro** (shipped 2026-09-11): one user-level subscription, plan slug `pro`, monthly,
+  priced in Clerk and never written into the app's copy; Clerk auto-creates the free plan
+  `free_user`. It carries exactly one feature, slug `tutor`, and that feature is the only thing
+  in the product behind a paywall. Sold on `/pro` with Clerk's pricing table; managed and
+  cancelled in the Clerk user profile, reachable from `/settings` and the avatar menu.
+- **The tutor** (Pro only): a chat panel to the left of the board in every game a member plays
+  or watches — online, AI, local, spectating and replay alike. It answers questions about the
+  position currently in view, and marks the board while it explains: square tints, arrows and a
+  numbered candidate line, in four tones (good, mistake, threat, idea) whose meaning is always
+  named in words as well as colour. Before it judges a move it asks the member's own browser
+  engine for lines, and it says so when the engine is busy with the opponent's move. Capped at
+  40 questions per game.
 
 Constraints (durable):
 
@@ -79,10 +102,16 @@ Constraints (durable):
 - Piece models are CC BY 3.0 and require visible attribution; HDRIs are CC0; the engines are
   GPL v3 and ship with their licence files.
 - Clerk currently runs a development instance in production; a production instance needs a
-  custom domain and real OAuth apps. Nothing in the product may pretend otherwise.
+  custom domain and real OAuth apps. Nothing in the product may pretend otherwise. Billing runs
+  on that same development instance and Clerk's shared test gateway, so a subscription taken
+  today is a test subscription — no real money moves.
+- The tutor's conversation is not persisted: it lives as long as the panel is on screen. Convex
+  never sees plan or feature claims (Clerk cannot put them in a custom JWT), so the per-game
+  question counter there is a spend guard, not the gate — the gate is the tutor's own route.
 
-Undecided product facts (recorded, not invented): none of the following exist yet — pricing,
-a production domain, a privacy policy, terms.
+Undecided product facts (recorded, not invented): a production domain, a privacy policy and
+terms still do not exist. Pricing now does — one monthly plan, defined in Clerk, whose amount is
+read from Clerk at runtime rather than written anywhere in this repo.
 
 ## Brand Commitments
 

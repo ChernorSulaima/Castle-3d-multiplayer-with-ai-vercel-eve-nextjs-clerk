@@ -31,6 +31,7 @@ import {
   type PieceTrackerState,
 } from "@/lib/piece-tracker";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { useTutorStore } from "@/lib/stores/tutor-store";
 import type {
   BoardView,
   BoardViewProps,
@@ -108,6 +109,9 @@ export function useMockGameController(scenario: MockScenario): GameController {
   const [trackerState, setTrackerState] = useState<PieceTrackerState>(EMPTY_PIECE_TRACKER_STATE);
 
   const reducedMotion = useUiStore((s) => s.reducedMotion);
+  // The tutor's drawings come from the same store the real controller reads, so the
+  // harness paints them through exactly the shipped path (docs/PRO_TUTOR.md §4).
+  const annotations = useTutorStore((s) => s.annotations);
   const totalPlies = moves.length;
   const seat = seatOf(scenario.viewerRole);
   const active = status === "active";
@@ -422,6 +426,7 @@ export function useMockGameController(scenario: MockScenario): GameController {
     captured,
     promotion,
     reviewPly,
+    annotations,
     onSquareSelect: selectSquare,
     onMove: (from, to) => {
       void move(from, to);

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { UserButton, useAuth } from "@clerk/nextjs";
 import { NavLinks, NAV_LINKS, PUBLIC_NAV_LINKS } from "@/components/nav/nav-links";
 import { buttonVariants } from "@/components/ui/button";
+import { useTutorAccess } from "@/components/tutor/access";
+import { cn, focusRing } from "@/lib/ui";
 
 /**
  * Client-side auth-aware header parts.
@@ -37,7 +39,12 @@ export function AuthActions() {
   }
 
   if (isSignedIn) {
-    return <UserButton />;
+    return (
+      <>
+        <ProLink />
+        <UserButton />
+      </>
+    );
   }
 
   return (
@@ -53,6 +60,33 @@ export function AuthActions() {
         Sign up
       </Link>
     </>
+  );
+}
+
+/**
+ * The quiet "Pro" link of PRO_TUTOR.md §7: parchment, brass on hover, before the
+ * avatar. Members who already have the tutor see nothing extra — the header is not
+ * the place to sell something the reader has already bought — and neither does anyone
+ * whose entitlement has not resolved yet, so the header never flashes an upsell at a
+ * member on a cold load.
+ */
+function ProLink() {
+  const { hasTutor } = useTutorAccess();
+  if (hasTutor !== false) return null;
+
+  return (
+    <Link
+      prefetch={false}
+      href="/pro"
+      className={cn(
+        "inline-flex items-center rounded-lg px-2.5 text-sm font-medium whitespace-nowrap",
+        "h-8 pointer-coarse:min-h-9 text-muted-foreground",
+        "transition-colors duration-(--dur-micro) hover:bg-muted/60 hover:text-primary",
+        focusRing,
+      )}
+    >
+      Pro
+    </Link>
   );
 }
 
