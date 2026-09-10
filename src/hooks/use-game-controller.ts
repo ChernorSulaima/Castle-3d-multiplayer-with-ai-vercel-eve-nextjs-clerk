@@ -53,6 +53,14 @@ import { api } from "../../convex/_generated/api";
 
 /* ------------------------------------------------------------------ helpers */
 
+/**
+ * How long the local hand-over card stays up when the player has asked for
+ * reduced motion (FR-21g). Longer than the 800ms camera sweep on purpose: with no
+ * movement to draw the eye, the card is the only signal that the device has
+ * changed hands, so it needs long enough to be read rather than glimpsed.
+ */
+const HAND_OVER_STATIC_MS = 1500;
+
 const NO_MOVES: string[] = [];
 const NO_TARGETS: LegalTarget[] = [];
 const EMPTY_CAPTURES: CapturedPieces = { w: [], b: [] };
@@ -262,15 +270,19 @@ export function useGameController(
     // A manual flip is a one-off; the automatic hand-over takes the seat back.
     const raf = requestAnimationFrame(() => {
       setOrientationOverride(null);
-      // FR-21g: reduced motion snaps — no input lock-out and no overlay.
-      if (!reducedMotion) setFlipping(true);
+      setFlipping(true);
     });
-    const timer = reducedMotion
-      ? undefined
-      : setTimeout(() => setFlipping(false), CAMERA_FLIP_MS);
+    // FR-21g takes the MOTION away, not the message: reduced motion still gets the
+    // hand-over card, held statically for HAND_OVER_STATIC_MS instead of riding
+    // the camera's 800ms sweep. Without this the one player who cannot watch the
+    // board turn around was also the one never told the device had changed hands.
+    const timer = setTimeout(
+      () => setFlipping(false),
+      reducedMotion ? HAND_OVER_STATIC_MS : CAMERA_FLIP_MS,
+    );
     return () => {
       cancelAnimationFrame(raf);
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       setFlipping(false);
     };
   }, [mode, totalPlies, boardFlipEnabled, reducedMotion]);

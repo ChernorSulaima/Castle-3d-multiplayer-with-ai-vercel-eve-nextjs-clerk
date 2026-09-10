@@ -24,7 +24,7 @@ function PersonaDisc({ initial }: { initial: string }) {
   return (
     <span
       aria-hidden
-      className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/20 text-[11px] font-medium text-primary"
+      className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/20 text-[12px] font-medium text-primary"
     >
       {initial}
     </span>
@@ -86,7 +86,10 @@ export function ChatMessage({
   if (variant === "you") {
     return (
       <li className={cn("flex justify-end", className)} {...props}>
-        <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-primary/15 px-3 py-2 text-[13px] text-primary motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150">
+        {/* DESIGN.md `chat-bubble-you` and The One Metal Rule: the player's own
+            bubbles are SEAM with brass text. A brass wash here read as a pressable
+            surface, and brass is reserved for things you can press. */}
+        <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-line px-3 py-2 text-[13px] text-primary motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150">
           {children}
         </div>
       </li>
@@ -107,9 +110,14 @@ export function ChatMessage({
         ) : null}
         <div className="rounded-xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] text-foreground motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150">
           {tag ? (
-            <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
-              {tag}
-            </span>
+            <>
+              <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[12px] font-medium tracking-wide text-primary uppercase">
+                {tag}
+              </span>
+              {/* Inline children concatenate with no separator, so the hint bubble
+                  announced as "HintNf3 …". A real one, for readers only. */}
+              <span className="sr-only">: </span>
+            </>
           ) : null}
           {variant === "thinking" ? (
             <ThinkingDots personaName={personaName} afterMs={stillThinkingAfterMs} />

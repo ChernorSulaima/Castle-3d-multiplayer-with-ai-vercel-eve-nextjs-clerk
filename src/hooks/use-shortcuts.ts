@@ -42,12 +42,21 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * True while a modal is on screen. Base UI mounts dialog popups into a portal
- * only while they are open, so their presence in the DOM *is* the open state —
- * and a dialog owns Escape, Home/End and the arrows for as long as it is up.
+ * True while a modal is on screen — a dialog owns Escape, Home/End and the
+ * arrows for as long as it is up.
+ *
+ * Presence in the DOM is NOT the open state: Base UI keeps a popup mounted for
+ * the whole of its exit transition (`internals/useTransitionStatus.mjs` flips
+ * `mounted` only once the animation completes), so a plain `[role="dialog"]`
+ * query goes on reporting a dialog that is already fading out — and Escape,
+ * pressed twice to leave a dialog and then fullscreen, would do nothing the
+ * second time. `data-open` / `data-closed` is Base UI's own open flag
+ * (`utils/popupStateMapping.mjs`), written by every popup part, so ask for that.
  */
 function isDialogOpen(): boolean {
-  return document.querySelector('[role="dialog"], [role="alertdialog"]') !== null;
+  return (
+    document.querySelector('[role="dialog"][data-open], [role="alertdialog"][data-open]') !== null
+  );
 }
 
 export function useShortcuts(

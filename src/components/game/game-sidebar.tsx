@@ -2,23 +2,37 @@
 // src/components/game/game-sidebar.tsx  [U2]
 // UI_REDESIGN §5.1's right column: Chat (default in AI games) / Moves / Info.
 // Pure — the chat rows, the hint state and the presence chips all arrive as props.
+import { useState } from "react";
 import Link from "next/link";
 import {
   ChevronFirstIcon,
   ChevronLastIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   CopyIcon,
   DownloadIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GameChat, type ChatHintState, type ChatSystemChip } from "@/components/ai/game-chat";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { MoveList } from "@/components/ui-kit";
+import { PIECE_MODEL_CREDIT } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { formatDateTime, formatMode, pluralize } from "@/lib/format";
 import { cn, focusRing } from "@/lib/ui";
@@ -126,6 +140,64 @@ function ReplayControls({
   );
 }
 
+/**
+ * FR-46's rewind, with the confirmation it always needed. Taking the game back to
+ * move 8 DELETES every move after it — the one destructive thing on this screen,
+ * and it used to fire from a hover icon on the first click.
+ */
+function RewindAction({
+  ply,
+  pending,
+  onRewind,
+}: {
+  ply: number;
+  pending: boolean;
+  onRewind(): void;
+}) {
+  // `AlertDialogAction` is a plain Button in this shadcn port — it does not close
+  // the dialog — so the open state is held here and the action closes it itself.
+  const [open, setOpen] = useState(false);
+  // `ply` is a half-move; players count in whole moves, and so does the status pill.
+  // The SIDE is part of the button's name because both halves of a row round to the
+  // same move number, and two controls that do different things cannot share a name.
+  const move = Math.max(1, Math.ceil(ply / 2));
+  const name = `Rewind to ${ply % 2 === 1 ? "White" : "Black"}'s move ${move}`;
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger
+        render={
+          <Button
+            size="icon-sm"
+            variant="secondary"
+            aria-label={name}
+            title={name}
+            disabled={pending}
+          />
+        }
+      >
+        <RotateCcwIcon />
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Rewind to move {move}?</AlertDialogTitle>
+          <AlertDialogDescription>Every move after it is removed.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep the game</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setOpen(false);
+              onRewind();
+            }}
+          >
+            Rewind
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function MovesTab({
   history,
   totalPlies,
@@ -163,18 +235,13 @@ function MovesTab({
           renderAction={
             rewindable
               ? (ply) => (
-                  <Button
-                    size="icon-sm"
-                    variant="secondary"
-                    aria-label={`Rewind to move ${ply} and play on from there`}
-                    title="Rewind to here"
-                    disabled={pending}
-                    onClick={() => {
+                  <RewindAction
+                    ply={ply}
+                    pending={pending}
+                    onRewind={() => {
                       void actions.undo(ply);
                     }}
-                  >
-                    <RotateCcwIcon />
-                  </Button>
+                  />
                 )
               : undefined
           }
@@ -223,14 +290,43 @@ function ProfileLink({ player }: { player: PlayerSummary | null }) {
   );
 }
 
+function CreditLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={cn(
+        "rounded-sm underline underline-offset-2 hover:text-foreground",
+        focusRing,
+      )}
+    >
+      {children}
+    </a>
+  );
+}
+
 function InfoTab({
   view,
+  mode,
   totalPlies,
   spectatorCount,
   actions,
-}: Pick<GameSidebarProps, "view" | "totalPlies" | "spectatorCount" | "actions">) {
+}: Pick<GameSidebarProps, "view" | "mode" | "totalPlies" | "spectatorCount" | "actions">) {
   const { game } = view;
   const difficulty = game.difficulty ? DIFFICULTIES[game.difficulty] : null;
+
+  // "Rated: Yes/No" is a database column, not an answer. The player is asking one
+  // question — does this game move my rating? — so the panel answers it in a
+  // sentence, and says WHY when the answer is no (FR-43 unrates on a take-back).
+  const ratingNote =
+    mode === "local"
+      ? "Local games are never rated."
+      : game.undoCount > 0
+        ? "Take-backs made this game unrated."
+        : game.rated
+          ? "This game counts toward your rating."
+          : "This game does not count toward your rating.";
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -258,7 +354,10 @@ function InfoTab({
             <span className="ml-1.5 text-muted-foreground">{difficulty.persona.name}</span>
           </InfoRow>
         ) : null}
-        <InfoRow label="Rated">{game.rated ? "Yes" : "No"}</InfoRow>
+        <div className="py-1.5">
+          <dt className="sr-only">Rating</dt>
+          <dd className="text-[13px] text-muted-foreground">{ratingNote}</dd>
+        </div>
         {game.undoCount > 0 ? (
           <InfoRow label="Take-backs">
             <span className="tabular font-mono">{game.undoCount}</span>
@@ -295,7 +394,98 @@ function InfoTab({
           Download
         </Button>
       </div>
+
+      {/* MANDATORY (§I-7): the piece models are CC BY 3.0, so this credit is a
+          licence obligation — and the game screen is where people actually look at
+          them. Settings keeps the long version; this is the one-line one. */}
+      <p className="mt-4 border-t border-border/60 pt-3 text-[12px] leading-relaxed text-muted-foreground">
+        Pieces by{" "}
+        <CreditLink href={PIECE_MODEL_CREDIT.authorUrl}>Jarlan Perez via Poly Pizza</CreditLink> (
+        <CreditLink href={PIECE_MODEL_CREDIT.licenseUrl}>CC BY 3.0</CreditLink>) · HDRIs from{" "}
+        <CreditLink href="https://polyhaven.com">Poly Haven</CreditLink> (CC0) ·{" "}
+        <CreditLink href="https://stockfishchess.org">Stockfish</CreditLink> (
+        <CreditLink href="/stockfish/sf18/LICENSE-GPL-3.0.txt">GPL v3</CreditLink>)
+      </p>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------- sheet peek */
+
+export interface GameSheetPeekProps {
+  /** Who spoke the newest line, or null when it is one of the centred system chips. */
+  speaker: string | null;
+  /** The newest line in the panel; null until something has been said. */
+  text: string | null;
+  /** What the strip offers while the panel is quiet, e.g. "Moves and game info". */
+  quiet: string;
+  /** How many lines have arrived since the reader last had the panel open. */
+  unread?: number;
+  onExpand(): void;
+  className?: string;
+}
+
+/**
+ * §5.3's bottom sheet, at rest.
+ *
+ * The sheet used to camp on 42dvh of a phone so the newest bubble stayed visible —
+ * which cost the board more than the bubble was worth. This is the same promise in
+ * one 44px line: who spoke and what they said, tappable to open the full panel.
+ * The board keeps the screen; the conversation keeps its voice.
+ */
+export function GameSheetPeek({
+  speaker,
+  text,
+  quiet,
+  unread = 0,
+  onExpand,
+  className,
+}: GameSheetPeekProps) {
+  const label =
+    text === null
+      ? `Open the game panel — ${quiet}`
+      : speaker === null
+        ? `Open the game panel — ${text}`
+        : `Open the game panel — ${speaker} said: ${text}`;
+
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label={unread === 0 ? label : `${label} (${pluralize(unread, "new line", "new lines")})`}
+      className={cn(
+        "flex h-11 w-full shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 text-left",
+        "transition-colors hover:bg-accent/40",
+        focusRing,
+        className,
+      )}
+    >
+      {text === null ? (
+        <span aria-hidden className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+          {quiet}
+        </span>
+      ) : (
+        <>
+          {speaker === null ? null : (
+            <span aria-hidden className="shrink-0 text-[13px] font-medium text-foreground">
+              {speaker}
+            </span>
+          )}
+          <span aria-hidden className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+            {text}
+          </span>
+        </>
+      )}
+      {unread > 0 ? (
+        <span
+          aria-hidden
+          className="tabular grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-primary px-1 text-[12px] leading-none font-semibold text-primary-foreground"
+        >
+          {unread > 9 ? "9+" : unread}
+        </span>
+      ) : null}
+      <ChevronUpIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 
@@ -390,6 +580,7 @@ export function GameSidebar({
       >
         <InfoTab
           view={view}
+          mode={mode}
           totalPlies={totalPlies}
           spectatorCount={spectatorCount}
           actions={actions}

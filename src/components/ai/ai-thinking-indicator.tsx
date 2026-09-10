@@ -41,8 +41,8 @@ export function AiThinkingIndicator({ name, className }: AiThinkingIndicatorProp
     >
       <span aria-hidden="true" className="flex gap-1">
         <Dot delay="0ms" />
-        <Dot delay="150ms" />
         <Dot delay="300ms" />
+        <Dot delay="600ms" />
       </span>
       <span>
         {name === undefined ? label : `${name}: ${label}`}
@@ -52,11 +52,17 @@ export function AiThinkingIndicator({ name, className }: AiThinkingIndicatorProp
   );
 }
 
+/**
+ * DESIGN.md, "Signature Component: the chat": the thinking bubble holds its place
+ * with three PULSING dots — the same 900ms stagger `ChatMessage`'s own
+ * `ThinkingDots` uses, so the two places an opponent thinks look identical.
+ * A bounce is springy easing the system does not own.
+ */
 function Dot({ delay }: { delay: string }) {
   return (
     <span
-      className="size-1.5 animate-bounce rounded-full bg-current motion-reduce:animate-none"
-      style={{ animationDelay: delay }}
+      className="size-1.5 rounded-full bg-current motion-safe:animate-pulse"
+      style={{ animationDelay: delay, animationDuration: "900ms" }}
     />
   );
 }

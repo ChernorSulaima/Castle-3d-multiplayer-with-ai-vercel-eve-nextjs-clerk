@@ -22,7 +22,9 @@ import type {
   ResolvedQualityTier,
 } from "@/lib/types";
 import { useQualityWatchdog } from "@/hooks/use-quality-watchdog";
+import { Board3DSkeleton } from "./board-skeleton";
 import { CameraOverlay } from "./camera-overlay";
+import { boardFrameKey } from "./frame-key";
 import { FirstFrame, FrameRateSampler, FrameloopGate } from "./frame-signals";
 import { AutoTierProbe, QualityWatchdog } from "./quality";
 import { PostFx } from "./post-fx";
@@ -60,6 +62,11 @@ export interface Board3DProps extends BoardViewProps {
    */
   onFrameRate?(fps: number): void;
 }
+
+/** How often to check whether fiber has managed to measure its wrapper yet. */
+const MEASURE_RETRY_MS = 300;
+/** …and how many times to nudge it before accepting that something else is wrong. */
+const MAX_MEASURE_NUDGES = 20;
 
 /** Keyboard camera control (NFR-7) — the board itself is operated by P3's SAN input. */
 const KEY_ROTATE = 0.14;
@@ -123,6 +130,22 @@ export default function Board3D(props: Board3DProps) {
   // never a setState-in-effect (which `react-hooks/set-state-in-effect` forbids here).
   const [selectedMesh, setSelectedMesh] = useState<Mesh | null>(null);
   const registerSelected = useCallback((mesh: Mesh | null) => setSelectedMesh(mesh), []);
+
+  // A WebGL canvas is transparent until the renderer has drawn into it, and everything
+  // that could draw — the piece GLB, the room HDRI, the 1.2 MB chunk itself — suspends
+  // for a while first. `painted` is the honest answer to "is there anything on this
+  // canvas yet", and it gates both the skeleton below and the `data-first-frame` hook
+  // the harnesses and the e2e suite read.
+  const [painted, setPainted] = useState(false);
+  const onFirstFrame = props.onFirstFrame;
+  const firstFrameRef = useRef(onFirstFrame);
+  useEffect(() => {
+    firstFrameRef.current = onFirstFrame;
+  }, [onFirstFrame]);
+  const handleFirstFrame = useCallback(() => {
+    setPainted(true);
+    firstFrameRef.current?.();
+  }, []);
 
   const [failure, setFailure] = useState<RenderFailureReason | null>(null);
   const mountedRef = useRef(true);
@@ -232,6 +255,54 @@ export default function Board3D(props: Board3DProps) {
   }, [pauseWhenOffscreen]);
   const paused = pauseWhenOffscreen && offscreen;
 
+  // THE OTHER WAY THE BOARD ENDS UP BLANK, and it happens before a frame is ever on the
+  // table. fiber's <Canvas> measures its own wrapper with react-use-measure and only
+  // creates the WebGL root once that measurement has landed; until then the <canvas> sits
+  // at the HTML default of 300x150 inside a wrapper that has a perfectly good size, and
+  // nothing inside the Canvas exists to ask for a frame. The measurement is delivered by
+  // a ResizeObserver, and react-use-measure DROPS the reading if it arrives before its
+  // own `mounted` ref is set — without recording it and without retrying, and the
+  // element's size never changes again, so no second callback ever comes. (A document
+  // the browser is not rendering delivers that callback late, which is what makes the
+  // race easy to lose.) A window resize re-measures through a different code path, so
+  // that is the nudge; it is the same event the library already listens for.
+  //
+  // Self-terminating: only until the board has painted, and capped so a genuinely broken
+  // mount cannot turn into a permanent timer.
+  const nudges = useRef(0);
+  useEffect(() => {
+    if (painted || webglAvailable !== true) return;
+    nudges.current = 0;
+    const id = window.setInterval(() => {
+      if (nudges.current >= MAX_MEASURE_NUDGES) {
+        window.clearInterval(id);
+        return;
+      }
+      const wrapper = wrapperRef.current;
+      const canvas = wrapper?.querySelector("canvas");
+      // `style.width` is written by the renderer's own setSize: empty means fiber has
+      // never had a measurement to act on.
+      if (!wrapper || !canvas || canvas.style.width !== "" || wrapper.clientWidth === 0) return;
+      nudges.current += 1;
+      window.dispatchEvent(new Event("resize"));
+    }, MEASURE_RETRY_MS);
+    return () => window.clearInterval(id);
+  }, [painted, webglAvailable]);
+
+  // Everything the scene draws, as one string (frame-key.ts). <FrameloopGate> turns each
+  // change into a frame, so a move, a flip, a review step or a room swap is guaranteed to
+  // be rendered instead of waiting for a pointer to invalidate the root by raycasting.
+  const frameKey = boardFrameKey(props, {
+    roomPreset,
+    roomColors: roomColors ?? null,
+    roomImageUrl,
+    tier,
+    postFx: postFxEnabled,
+    cameraPreset,
+    cinematic,
+    reducedMotion,
+  });
+
   // Frozen at mount: re-applying `camera` reactively would yank the camera out of a
   // CameraControls transition every time the preset changes.
   const [initialCamera] = useState(() => ({
@@ -269,6 +340,11 @@ export default function Board3D(props: Board3DProps) {
       // Hook for the consumer's CSS (the landing fades this in on `onFirstFrame`).
       data-showcase={showcase ? "true" : undefined}
       data-paused={paused ? "true" : undefined}
+      // "false" rather than an absent attribute: a missing hook must not be readable as
+      // a board that has painted. `getContext` belongs to r3f and a WebGL drawing buffer
+      // is gone by the time `toDataURL` could look at it, so this is the only honest way
+      // to ask a live page whether a frame has actually been presented.
+      data-first-frame={painted ? "true" : "false"}
       role={widget ? "application" : "img"}
       aria-label={
         widget
@@ -323,7 +399,7 @@ export default function Board3D(props: Board3DProps) {
               persistSession={!showcase}
               paused={paused}
             />
-            <FirstFrame onFirstFrame={props.onFirstFrame} />
+            <FirstFrame onFirstFrame={handleFirstFrame} />
           </Suspense>
 
           <PostFx
@@ -338,10 +414,16 @@ export default function Board3D(props: Board3DProps) {
             onRestoreDpr={onRestoreDpr}
           />
 
-          <FrameloopGate paused={paused} />
+          <FrameloopGate paused={paused} painted={painted} signature={frameKey} />
           {props.onFrameRate ? <FrameRateSampler onFrameRate={props.onFrameRate} /> : null}
         </Canvas>
       )}
+
+      {/* Until the renderer has presented a frame there is nothing on the canvas but the
+          ring around it, and the chunk-level skeleton was unmounted the moment this
+          component mounted. Same skeleton, held until there is genuinely something to
+          look at. Inert: the board underneath is not operable yet either. */}
+      {painted ? null : <Board3DSkeleton className="pointer-events-none absolute inset-0" />}
 
       {controlsHidden ? null : (
         <CameraOverlay preset={cameraPreset} onSelect={selectCameraPreset} onReset={resetCamera} />

@@ -162,7 +162,9 @@ test.describe("public routes", () => {
     ]) {
       await expect(actions.getByRole("button", { name, exact: true })).toBeVisible();
     }
-    await expect(actions.getByRole("button", { name: /^Hint/ })).toBeVisible();
+    // One name for the hint action: the bar and the chat composer both say
+    // "Ask for a hint", with the count as "2 left".
+    await expect(actions.getByRole("button", { name: /^Ask for a hint/ })).toBeVisible();
     await expect(actions.getByRole("button", { name: "Resign the game" })).toBeVisible();
     await expect(actions.getByRole("button", { name: "PGN export" })).toBeVisible();
     // 3D only, and it is why the in-canvas camera overlay is hidden in the shell:
@@ -182,8 +184,14 @@ test.describe("public routes", () => {
     const chat = page.getByRole("list", { name: /Conversation with/i });
     await expect(chat).toBeVisible();
     await expect(chat.getByText("You played e4")).toBeVisible();
-    // §5.1's composer is the primary hint button with the remaining count.
-    await expect(page.getByRole("button", { name: /Ask for a hint/ })).toBeVisible();
+    // §5.1's composer is the primary hint button with the remaining count. It is
+    // scoped to the Chat panel because the action bar's button now says the same
+    // thing — that agreement is the point (one name for one action).
+    await expect(
+      page.getByRole("tabpanel", { name: "Chat" }).getByRole("button", {
+        name: /Ask for a hint/,
+      }),
+    ).toBeVisible();
 
     // The board box is square and the screen never scrolls (§5.1).
     await expect(page.getByRole("application", { name: /3D chess board/i })).toBeVisible();
@@ -199,7 +207,53 @@ test.describe("public routes", () => {
     // itself against exactly that attribute — the only coupling between the two.
     await expect(page.locator("html")).toHaveAttribute("data-layout", "focus");
     await expect(page.locator('header[data-slot="site-header"]')).toBeHidden();
-    await expect(page.getByRole("button", { name: "Exit fullscreen" })).toBeVisible();
+
+    // The HUD is two layers: one that may fade after 3s idle, and one that never
+    // does. The way out and the shortcuts key live in the second — a HUD that can
+    // fade to nothing is a trap on a touch screen, where nothing hovers.
+    const hud = page.locator('[data-slot="focus-hud"]');
+    const fading = hud.locator('[data-slot="focus-hud-fade"]');
+    await expect(hud).toBeVisible();
+
+    const exit = page.getByRole("button", { name: "Exit fullscreen" });
+    await expect(exit).toBeVisible();
+    await expect(fading.getByRole("button", { name: "Exit fullscreen" })).toHaveCount(0);
+
+    const shortcuts = page.getByRole("button", { name: "Keyboard shortcuts" });
+    await expect(shortcuts).toBeVisible();
+    await expect(fading.getByRole("button", { name: "Keyboard shortcuts" })).toHaveCount(0);
+    await shortcuts.click();
+    await expect(page.getByRole("dialog", { name: /shortcuts/i })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: /shortcuts/i })).toBeHidden();
+
+    // The compact bar keeps the two actions that end a game: conceding and
+    // answering an offer are not things you leave the layout to do.
+    const actions = page.getByRole("toolbar", { name: "Game actions" });
+    await expect(actions.getByRole("button", { name: "Resign the game" })).toBeVisible();
+  });
+
+  test("a draw offer reaches the focus layout", async ({ page }) => {
+    await page.goto("/dev/game?scenario=online-draw-offer");
+
+    // FR-31 in the default layout: the banner sits above the action bar, and the
+    // two answers carry equal weight — accepting a draw cannot be taken back.
+    const offer = page.getByRole("alert").filter({ hasText: "offers a draw" });
+    await expect(offer).toBeVisible();
+    await expect(offer.getByRole("button", { name: "Accept" })).toBeVisible();
+    await expect(offer.getByRole("button", { name: "Decline" })).toBeVisible();
+
+    // F switches to the focus layout; the offer follows it there as a HUD layer
+    // instead of disappearing with the sidebar and the action-bar row.
+    await page.keyboard.press("f");
+    await expect(page.locator("html")).toHaveAttribute("data-layout", "focus");
+    await expect(offer).toBeVisible();
+    await expect(offer.getByRole("button", { name: "Accept" })).toBeVisible();
+    await expect(
+      page.getByRole("toolbar", { name: "Game actions" }).getByRole("button", {
+        name: "Offer draw",
+      }),
+    ).toBeVisible();
   });
 
   test("the ui-kit gallery renders every primitive", async ({ page }) => {

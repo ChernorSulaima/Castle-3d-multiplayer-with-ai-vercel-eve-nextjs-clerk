@@ -4,11 +4,15 @@
 // labelled, every disabled button carrying the reason in its tooltip:
 //
 //   View   2D/3D (T) · Flip (R) · Camera ▾ (3D) · Fullscreen (F)
-//   Game   Hint · Take back · Offer draw · Resign
+//   Game   Ask for a hint · Take back · Offer draw · Resign
 //   More   PGN ▾ · Room · Shortcuts
+//
+// The hint action has ONE name — "Ask for a hint", with the count as "2 left" —
+// and the chat composer in `game-chat.tsx` says exactly the same thing.
 //
 // Icon + label from 1280px up, icon-only with a tooltip below that (`labelFrom`).
 // Nothing here talks to Convex: every verb is a `GameActions` call or a callback.
+import { useState } from "react";
 import {
   BoxIcon,
   CameraIcon,
@@ -47,6 +51,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActionBar, ActionButton, ActionGroup, ActionSeparator } from "@/components/ui-kit";
 import { errorCopyFor } from "@/lib/errors";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -81,7 +86,7 @@ export interface GameActionBarProps {
   onToggleFocus(): void;
   onOpenRoom(): void;
   onOpenShortcuts(): void;
-  /** "focus" drops the More group and the labels — it is the floating HUD bar. */
+  /** "focus" drops the More group — it is the floating HUD bar of §5.2. */
   variant?: "full" | "focus";
   className?: string;
 }
@@ -93,19 +98,34 @@ const CAMERA_ITEMS: { preset: CameraPresetId; label: string }[] = [
   { preset: "cinematic", label: "Orbit" },
 ];
 
+/** Below 1280 this is a bare camera icon, so — like every other trigger in the bar
+ *  (§5.1: "every trigger carries a tooltip") — it says what it does. Base UI composes
+ *  the two triggers by nesting `render` props (handbook/composition.md). */
 function CameraMenu({ orientation }: { orientation: Colour }) {
   const setCameraPreset = useUiStore((s) => s.setCameraPreset);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button size="sm" variant="ghost" className="shrink-0" aria-label="Camera angle" />
-        }
-      >
-        <CameraIcon aria-hidden />
-        <span className="sr-only xl:not-sr-only">Camera</span>
-        <ChevronDownIcon aria-hidden className="opacity-60" />
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="default"
+                  variant="ghost"
+                  className="shrink-0"
+                  aria-label="Camera angle"
+                />
+              }
+            >
+              <CameraIcon aria-hidden />
+              <span className="sr-only xl:not-sr-only">Camera</span>
+              <ChevronDownIcon aria-hidden className="opacity-60" />
+            </DropdownMenuTrigger>
+          }
+        />
+        <TooltipContent side="bottom">Where you sit — white, black, top down or orbit</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" side="top">
         <DropdownMenuLabel>Camera</DropdownMenuLabel>
         {CAMERA_ITEMS.map((item) => (
@@ -122,18 +142,28 @@ function CameraMenu({ orientation }: { orientation: Colour }) {
   );
 }
 
+/** "PGN" is chess jargon, and below 1280 it is not even a word on screen — so the
+ *  trigger carries a tooltip that expands it. Base UI composes the two triggers by
+ *  nesting `render` props (handbook/composition.md, "Composing multiple components"). */
 function PgnMenu({ actions }: { actions: GameActions }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button size="sm" variant="ghost" className="shrink-0" aria-label="PGN export" />
-        }
-      >
-        <FileTextIcon aria-hidden />
-        <span className="sr-only xl:not-sr-only">PGN</span>
-        <ChevronDownIcon aria-hidden className="opacity-60" />
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button size="default" variant="ghost" className="shrink-0" aria-label="PGN export" />
+              }
+            >
+              <FileTextIcon aria-hidden />
+              <span className="sr-only xl:not-sr-only">PGN</span>
+              <ChevronDownIcon aria-hidden className="opacity-60" />
+            </DropdownMenuTrigger>
+          }
+        />
+        <TooltipContent side="bottom">PGN — the game as text (copy or download)</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" side="top">
         <DropdownMenuItem
           onClick={() => {
@@ -167,26 +197,39 @@ export function ResignAction({
   onResign(): void;
 }) {
   const blocked = disabledReason !== null;
+  // `AlertDialogAction` is a plain Button in this shadcn port — it does not close
+  // the dialog — so the open state is held here and the action closes it itself.
+  // Without this the game ends behind a modal that is still asking the question.
+  const [open, setOpen] = useState(false);
   return (
-    <AlertDialog>
-      <AlertDialogTrigger
-        render={
-          <Button
-            size={wide ? "default" : "sm"}
-            variant="destructive"
-            aria-label="Resign the game"
-            title={disabledReason ?? "Resign the game"}
-            aria-disabled={blocked || undefined}
-            className={cn(
-              wide ? "justify-start" : "shrink-0",
-              blocked && "pointer-events-none opacity-50",
-            )}
-          />
-        }
-      >
-        <FlagIcon aria-hidden />
-        <span className={wide ? undefined : "sr-only xl:not-sr-only"}>Resign</span>
-      </AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      {/* A native `title` was the odd one out in a bar where everything else
+          explains itself through the Tooltip component: it looked different, waited
+          longer, and never appeared for a keyboard user. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <AlertDialogTrigger
+              render={
+                <Button
+                  size={wide ? "lg" : "default"}
+                  variant="destructive"
+                  aria-label="Resign the game"
+                  aria-disabled={blocked || undefined}
+                  className={cn(
+                    wide ? "justify-start" : "shrink-0",
+                    blocked && "pointer-events-none opacity-50",
+                  )}
+                />
+              }
+            >
+              <FlagIcon aria-hidden />
+              <span className={wide ? undefined : "sr-only xl:not-sr-only"}>Resign</span>
+            </AlertDialogTrigger>
+          }
+        />
+        <TooltipContent side="bottom">{disabledReason ?? "Resign the game"}</TooltipContent>
+      </Tooltip>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Resign this game?</AlertDialogTitle>
@@ -198,7 +241,13 @@ export function ResignAction({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Keep playing</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onResign}>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              setOpen(false);
+              onResign();
+            }}
+          >
             Resign
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -260,6 +309,9 @@ export function GameActionBar({
   return (
     <ActionBar
       label="Game actions"
+      // Only the focus HUD's bar floats over the board; the default one is part of
+      // the page and takes tone and a hairline instead of a shadow (DESIGN.md).
+      variant={compact ? "focus" : "default"}
       className={cn(compact && "w-auto bg-card/90 backdrop-blur-md", className)}
     >
       <ActionGroup>
@@ -298,9 +350,9 @@ export function GameActionBar({
             {hint.available ? (
               <ActionButton
                 icon={LightbulbIcon}
-                label="Hint"
+                label="Ask for a hint"
                 labelFrom={labelFrom}
-                tooltip="Ask your opponent for a nudge"
+                tooltip="Your opponent suggests a move"
                 badge={`${hint.remaining} left`}
                 disabledReason={hint.disabledReason ?? undefined}
                 onClick={hint.request}
@@ -318,7 +370,10 @@ export function GameActionBar({
               }}
             />
 
-            {!compact && mode === "online" ? (
+            {/* Both of these used to be dropped from the focus HUD, which left a
+                fullscreen player unable to answer — or make — a draw offer, and
+                unable to concede. They stay (§5.2's HUD bar scrolls if it must). */}
+            {mode === "online" ? (
               <ActionButton
                 icon={HandshakeIcon}
                 label="Offer draw"
@@ -331,17 +386,15 @@ export function GameActionBar({
               />
             ) : null}
 
-            {!compact ? (
-              <ResignAction
-                mode={mode}
-                disabledReason={
-                  canResign && !pending ? null : errorCopyFor("game-not-active", "game")
-                }
-                onResign={() => {
-                  void actions.resign();
-                }}
-              />
-            ) : null}
+            <ResignAction
+              mode={mode}
+              disabledReason={
+                canResign && !pending ? null : errorCopyFor("game-not-active", "game")
+              }
+              onResign={() => {
+                void actions.resign();
+              }}
+            />
 
             {compact ? fullscreenAction : null}
           </ActionGroup>

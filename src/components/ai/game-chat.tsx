@@ -107,6 +107,23 @@ export function GameChat({
     })),
   ].sort((a, b) => a.ply - b.ply || a.order - b.order);
 
+  // NFR-7, one voice per event. The move itself is announced by the shell's
+  // sr-only `MoveAnnouncer`, so the transcript is NOT a live region (see
+  // `ChatList`): a player's own move would otherwise be read twice, once as
+  // notation and once as a chat line. What a reader cannot get anywhere else is
+  // what the OPPONENT said, so that — and the hint they asked for — is all this
+  // region carries. Two spans, not one string: each changes only when its own
+  // source does, so clearing the hint can never re-announce the last comment.
+  let lastAi: { personaName: string; text: string } | null = null;
+  for (const item of items) {
+    if (item.kind === "ai") lastAi = { personaName: item.personaName, text: item.text };
+  }
+  const aiLine = lastAi === null ? "" : `${lastAi.personaName}: ${lastAi.text}`;
+  const hintLine =
+    hintResult === null
+      ? ""
+      : `Hint: ${hintResult.san}.${hintResult.text.length > 0 ? ` ${hintResult.text}` : ""}`;
+
   const thinking = isAi && phase !== "idle";
   const askedForHint = isAi && (hintPending || hintResult !== null);
   const engineBusy = isAi && engineStatus !== "idle" && engineStatus !== "ready";
@@ -121,116 +138,125 @@ export function GameChat({
     (streaming.length > 0 ? 1 : 0);
 
   return (
-    <ChatList
-      className={className}
-      label={isAi ? `Conversation with ${personaName}` : "Game events"}
-      messageCount={merged.length + liveCount}
-      empty={
-        isAi
-          ? `${personaName} will say something once the game is under way.`
-          : "Commentary is available in games against the AI."
-      }
-      footer={
-        hint.available ? (
-          <div className="flex flex-col gap-1.5">
-            <Button
-              // `aria-disabled`, not `disabled`, so the button keeps its tooltip and
-              // stays in the tab order to explain itself — but it has to LOOK
-              // unavailable too, the same 50% the action bar's blocked buttons use.
-              className="w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              aria-disabled={hint.disabledReason !== null || undefined}
-              aria-label={`Ask for a hint. ${hint.remaining} of ${hint.max} left.`}
-              title={hint.disabledReason ?? undefined}
-              onClick={() => {
-                if (hint.disabledReason === null) hint.request();
-              }}
+    <>
+      {/* Polite, and only ever the opponent. Two spans so each announces on its
+          own source's change and nothing is repeated when the other clears. */}
+      <p aria-live="polite" className="sr-only" data-slot="chat-announcer">
+        <span>{aiLine}</span>
+        <span>{hintLine}</span>
+      </p>
+
+      <ChatList
+        className={className}
+        label={isAi ? `Conversation with ${personaName}` : "Game events"}
+        messageCount={merged.length + liveCount}
+        empty={
+          isAi
+            ? `${personaName} will say something once the game is under way.`
+            : "Commentary is available in games against the AI."
+        }
+        footer={
+          hint.available ? (
+            <div className="flex flex-col gap-1.5">
+              <Button
+                // `aria-disabled`, not `disabled`, so the button keeps its tooltip and
+                // stays in the tab order to explain itself — but it has to LOOK
+                // unavailable too, the same 50% the action bar's blocked buttons use.
+                className="w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                aria-disabled={hint.disabledReason !== null || undefined}
+                aria-label={`Ask for a hint. ${hint.remaining} of ${hint.max} left.`}
+                title={hint.disabledReason ?? undefined}
+                onClick={() => {
+                  if (hint.disabledReason === null) hint.request();
+                }}
+              >
+                <LightbulbIcon aria-hidden />
+                {hint.pending ? "Thinking…" : "Ask for a hint"}
+                <span className="tabular text-[12px] opacity-80">{hint.remaining} left</span>
+              </Button>
+              {hint.disabledReason !== null ? (
+                <p className="text-center text-[12px] text-muted-foreground">
+                  {hint.disabledReason}
+                </p>
+              ) : null}
+            </div>
+          ) : isAi ? null : (
+            <p className="text-center text-[12px] text-muted-foreground">
+              Commentary is available in games against the AI.
+            </p>
+          )
+        }
+      >
+        {merged.map(({ item }) => {
+          if (item.kind === "system") {
+            return (
+              <ChatMessage key={item.id} variant="system">
+                {item.text}
+              </ChatMessage>
+            );
+          }
+          if (item.kind === "you") {
+            return (
+              <ChatMessage key={item.id} variant="you">
+                {item.text}
+              </ChatMessage>
+            );
+          }
+          return (
+            <ChatMessage
+              key={item.id}
+              variant="ai"
+              // e2e hook: a PERSISTED commentary bubble, as opposed to the live
+              // "thinking"/streaming ones below. Attribute only.
+              data-testid="chat-ai-message"
+              personaName={item.personaName}
+              moveLabel={item.moveLabel}
+              tag={item.tag}
             >
-              <LightbulbIcon aria-hidden />
-              {hint.pending ? "Thinking…" : "Ask for a hint"}
-              <span className="tabular text-[12px] opacity-80">{hint.remaining} left</span>
-            </Button>
-            {hint.disabledReason !== null ? (
-              <p className="text-center text-[12px] text-muted-foreground">
-                {hint.disabledReason}
-              </p>
-            ) : null}
-          </div>
-        ) : isAi ? null : (
-          <p className="text-center text-[12px] text-muted-foreground">
-            Commentary is available in games against the AI.
-          </p>
-        )
-      }
-    >
-      {merged.map(({ item }) => {
-        if (item.kind === "system") {
-          return (
-            <ChatMessage key={item.id} variant="system">
               {item.text}
             </ChatMessage>
           );
-        }
-        if (item.kind === "you") {
-          return (
-            <ChatMessage key={item.id} variant="you">
-              {item.text}
-            </ChatMessage>
-          );
-        }
-        return (
+        })}
+
+        {engineBusy ? (
           <ChatMessage
-            key={item.id}
-            variant="ai"
-            // e2e hook: a PERSISTED commentary bubble, as opposed to the live
-            // "thinking"/streaming ones below. Attribute only.
-            data-testid="chat-ai-message"
-            personaName={item.personaName}
-            moveLabel={item.moveLabel}
-            tag={item.tag}
+            key="engine"
+            variant="system"
+            className={cn("[&>span]:w-full [&>span]:max-w-[16rem]")}
           >
-            {item.text}
+            <EngineLoading onRetry={onRetryEngine} />
           </ChatMessage>
-        );
-      })}
+        ) : null}
 
-      {engineBusy ? (
-        <ChatMessage
-          key="engine"
-          variant="system"
-          className={cn("[&>span]:w-full [&>span]:max-w-[16rem]")}
-        >
-          <EngineLoading onRetry={onRetryEngine} />
-        </ChatMessage>
-      ) : null}
+        {askedForHint ? (
+          <ChatMessage key="hint-request" variant="you">
+            Hint requested
+          </ChatMessage>
+        ) : null}
 
-      {askedForHint ? (
-        <ChatMessage key="hint-request" variant="you">
-          Hint requested
-        </ChatMessage>
-      ) : null}
+        {hintPending ? (
+          <ChatMessage key="hint-thinking" variant="thinking" personaName={personaName} />
+        ) : null}
 
-      {hintPending ? (
-        <ChatMessage key="hint-thinking" variant="thinking" personaName={personaName} />
-      ) : null}
+        {hintResult !== null ? (
+          <ChatMessage key="hint-result" variant="ai" personaName={personaName} tag="Hint">
+            <strong className="tabular font-mono font-medium">{hintResult.san}</strong>{" "}
+            {hintResult.text.length > 0 ? <span>{hintResult.text}</span> : null}
+          </ChatMessage>
+        ) : null}
 
-      {hintResult !== null ? (
-        <ChatMessage key="hint-result" variant="ai" personaName={personaName} tag="Hint">
-          <strong className="tabular font-mono font-medium">{hintResult.san}</strong>{" "}
-          {hintResult.text.length > 0 ? <span>{hintResult.text}</span> : null}
-        </ChatMessage>
-      ) : null}
+        {streaming.length > 0 ? (
+          <ChatMessage key="streaming" variant="ai" personaName={personaName}>
+            {streaming}
+          </ChatMessage>
+        ) : null}
 
-      {streaming.length > 0 ? (
-        <ChatMessage key="streaming" variant="ai" personaName={personaName}>
-          {streaming}
-        </ChatMessage>
-      ) : null}
+        {thinking && streaming.length === 0 ? (
+          <ChatMessage key="thinking" variant="thinking" personaName={personaName} />
+        ) : null}
 
-      {thinking && streaming.length === 0 ? (
-        <ChatMessage key="thinking" variant="thinking" personaName={personaName} />
-      ) : null}
-
-      <li key="bottom" ref={bottomRef} aria-hidden className="h-px shrink-0" />
-    </ChatList>
+        <li key="bottom" ref={bottomRef} aria-hidden className="h-px shrink-0" />
+      </ChatList>
+    </>
   );
 }

@@ -13,8 +13,10 @@ import {
   ExpandIcon,
   Grid2x2Icon,
   HandshakeIcon,
+  InfoIcon,
   KeyboardIcon,
   LightbulbIcon,
+  ListIcon,
   MessagesSquareIcon,
   MinimizeIcon,
   RefreshCwIcon,
@@ -37,6 +39,15 @@ import { cn } from "@/lib/ui";
 import type { BoardView, CameraPresetId, Colour, GameActions, GameMode } from "@/lib/types";
 import { ResignAction } from "./game-action-bar";
 
+/** Which tab the panel button opens onto, so the label names what happens. */
+export type MobilePanelTab = "chat" | "moves" | "info";
+
+const PANEL_BUTTON: Record<MobilePanelTab, { icon: typeof BoxIcon; label: string }> = {
+  chat: { icon: MessagesSquareIcon, label: "Chat" },
+  moves: { icon: ListIcon, label: "Moves" },
+  info: { icon: InfoIcon, label: "Info" },
+};
+
 export interface GameMobileBarProps {
   mode: GameMode;
   seat: Colour | "both" | null;
@@ -50,6 +61,8 @@ export interface GameMobileBarProps {
   canOfferDraw: boolean;
   hint: { available: boolean; remaining: number; disabledReason: string | null; request(): void };
   actions: GameActions;
+  /** The tab the sheet will land on — names the panel button (§4 "say what happens"). */
+  panelTab: MobilePanelTab;
   onToggleView(): void;
   onToggleFocus(): void;
   onOpenPanel(): void;
@@ -65,36 +78,47 @@ const CAMERA_ITEMS: { preset: CameraPresetId; label: string }[] = [
   { preset: "cinematic", label: "Orbit" },
 ];
 
-/** One thumb-sized button: icon over a 10px caption, so nothing is a mystery glyph. */
+/**
+ * One thumb-sized button: icon over a 10px caption, so nothing is a mystery glyph.
+ *
+ * `min-h-11` is the 44px touch floor, and the caption is the accessible name unless
+ * `srLabel` gives a fuller one — "Exit" reads as a whole verb under the icon while a
+ * screen reader still hears "Exit fullscreen".
+ */
 function BarButton({
   icon: Icon,
   label,
+  srLabel,
   onClick,
   disabled = false,
-  badge,
   tone = "default",
+  className,
 }: {
   icon: typeof BoxIcon;
   label: string;
+  srLabel?: string;
   onClick(): void;
   disabled?: boolean;
-  badge?: string;
   tone?: "default" | "primary";
+  className?: string;
 }) {
   return (
     <Button
       variant="ghost"
       onClick={onClick}
       aria-disabled={disabled || undefined}
+      aria-label={srLabel}
       className={cn(
-        "h-auto min-w-0 flex-1 flex-col gap-0.5 px-1 py-1.5 text-[10px] font-medium",
+        "h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0.5 py-1.5 text-[12px] font-medium",
         tone === "primary" && "text-primary",
         disabled && "opacity-50",
+        className,
       )}
     >
       <Icon aria-hidden className="size-5" />
-      <span className="truncate">{label}</span>
-      {badge ? <span className="tabular sr-only">{badge}</span> : null}
+      <span aria-hidden={srLabel ? true : undefined} className="truncate">
+        {label}
+      </span>
     </Button>
   );
 }
@@ -138,6 +162,7 @@ export function GameMobileBar({
   canOfferDraw,
   hint,
   actions,
+  panelTab,
   onToggleView,
   onToggleFocus,
   onOpenPanel,
@@ -149,11 +174,12 @@ export function GameMobileBar({
   const is3d = boardView === "3d";
   const noWebgl = webglAvailable === false;
   const flip = () => actions.setOrientation(orientation === "w" ? "b" : "w");
+  const panel = PANEL_BUTTON[panelTab];
 
   return (
     <ActionBar
       label="Game actions"
-      className={cn("gap-0 overflow-visible px-1", className)}
+      className={cn("gap-0 overflow-visible px-0.5", className)}
     >
       <BarButton
         icon={is3d ? Grid2x2Icon : BoxIcon}
@@ -166,14 +192,21 @@ export function GameMobileBar({
       <BarButton icon={RefreshCwIcon} label="Flip" onClick={flip} />
       <BarButton
         icon={focus ? MinimizeIcon : ExpandIcon}
-        label={focus ? "Exit" : "Full"}
+        label={focus ? "Exit" : "Fullscreen"}
+        srLabel={focus ? "Exit fullscreen" : "Fullscreen"}
         onClick={onToggleFocus}
       />
       {hint.available ? (
+        // The count is on the face, not in a tooltip a thumb cannot summon: a hint
+        // is spent, so "2 left" is the part of the label that decides the tap. The
+        // face is short because a thumb bar is narrow; the accessible name is the
+        // action's ONE name, the same words the bar and the composer use.
         <BarButton
           icon={LightbulbIcon}
-          label={`Hint ${hint.remaining}`}
+          label={`Hint · ${hint.remaining} left`}
+          srLabel={`Ask for a hint · ${hint.remaining} left`}
           tone="primary"
+          className="flex-[1.3]"
           disabled={hint.disabledReason !== null}
           onClick={() => {
             if (hint.disabledReason === null) hint.request();
@@ -182,14 +215,14 @@ export function GameMobileBar({
       ) : (
         <BarButton
           icon={UndoIcon}
-          label="Undo"
+          label={mode === "local" ? "Undo" : "Take back"}
           disabled={!canUndo || mode === "online" || seat === null}
           onClick={() => {
             void actions.undo();
           }}
         />
       )}
-      <BarButton icon={MessagesSquareIcon} label="Panel" onClick={onOpenPanel} />
+      <BarButton icon={panel.icon} label={panel.label} onClick={onOpenPanel} />
 
       <Drawer>
         <DrawerTrigger
@@ -197,7 +230,7 @@ export function GameMobileBar({
             <Button
               variant="ghost"
               aria-label="More game actions"
-              className="h-auto min-w-0 flex-1 flex-col gap-0.5 px-1 py-1.5 text-[10px] font-medium"
+              className="h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0.5 py-1.5 text-[12px] font-medium"
             />
           }
         >

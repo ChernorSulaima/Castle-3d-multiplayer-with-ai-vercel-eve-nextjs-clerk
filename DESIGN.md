@@ -65,6 +65,12 @@ typography:
     fontWeight: 500
     lineHeight: 1.4
     fontFeature: "'tnum' 1"
+  micro:
+    fontFamily: "Geist, system-ui, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 500
+    lineHeight: 1.35
+    letterSpacing: "0.02em"
 rounded:
   chip: "999px"
   control: "0.625rem"
@@ -214,6 +220,7 @@ discipline of a scoresheet.
 - **Body** (400, 0.9375rem marketing / 0.875rem app frame, 1.6): copy; keep measure to 46–60 characters.
 - **Label** (500, 0.8125rem, 0.12em tracking, uppercase): eyebrows, section labels, table headers.
 - **Data** (500, 0.8125rem mono, tabular figures): move notation, ratings, clocks, coordinates, IDs.
+- **Micro** (500, 0.75rem, 0.02em tracking): the floor of the ramp — metadata beside a name, counters and badges, keyboard caps. Nothing in the interface is set smaller than this, and anything that would be is lifted to it.
 
 ### Named Rules
 **The Scoresheet Rule.** Anything a player would write on a scoresheet — moves, ratings, clocks, coordinates — is set in Geist Mono with tabular figures, never in the UI face.

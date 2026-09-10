@@ -5,6 +5,9 @@
 // with 2 take-backs" when applicable, buttons: Play again (same mode), Review
 // game, Back to lobby.'
 //
+// The delta and the take-back line are EXCLUSIVE: a game with take-backs is
+// unrated (FR-43), so it gets the sentence and no brass pill.
+//
 // PURE: the rating row and the rematch mutation are fed in by `GameShell`, so
 // /dev/game can open this dialog with no Convex at all.
 import { useState } from "react";
@@ -25,7 +28,6 @@ import {
   formatGameResult,
   formatRatingDelta,
   outcomeFor,
-  pluralize,
 } from "@/lib/format";
 import { cn } from "@/lib/ui";
 import type { Colour, GameView } from "@/lib/types";
@@ -54,6 +56,25 @@ function headlineFor(view: GameView, seat: Colour | "both" | null): string {
   return "Game over";
 }
 
+/** The host says small numbers as words: "one take-back", not "1 take-back". */
+const NUMBER_WORDS = [
+  "no",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+];
+
+function spellCount(n: number): string {
+  return NUMBER_WORDS[n] ?? String(n);
+}
+
 export function GameResultDialog({
   view,
   seat,
@@ -78,6 +99,30 @@ export function GameResultDialog({
     blackName: view.blackName,
   });
 
+  // FR-43: `games.undo` writes `rated: false`, so a game with take-backs moved
+  // nobody's rating. Showing a brass delta NEXT TO "Won with one take-back" gave
+  // the player two answers to one question. One sentence answers it instead, and
+  // the delta is kept for the games that actually earned one.
+  const takeBacks = game.undoCount;
+  const seated = myColour !== null;
+  const myRating = myColour === null ? null : (view[myColour === "w" ? "white" : "black"]?.rating ?? null);
+  const verb = !seated
+    ? "Played"
+    : outcome === "win"
+      ? "Won"
+      : outcome === "loss"
+        ? "Lost"
+        : "Drew";
+  const takeBackLine =
+    takeBacks === 0
+      ? null
+      : `${verb} with ${spellCount(takeBacks)} take-back${takeBacks === 1 ? "" : "s"}` +
+        (!seated
+          ? "."
+          : myRating === null
+            ? ", so the rating stays put."
+            : `, so the rating stays put — ${myRating}.`);
+
   return (
     <Dialog
       open={open}
@@ -99,7 +144,7 @@ export function GameResultDialog({
         </DialogHeader>
 
         <div className="flex flex-wrap items-center gap-2">
-          {rating !== null ? (
+          {takeBacks > 0 ? null : rating !== null ? (
             <span
               className={cn(
                 "tabular inline-flex items-baseline gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[13px]",
@@ -109,6 +154,10 @@ export function GameResultDialog({
               )}
             >
               <span className="font-medium">{formatRatingDelta(rating.delta)}</span>
+              <span aria-hidden className="opacity-50">
+                →
+              </span>
+              <span className="sr-only">new rating</span>
               <span className="opacity-75">{rating.after}</span>
             </span>
           ) : game.rated ? (
@@ -126,12 +175,9 @@ export function GameResultDialog({
           ) : null}
         </div>
 
-        {game.undoCount > 0 ? (
-          <p className="text-[13px] text-muted-foreground">
-            {outcome === "win" ? "Won with " : "Played with "}
-            {pluralize(game.undoCount, "take-back")}.
-          </p>
-        ) : null}
+        {takeBackLine === null ? null : (
+          <p className="text-[13px] text-muted-foreground">{takeBackLine}</p>
+        )}
 
         <DialogFooter className="sm:justify-between">
           <Button variant="ghost" onClick={() => setDismissedFor(dismissKey)}>

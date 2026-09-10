@@ -67,12 +67,15 @@ export function ChatList({
 
   return (
     <div className={cn("relative flex min-h-0 flex-1 flex-col", className)} {...props}>
+      {/* NOT a live region. Every row that lands here for a MOVE is already spoken
+          by the game's sr-only move announcer, so announcing the list too read the
+          same move twice — once as notation, once as a chat line. The owner of the
+          chat decides what is worth interrupting for (see `GameChat`, which
+          announces the opponent's messages and nothing else). */}
       <ol
         ref={scrollerRef}
         onScroll={handleScroll}
         aria-label={label}
-        aria-live="polite"
-        aria-relevant="additions"
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
       >
         {messageCount === 0 && empty ? (

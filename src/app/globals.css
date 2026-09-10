@@ -357,3 +357,24 @@
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
 }
+
+/* The game board's canvas, unframed. DESIGN.md: "Don't frame the 3D board with a
+   border, card or box; its light is its edge." A hairline ring used to do exactly
+   that, so the room now dissolves into the page instead — the hero's technique at
+   a fifth of the drama: no corner bias, no diagonal, just an even 5% fade off all
+   four edges, so the board keeps its square and only the room's light softens.
+   The 2D board is deliberately NOT given this: its outer files and ranks are
+   information, not atmosphere. */
+.board-canvas-feather {
+  --board-mask:
+    linear-gradient(to bottom, transparent 0%, #000 5%, #000 95%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
+  -webkit-mask-image: var(--board-mask);
+  mask-image: var(--board-mask);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}

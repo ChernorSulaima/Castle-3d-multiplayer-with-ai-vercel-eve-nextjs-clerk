@@ -9,9 +9,11 @@ export interface MoveListProps extends Omit<React.ComponentProps<"div">, "onSele
   currentPly?: number | null;
   onSelect?(ply: number): void;
   /**
-   * Per-cell slot revealed on hover/focus, e.g. a "Rewind to here" button (§5.1).
-   * It is rendered as a SIBLING of the cell button, overlaid on its right edge —
-   * a button inside a button is invalid HTML and breaks hydration.
+   * Per-cell slot revealed on hover/focus, e.g. the "Rewind to move 8" button that
+   * opens its confirmation (§5.1). It is rendered as a SIBLING of the cell button,
+   * overlaid on its right edge — a button inside a button is invalid HTML and
+   * breaks hydration. The slot may render a dialog trigger, so keep it a sibling
+   * rather than nesting it in the cell.
    */
   renderAction?(ply: number): React.ReactNode;
   emptyMessage?: string;

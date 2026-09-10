@@ -3,6 +3,9 @@
 // UI_REDESIGN §5.1: 'Status pill (centre top): "Move 12 · White to move" /
 // "Check" (ember) / "Reviewing move 8 · Back to live" (brass, clickable) /
 // result text when over. Difficulty badge for AI games.'
+//
+// Plus one state the spec did not name: before the first move, a player who has
+// never met a 3D board is told what to do — "Your move — pick a piece".
 import { RadioIcon, RotateCcwIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatPill } from "@/components/ui-kit";
@@ -17,6 +20,10 @@ export interface GameStatusPillProps {
   turnLabel: string;
   active: boolean;
   inCheck: boolean;
+  /** True when this viewer may move right now — `controller.canMove`. */
+  canMove?: boolean;
+  /** Half-moves played so far; 0 means nobody has touched the board yet. */
+  totalPlies?: number;
   /** Shown once the game is over, e.g. "White wins by checkmate". */
   resultText: string | null;
   onBackToLive(): void;
@@ -29,6 +36,8 @@ export function GameStatusPill({
   turnLabel,
   active,
   inCheck,
+  canMove = false,
+  totalPlies = 1,
   resultText,
   onBackToLive,
   className,
@@ -37,25 +46,28 @@ export function GameStatusPill({
     // Ply 0 is the position before White's first move, not "move 0".
     const where = reviewPly === 0 ? "the start" : `move ${Math.ceil(reviewPly / 2)}`;
     return (
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onBackToLive}
-        aria-label={`Reviewing ${where}. Go back to the live position.`}
-        className={cn(
-          "h-7 shrink-0 gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[13px] text-primary hover:bg-primary/20",
-          className,
-        )}
-      >
-        <RotateCcwIcon aria-hidden />
-        <span className="tabular">Reviewing {where}</span>
-        <span aria-hidden className="hidden opacity-60 sm:inline">
-          ·
-        </span>
-        <span aria-hidden className="hidden font-medium sm:inline">
-          Back to live
-        </span>
-      </Button>
+      // Every other state of this pill is a `role="status"` live region, and review
+      // is a state change worth hearing. The role cannot go on the button itself —
+      // that would replace its `button` role and the way out would stop announcing
+      // itself as pressable — so the live region wraps it.
+      <span role="status" className={cn("inline-flex shrink-0", className)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onBackToLive}
+          aria-label={`Reviewing ${where}. Go back to the live position.`}
+          className="h-7 gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[13px] text-primary hover:bg-primary/20"
+        >
+          <RotateCcwIcon aria-hidden />
+          <span className="tabular">Reviewing {where}</span>
+          <span aria-hidden className="hidden opacity-60 sm:inline">
+            ·
+          </span>
+          <span aria-hidden className="hidden font-medium sm:inline">
+            Back to live
+          </span>
+        </Button>
+      </span>
     );
   }
 
@@ -87,6 +99,23 @@ export function GameStatusPill({
             <span className="sr-only sm:not-sr-only">{turnLabel} to move</span>
           </>
         }
+      />
+    );
+  }
+
+  // Nobody has moved yet and the board is waiting on this viewer. "Move 1 · You to
+  // move" is a scoreboard reading; the first thing a player needs is what to DO.
+  if (canMove && totalPlies === 0) {
+    return (
+      <StatPill
+        role="status"
+        tone="live"
+        dot
+        className={cn("shrink-0", className)}
+        // One string, not value + label: StatPill's two spans are separated by a
+        // flex gap and NOT by a text node, so a split here would announce (and
+        // copy) as "Your move— pick a piece".
+        value="Your move — pick a piece"
       />
     );
   }

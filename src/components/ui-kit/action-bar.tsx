@@ -9,17 +9,26 @@ import { Kbd } from "./kbd";
 export interface ActionBarProps extends React.ComponentProps<"div"> {
   /** Accessible name for the toolbar, e.g. "Game actions". */
   label: string;
+  /**
+   * "default" sits in the page's structure under the board; "focus" is the bar
+   * that floats over the board in the fullscreen layout (§5.2).
+   */
+  variant?: "default" | "focus";
 }
 
 /** The always-visible row of labelled game actions (§5.1). */
-export function ActionBar({ label, className, ...props }: ActionBarProps) {
+export function ActionBar({ label, variant = "default", className, ...props }: ActionBarProps) {
   return (
     <div
       role="toolbar"
       aria-label={label}
       className={cn(
         "no-scrollbar flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-border",
-        "bg-card p-1.5 shadow-soft",
+        "bg-card p-1.5",
+        // DESIGN.md, The Only-Floating-Things-Cast-Shadows Rule: the bar beneath
+        // the board is part of the page and gets tone and a hairline; only the
+        // focus HUD's bar genuinely floats, so only it casts the soft shadow.
+        variant === "focus" && "shadow-soft",
         className,
       )}
       {...props}
@@ -29,7 +38,15 @@ export function ActionBar({ label, className, ...props }: ActionBarProps) {
 
 /** A related run of actions inside an ActionBar (View / Game / More). */
 export function ActionGroup({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex items-center gap-1", className)} {...props} />;
+  return (
+    // `shrink-0` matters: the buttons inside a group cannot shrink (the Button base
+    // sets `shrink-0`), so a group that CAN shrink gets squeezed by the flex line
+    // and its children spill over the group beside it — at 1440px "Resign" sat
+    // underneath "PGN" and could not be clicked at its own centre. Holding the
+    // group's width instead lets the bar do what it already says it does and
+    // scroll (`overflow-x-auto`).
+    <div className={cn("flex shrink-0 items-center gap-1", className)} {...props} />
+  );
 }
 
 /** Hairline between two ActionGroups. */
@@ -92,7 +109,10 @@ export function ActionButton({
       <TooltipTrigger
         render={
           <Button
-            size="sm"
+            // DESIGN.md Buttons: 32px tall by default (`size="default"`), 36px for
+            // the large size (`size="lg"`) — shadcn's `sm` is 28px and was off the
+            // token. A caller may still override: `props` is spread after this.
+            size="default"
             variant={BUTTON_VARIANT[variant]}
             aria-disabled={blocked || undefined}
             className={cn("shrink-0", blocked && "opacity-50", className)}
@@ -113,7 +133,7 @@ export function ActionButton({
             text of the inline children with no separator inserted, so without it the
             Hint button announced as "Hint2 left". */}
         {badge ? (
-          <span className="tabular text-[11px] opacity-70">
+          <span className="tabular text-[12px] font-medium opacity-70">
             {" "}
             {badge}
           </span>

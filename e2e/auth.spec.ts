@@ -59,8 +59,9 @@ test.describe("authenticated flows", () => {
 
     // --- 1. e4 on the 2D board --------------------------------------------
     await setBoardView(page, "2D");
-    const whiteToMove = await turnPhraseNow(page);
-    expect(whiteToMove).toMatch(/to move$/);
+    // §5.1: with nothing played yet the pill teaches instead of counting — the
+    // first thing a new player needs is what to do, not that it is move 1.
+    await expect(turnIndicator(page)).toContainText("Your move — pick a piece");
 
     await playMove(page, "e2", "e4");
 
@@ -75,7 +76,8 @@ test.describe("authenticated flows", () => {
     // The status pill names whoever is to move; in a local game that is the other
     // seat's name, so it must have changed.
     await expect(turnIndicator(page)).toContainText(`${PLAYER_TWO} to move`);
-    expect(await turnPhraseNow(page)).not.toBe(whiteToMove);
+    // …and the counter half is separable from the name half.
+    expect(await turnPhraseNow(page)).toBe(`${PLAYER_TWO} to move`);
 
     // --- 3D and back, with the game state intact (FR-14) -------------------
     await setBoardView(page, "3D");
@@ -90,7 +92,8 @@ test.describe("authenticated flows", () => {
     await undo.click();
     await expect(moveHistory(page).getByText("No moves yet.")).toBeVisible();
     await expect.poll(() => sanMoves(page)).toEqual([]);
-    await expect(turnIndicator(page)).toContainText(whiteToMove);
+    // An empty board again, so the first-move nudge comes back.
+    await expect(turnIndicator(page)).toContainText("Your move — pick a piece");
 
     await resign(page);
   });
@@ -112,8 +115,9 @@ test.describe("authenticated flows", () => {
     await expect(page).toHaveURL(/\/game\/[a-z0-9]+$/i);
     await setBoardView(page, "2D");
 
-    // The colour chips default to White, so the player opens.
-    await expect(turnIndicator(page)).toContainText("You to move");
+    // The colour chips default to White, so the player opens — and before the first
+    // move the pill says so in the nudge, not in a move counter.
+    await expect(turnIndicator(page)).toContainText("Your move — pick a piece");
     // In AI games the board stays locked until the engine worker is ready (Stockfish 18
     // is a 5.6 MB first download), so wait for the squares to enable before moving.
     await expect(square(page, "e2")).toBeEnabled({ timeout: 90_000 });

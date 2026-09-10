@@ -75,7 +75,19 @@ export function BoardSurface(props: BoardViewProps) {
     // Board3D fills its parent (`h-full`); U2's shell owns the square box around
     // this component, so both views occupy exactly the same space.
     return (
-      <div className="size-full overflow-hidden rounded-xl ring-1 ring-border">
+      // `[&>*]:min-h-0` cancels the `min-h-[320px]` Board3D carries for standalone
+      // mounts. Inside the shell the box is a SQUARE the shell already sized, so on a
+      // phone (241px wide before U2's mobile pass, ~390px after) that floor made the
+      // canvas taller than its own frame and `overflow-hidden` sliced the bottom rank
+      // off the board. The board decides nothing about its size here: the square does.
+      // DESIGN.md: "Don't frame the 3D board with a border, card or box; its light
+      // is its edge." A `rounded-xl ring-1 ring-border` used to do exactly that and
+      // made the board one more card on the page. `.board-canvas-feather`
+      // (globals.css) replaces it with the landing hero's dissolve at a fifth of
+      // the drama — an even 5% fade off all four edges, no corner bias — so the
+      // room's light ends the board instead of a hairline. The 2D branch below is
+      // deliberately left unmasked.
+      <div className="board-canvas-feather size-full overflow-hidden [&>*]:min-h-0">
         {/* §5.1 puts White / Black / Top / Orbit / Reset in the shell's own action
             bar (and in the mobile "More" sheet and the focus HUD), so the in-canvas
             copy of the same five buttons is redundant here and sits over the bottom

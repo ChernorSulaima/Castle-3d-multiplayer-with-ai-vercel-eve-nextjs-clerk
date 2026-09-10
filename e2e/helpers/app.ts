@@ -117,7 +117,7 @@ export async function openChatTab(page: Page): Promise<void> {
  * `aria-label`, both of which stay in the DOM while the panel is hidden, and
  * `textContent` does not need the element to be visible. That keeps "the move list
  * survived a 2D/3D round trip" an assertion about state, not about which tab is open.
- * The `aria-label^="Move "` filter excludes the hover-revealed "Rewind to here"
+ * The `aria-label^="Move "` filter excludes the hover-revealed "Rewind to move N"
  * buttons that sit in the same cells.
  */
 export async function sanMoves(page: Page): Promise<string[]> {
@@ -126,14 +126,20 @@ export async function sanMoves(page: Page): Promise<string[]> {
     .allTextContents();
 }
 
-/** `<StatPill role="status">Move 3 · Ada to move</StatPill>` in the player row (§5.1). */
+/**
+ * `<StatPill role="status">Move 3 · Ada to move</StatPill>` in the player row (§5.1).
+ *
+ * Before the first move the same pill reads "Your move — pick a piece" instead of
+ * counting, so that phrase is part of what identifies it.
+ */
 export function turnIndicator(page: Page): Locator {
-  return page.getByRole("status").filter({ hasText: /to move|Game over/ });
+  return page.getByRole("status").filter({ hasText: /to move|Your move|Game over/ });
 }
 
 /**
  * The "<name> to move" half of the status pill, without the "Move N ·" counter —
- * so a phrase captured before a move can be compared with one captured after it.
+ * so a phrase captured after one move can be compared with one captured after the
+ * next. (At ply 0 there is no such half: the pill carries the first-move nudge.)
  */
 export function turnPhrase(text: string | null): string {
   const match = (text ?? "").match(/([^·]*?to move)\s*$/);

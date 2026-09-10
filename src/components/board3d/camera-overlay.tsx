@@ -34,6 +34,9 @@ export function CameraOverlay({ preset, onSelect, onReset }: CameraOverlayProps)
     <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2">
       <ActionBar
         label="Camera"
+        // It genuinely floats over the canvas, so it keeps the soft shadow that
+        // the bar under the board has now given up.
+        variant="focus"
         className="pointer-events-auto w-auto flex-wrap justify-end gap-1 border-border/70 bg-card/80 p-1 backdrop-blur-sm"
       >
         {CAMERA_BUTTONS.map((button) => (

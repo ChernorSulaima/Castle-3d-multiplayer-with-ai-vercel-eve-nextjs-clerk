@@ -84,7 +84,7 @@ export function CommentaryPanel({
                 : `Agent unavailable — engine move played${latencyLabel(lastLatencyMs)}`) +
               buildTitle(engineBuild)
             }
-            className="ml-auto font-mono text-[10px] uppercase"
+            className="ml-auto font-mono text-[12px] uppercase"
           >
             {lastSource}
             {engineBuild !== null ? (
@@ -119,12 +119,12 @@ export function CommentaryPanel({
               key={row._id}
               className="rounded-lg border border-border bg-card px-2.5 py-2 text-sm"
             >
-              <span className="mr-1.5 font-mono text-[10px] text-muted-foreground">
+              <span className="mr-1.5 font-mono text-[12px] text-muted-foreground">
                 {plyLabel(row.ply)}
               </span>
               {row.text}
               {showSource && row.source === "fallback" ? (
-                <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+                <span className="ml-1.5 font-mono text-[12px] text-muted-foreground">
                   (engine)
                 </span>
               ) : null}

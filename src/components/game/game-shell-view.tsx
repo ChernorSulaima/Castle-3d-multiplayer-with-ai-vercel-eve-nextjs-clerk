@@ -12,10 +12,11 @@
 // is the SAME element in the default and focus layouts, only its classes differ.
 // Remounting it would tear down the WebGL context and re-download the room.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EyeIcon, MinimizeIcon } from "lucide-react";
+import { ChevronDownIcon, EyeIcon, MinimizeIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
+  DrawerClose,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
@@ -25,6 +26,7 @@ import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import type { ChatHintState, ChatSystemChip } from "@/components/ai/game-chat";
 import {
   FocusHud,
+  Kbd,
   PlayerChip,
   ShortcutsDialog,
   StatPill,
@@ -43,12 +45,12 @@ import { GameActionBar } from "./game-action-bar";
 import { GameMobileBar } from "./game-mobile-bar";
 import { GamePlayerRow } from "./game-player-row";
 import { GameResultDialog } from "./game-result-dialog";
-import { GameSidebar, type SidebarTab } from "./game-sidebar";
+import { GameSheetPeek, GameSidebar, type SidebarTab } from "./game-sidebar";
 import { GameStatusPill } from "./game-status-pill";
 import { GAME_SHORTCUTS } from "./game-shortcuts";
 import { PromotionPicker } from "./promotion-picker";
 import { TurnOverlay } from "./turn-overlay";
-import { useHasRoomForSheet, useIsCompact } from "./use-viewport";
+import { useIsCompact } from "./use-viewport";
 
 /** Everything the screen needs that `GameController` does not carry. */
 export interface GameShellMeta {
@@ -154,7 +156,6 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const setSettingsDrawerOpen = useUiStore((s) => s.setSettingsDrawerOpen);
 
   const compact = useIsCompact();
-  const roomForSheet = useHasRoomForSheet();
   const fullscreen = useFullscreen();
   const focus = layoutMode === "focus";
 
@@ -175,14 +176,31 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
     if (!controller.isLive && tab !== "moves") setTab("moves");
   }
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  // null = "the default for this mode"; a boolean once the reader has decided.
-  const [sheetOverride, setSheetOverride] = useState<boolean | null>(null);
+  // §5.3's sheet is now opened, never defaulted open: at rest the panel is the
+  // one-line peek strip above the action bar, so the board keeps the phone.
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const presenceChips = usePresenceChips(meta.opponentOnline);
   const drawChips = useDrawChips(
     controller.drawOfferFrom,
     (game?.status ?? "active") === "active",
   );
+
+  // Neither the focus layout nor a phone at rest shows the panel, so anything Pip
+  // says while the board has the screen would otherwise arrive silently. One count
+  // and a baseline stamped the moment the panel goes away is all the bookkeeping
+  // this needs — no per-row ids, no read receipts, and it resets itself the moment
+  // the panel is back (leaving focus, or opening the sheet).
+  const messageCount =
+    meta.commentary.length +
+    presenceChips.length +
+    drawChips.length +
+    (controller.drawOfferFrom === null ? 0 : 1);
+  const panelHidden = focus || (compact && !sheetOpen);
+  const [unreadFrom, setUnreadFrom] = useState({ hidden: panelHidden, at: messageCount });
+  if (unreadFrom.hidden !== panelHidden) setUnreadFrom({ hidden: panelHidden, at: messageCount });
+  const unread =
+    panelHidden && unreadFrom.hidden ? Math.max(0, messageCount - unreadFrom.at) : 0;
 
   /* --------------------------------------------------------------- focus */
 
@@ -302,6 +320,15 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       : []),
   ];
 
+  // The peek strip carries whatever sits at the BOTTOM of the panel. `GameChat`
+  // sorts system chips with no ply after every bubble, so a chip — "Draw declined",
+  // "Game over · 1-0" — outranks the last thing the persona said here too, and the
+  // strip and the list never disagree about what was said most recently.
+  const lastChip = systemChips.at(-1) ?? null;
+  const lastComment = meta.commentary.at(-1) ?? null;
+  const peekText = lastChip?.text ?? lastComment?.text ?? null;
+  const peekSpeaker = lastChip !== null ? null : (persona?.persona.name ?? null);
+
   const statusPill = (
     <GameStatusPill
       reviewPly={reviewPly}
@@ -309,6 +336,8 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       turnLabel={controller.turnLabel}
       active={active}
       inCheck={board.checkSquare !== null}
+      canMove={controller.canMove}
+      totalPlies={totalPlies}
       resultText={resultText}
       onBackToLive={() => actions.goToPly(null)}
     />
@@ -337,6 +366,20 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
     />
   );
 
+  // FR-31: the same banner in both layouts. In focus it is a persistent HUD
+  // layer rather than a row above the action bar — an offer that fades out while
+  // the clock runs is an offer the player never answered.
+  const drawOfferOpen = controller.drawOfferFrom !== null && seat !== null;
+  const drawOffer = (
+    <DrawOfferDialog
+      offerFrom={controller.drawOfferFrom}
+      seat={seat}
+      pending={controller.pending}
+      onRespond={actions.respondDraw}
+      className={focus ? "border-primary/50 bg-card/95 shadow-soft backdrop-blur-md" : undefined}
+    />
+  );
+
   const barProps = {
     mode: game.mode,
     seat,
@@ -357,9 +400,6 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
     onOpenShortcuts: () => setShortcutsOpen(true),
   };
 
-  // §5.3: the sheet peeks at 40% in AI games so the newest bubble is visible.
-  const sheetOpen = sheetOverride ?? (compact && isAi && !focus && roomForSheet);
-
   return (
     <div
       className={cn(
@@ -367,9 +407,6 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
         // The board never scrolls (§5.1) — at every width the screen is exactly
         // one viewport tall and the board takes whatever height is left over.
         focus ? "fixed inset-0 z-50 h-[100dvh]" : "h-[calc(100dvh-3.5rem)] overflow-hidden",
-        // §5.3: the bottom sheet peeks over the lower 40dvh, so the column has to
-        // end above it — otherwise the action bar sits behind the sheet.
-        !focus && sheetOpen && "pb-[42dvh] lg:pb-0",
       )}
       data-layout={focus ? "focus" : "default"}
     >
@@ -426,9 +463,12 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
 
           {/* The board box: one element, two layouts. `container-type: size`
               turns the leftover height into a unit so the square can be the
-              smaller of the two axes without measuring anything in JS. */}
+              smaller of the two axes without measuring anything in JS.
+              Full-bleed below `lg`: on a phone the square is capped by the column
+              WIDTH, so every pixel of side padding comes straight off the board.
+              The desk keeps its 8px margin, the phone gives it to the hero. */}
           <div
-            className="relative grid min-h-0 flex-1 place-items-center p-2 [container-type:size]"
+            className="relative grid min-h-0 flex-1 place-items-center p-0 [container-type:size] lg:p-2"
           >
             <div
               className="relative aspect-square h-[min(100cqw,100cqh)] w-[min(100cqw,100cqh)]"
@@ -459,16 +499,45 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                     />
                   </div>
                 }
-                topRight={
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="shadow-soft backdrop-blur-md"
-                    onClick={toggleFocus}
-                  >
-                    <MinimizeIcon aria-hidden />
-                    Exit fullscreen
-                  </Button>
+                topCenter={drawOfferOpen ? drawOffer : undefined}
+                // Outside the fading layer on purpose: the way out, and the way
+                // to find out what the keys do, are the two things that must
+                // never be a guess on a screen with no header (§5.2).
+                persistent={
+                  <>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Keyboard shortcuts"
+                      className="border border-border bg-card/85 shadow-soft backdrop-blur-md"
+                      onClick={() => setShortcutsOpen(true)}
+                    >
+                      <Kbd aria-hidden className="border-0 bg-transparent px-0">
+                        ?
+                      </Kbd>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="relative border border-border bg-card/85 shadow-soft backdrop-blur-md"
+                      aria-label={
+                        unread === 0
+                          ? undefined
+                          : `Exit fullscreen, ${unread} new ${unread === 1 ? "message" : "messages"}`
+                      }
+                      onClick={toggleFocus}
+                    >
+                      <MinimizeIcon aria-hidden />
+                      Exit fullscreen
+                      {unread === 0 ? null : (
+                        <span
+                          aria-hidden
+                          className="tabular absolute -top-1.5 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[12px] leading-none font-semibold text-primary-foreground"
+                        >
+                          {unread > 9 ? "9+" : unread}
+                        </span>
+                      )}
+                    </Button>
+                  </>
                 }
                 bottom={<GameActionBar {...barProps} variant="focus" />}
               />
@@ -488,22 +557,29 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
             />
           )}
 
-          {/* §5.3 calls this "sticky": with the column pinned to one viewport
-              (and the sheet's 40dvh reserved as padding above) it is always the
-              last visible row, so plain flow does the job without a scrollport. */}
+          {/* §5.3 calls this "sticky": with the column pinned to one viewport it is
+              always the last visible row, so plain flow does the job without a
+              scrollport. On a phone the panel rides just above it as one line. */}
           {focus ? null : (
             <div className="z-20 flex shrink-0 flex-col gap-2 p-2">
-              <DrawOfferDialog
-                offerFrom={controller.drawOfferFrom}
-                seat={seat}
-                pending={controller.pending}
-                onRespond={actions.respondDraw}
-              />
+              {drawOffer}
               {compact ? (
-                <GameMobileBar
-                  {...barProps}
-                  onOpenPanel={() => setSheetOverride(true)}
-                />
+                <>
+                  {sheetOpen ? null : (
+                    <GameSheetPeek
+                      speaker={peekSpeaker}
+                      text={peekText}
+                      quiet={isAi ? "Chat, moves and game info" : "Moves and game info"}
+                      unread={unread}
+                      onExpand={() => setSheetOpen(true)}
+                    />
+                  )}
+                  <GameMobileBar
+                    {...barProps}
+                    panelTab={tab}
+                    onOpenPanel={() => setSheetOpen(true)}
+                  />
+                </>
               ) : (
                 <GameActionBar {...barProps} />
               )}
@@ -521,23 +597,40 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       {compact && !focus ? (
         <Drawer
           open={sheetOpen}
-          onOpenChange={setSheetOverride}
+          onOpenChange={setSheetOpen}
           modal={false}
           disablePointerDismissal
           showSwipeHandle
         >
-          {/* §5.3's "40% peek" is a FIXED-height sheet, not a snap point: a
-              snap-point drawer is a full-height popup slid down, so its content
-              is laid out for the whole viewport and the newest chat bubble ends
-              up below the fold. `--drawer-height` is the shadcn popup's own hook. */}
+          {/* A FIXED-height sheet, not a snap point: a snap-point drawer is a
+              full-height popup slid down, so its content is laid out for the whole
+              viewport and the newest chat bubble ends up below the fold.
+              `--drawer-height` is the shadcn popup's own hook. It is 60dvh because
+              the reader ASKED for it — at rest the panel is the one-line strip, and
+              the board never loses the screen to a sheet nobody opened. */}
           <DrawerContent
             aria-label="Game panel"
-            style={{ "--drawer-height": "42dvh" } as React.CSSProperties}
+            style={{ "--drawer-height": "60dvh" } as React.CSSProperties}
           >
             <DrawerHeader className="sr-only">
               <DrawerTitle>Game panel</DrawerTitle>
               <DrawerDescription>Chat, moves and game information.</DrawerDescription>
             </DrawerHeader>
+            {/* The sheet covers the action bar while it is open, so the way back to
+                the board cannot be a swipe a first-timer has to guess at. */}
+            <DrawerClose
+              render={
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Hide the game panel"
+                  // 44px square: it is a thumb target on a phone, not a desk affordance.
+                  className="absolute top-2 right-1.5 z-10 size-11"
+                />
+              }
+            >
+              <ChevronDownIcon aria-hidden />
+            </DrawerClose>
             <div className="flex min-h-0 flex-1 flex-col">{sidebar}</div>
           </DrawerContent>
         </Drawer>
