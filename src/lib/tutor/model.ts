@@ -20,6 +20,7 @@
 // Sonnet rather than Haiku because the tutor reads an engine's lines and explains a
 // position in prose; the opponent's move choice (Haiku 4.5) is a different job with
 // a 3 s budget, and it keeps its own id.
+import { getContext } from "@vercel/oidc";
 export const TUTOR_MODEL_ID = "anthropic/claude-sonnet-5";
 
 /**
@@ -46,8 +47,20 @@ export const TUTOR_FALLBACK_MODEL_ID = "anthropic/claude-haiku-4.5";
  */
 export function gatewayCredentialPresent(): boolean {
   if (hasValue(process.env.AI_GATEWAY_API_KEY)) return true;
-  const oidc = process.env.VERCEL_OIDC_TOKEN;
+  const oidc = resolveOidcToken();
   return hasValue(oidc) && !isExpiredJwt(oidc);
+}
+
+/**
+ * The token exactly as `@vercel/oidc` (and therefore the AI SDK's gateway provider)
+ * resolves it: on Vercel the per-request `x-vercel-oidc-token` header from the
+ * runtime's request context, locally the `VERCEL_OIDC_TOKEN` that `vercel env pull`
+ * wrote. Reading only the environment variable answered 503 in production while the
+ * opponent's agent, on the same credential, was answering fine.
+ */
+function resolveOidcToken(): string | undefined {
+  const fromRequest = getContext().headers?.["x-vercel-oidc-token"];
+  return fromRequest ?? process.env.VERCEL_OIDC_TOKEN;
 }
 
 function hasValue(value: string | undefined): value is string {
