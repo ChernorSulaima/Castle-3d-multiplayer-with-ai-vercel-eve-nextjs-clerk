@@ -25,7 +25,8 @@ import { TUTOR_FEATURE } from "@/lib/constants";
 import { getAuthToken } from "@/lib/convex-server";
 import type { GameView } from "@/lib/types";
 import { fenAtPly } from "./system";
-import { gatewayCredentialPresent } from "./model";
+import type { LanguageModel } from "ai";
+import { describeGatewayCredential, resolveGatewayModel } from "./model";
 
 /**
  * The body the panel posts. `messages` is checked only for shape here — the route
@@ -48,6 +49,8 @@ export type TutorBody = z.infer<typeof tutorBodySchema>;
 
 export interface TutorGuardOk {
   ok: true;
+  /** The gateway model with its credential already attached. */
+  model: LanguageModel;
   view: GameView;
   /** FEN at the ply in view, replayed server-side from `game.moves`. */
   fen: string;
@@ -124,7 +127,13 @@ export async function guardTutorRequest(request: Request): Promise<TutorGuardRes
   if (fen === null) return fail(409, "position-unavailable");
 
   // 6. No credential means no answer is possible; say so before spending a turn.
-  if (!gatewayCredentialPresent()) return fail(503, "tutor-unavailable");
+  // The credential is resolved from this request (Vercel's OIDC header), the runtime
+  // context or the environment, and the model carries it explicitly (see model.ts).
+  const model = resolveGatewayModel(request.headers);
+  if (model === null) {
+    console.warn("[tutor] no gateway credential", describeGatewayCredential(request.headers));
+    return fail(503, "tutor-unavailable");
+  }
 
   // 7. Charged BEFORE the model call, with the caller's token, exactly like
   // `useHint` in /api/ai/hint: a turn that then fails still costs one, and a direct
@@ -145,6 +154,7 @@ export async function guardTutorRequest(request: Request): Promise<TutorGuardRes
 
   return {
     ok: true,
+    model,
     view,
     fen,
     ply: body.ply,

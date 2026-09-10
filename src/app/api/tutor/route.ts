@@ -22,7 +22,6 @@ import {
   toUIMessageStream,
 } from "ai";
 import { guardTutorRequest, tutorErrorResponse } from "@/lib/tutor/guard";
-import { TUTOR_MODEL_ID } from "@/lib/tutor/model";
 import { buildTutorContext, TUTOR_SYSTEM_PROMPT } from "@/lib/tutor/system";
 import { createTutorTools, type TutorUIMessage } from "@/lib/tutor/tools";
 
@@ -68,9 +67,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const result = streamText({
-    // A gateway id string: routed through the Vercel AI Gateway on the project's
-    // AI_GATEWAY_API_KEY / OIDC credential, the same path `agent/agent.ts` uses.
-    model: TUTOR_MODEL_ID,
+    // Resolved by the guard with its credential attached (model.ts): the project's
+    // AI_GATEWAY_API_KEY, or the OIDC token this request arrived with.
+    model: guard.model,
     // The context block is built from the game document, never from the body.
     system: `${TUTOR_SYSTEM_PROMPT}\n\n${buildTutorContext({
       view: guard.view,

@@ -20,6 +20,7 @@
 // Sonnet rather than Haiku because the tutor reads an engine's lines and explains a
 // position in prose; the opponent's move choice (Haiku 4.5) is a different job with
 // a 3 s budget, and it keeps its own id.
+import { createGateway, type LanguageModel } from "ai";
 import { getContext } from "@vercel/oidc";
 export const TUTOR_MODEL_ID = "anthropic/claude-sonnet-5";
 
@@ -45,22 +46,38 @@ export const TUTOR_FALLBACK_MODEL_ID = "anthropic/claude-haiku-4.5";
  * failed") would otherwise arrive halfway through a stream — the member would see
  * "the tutor did not answer" and retry forever, having been charged each time.
  */
-export function gatewayCredentialPresent(): boolean {
+export function gatewayCredentialPresent(requestHeaders?: Headers): boolean {
   if (hasValue(process.env.AI_GATEWAY_API_KEY)) return true;
-  const oidc = resolveOidcToken();
+  const oidc = resolveOidcToken(requestHeaders);
   return hasValue(oidc) && !isExpiredJwt(oidc);
 }
 
+/** Where the credential was (not) found; booleans only, safe to log. */
+export function describeGatewayCredential(requestHeaders?: Headers): Record<string, boolean> {
+  const ctx = getContext();
+  return {
+    apiKey: hasValue(process.env.AI_GATEWAY_API_KEY),
+    requestHeader: hasValue(requestHeaders?.get(OIDC_HEADER) ?? undefined),
+    contextHeaders: ctx.headers !== undefined,
+    contextHeader: hasValue(ctx.headers?.[OIDC_HEADER]),
+    env: hasValue(process.env.VERCEL_OIDC_TOKEN),
+  };
+}
+
+const OIDC_HEADER = "x-vercel-oidc-token";
+
 /**
- * The token exactly as `@vercel/oidc` (and therefore the AI SDK's gateway provider)
- * resolves it: on Vercel the per-request `x-vercel-oidc-token` header from the
- * runtime's request context, locally the `VERCEL_OIDC_TOKEN` that `vercel env pull`
- * wrote. Reading only the environment variable answered 503 in production while the
+ * The token as `@vercel/oidc` (and therefore the AI SDK's gateway provider) resolves
+ * it — the per-request `x-vercel-oidc-token` header on Vercel, else the local
+ * `VERCEL_OIDC_TOKEN` that `vercel env pull` wrote — plus the incoming request's own
+ * header, which is where Vercel puts the token before any runtime context exists.
+ * Reading only the environment variable answered 503 in production while the
  * opponent's agent, on the same credential, was answering fine.
  */
-function resolveOidcToken(): string | undefined {
-  const fromRequest = getContext().headers?.["x-vercel-oidc-token"];
-  return fromRequest ?? process.env.VERCEL_OIDC_TOKEN;
+export function resolveOidcToken(requestHeaders?: Headers): string | undefined {
+  const fromRequest = requestHeaders?.get(OIDC_HEADER) ?? undefined;
+  const fromContext = getContext().headers?.[OIDC_HEADER];
+  return fromRequest ?? fromContext ?? process.env.VERCEL_OIDC_TOKEN;
 }
 
 function hasValue(value: string | undefined): value is string {
@@ -85,4 +102,21 @@ export function isExpiredJwt(token: string, now: number = Date.now()): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The model the route streams from, with the credential resolved HERE rather than
+ * left to the provider. With `AI_GATEWAY_API_KEY` the plain id string is enough (the
+ * SDK reads the key). On the OIDC path the provider would call `getVercelOidcToken()`,
+ * which reads the runtime request context — empty in this deployment's route
+ * handlers even though the token rides in on the request itself — so the token found
+ * by `resolveOidcToken` is handed to `createGateway({ apiKey })` explicitly. The
+ * gateway accepts an OIDC token there (verified 2026-09-11: a local token as `apiKey`
+ * answered "ok"). Returns null when there is no usable credential at all.
+ */
+export function resolveGatewayModel(requestHeaders?: Headers): LanguageModel | null {
+  if (hasValue(process.env.AI_GATEWAY_API_KEY)) return TUTOR_MODEL_ID;
+  const oidc = resolveOidcToken(requestHeaders);
+  if (!hasValue(oidc) || isExpiredJwt(oidc)) return null;
+  return createGateway({ apiKey: oidc }).languageModel(TUTOR_MODEL_ID);
 }

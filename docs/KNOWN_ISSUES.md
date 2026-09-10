@@ -400,8 +400,10 @@ model turn, the browser-side Stockfish tool round trip, annotations on both boar
    over the left of the chat-peek expander at 390. No free corner exists at every phone size; the
    fix is a dismiss control or auto-hide. Development only.
 4. **Gateway credentials.** The tutor route reports 503 `tutor-unavailable` when no AI Gateway
-   credential is present (an expired local `VERCEL_OIDC_TOKEN` counts as absent; `vercel env pull`
-   refreshes it). Production uses the same mechanism as the opponent's agent.
+   credential is present. It resolves the OIDC token the way `@vercel/oidc` does: the per-request
+   `x-vercel-oidc-token` header on Vercel, else the local `VERCEL_OIDC_TOKEN` that `vercel env pull`
+   writes (an expired one counts as absent). No `AI_GATEWAY_API_KEY` is configured anywhere; the
+   opponent's agent uses the same credential.
 5. **Free plan copy lives in Clerk config**, not source: `clerk config patch` set the `free_user`
    description on 2026-09-11. The Pro plan's price is never written in the repo.
 6. **The e2e test user `castle-e2e` is now a Pro subscriber** (dev gateway, test card), so
