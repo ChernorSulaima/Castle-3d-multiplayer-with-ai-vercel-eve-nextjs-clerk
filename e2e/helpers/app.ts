@@ -5,18 +5,31 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import { clerk } from "@clerk/testing/playwright";
 
+export const E2E_EMAIL = process.env.E2E_CLERK_USER_EMAIL;
 export const E2E_USERNAME = process.env.E2E_CLERK_USER_USERNAME;
 export const E2E_PASSWORD = process.env.E2E_CLERK_USER_PASSWORD;
-export const hasClerkTestUser = Boolean(E2E_USERNAME) && Boolean(E2E_PASSWORD);
+/** Either a sign-in-token email, or a username + password pair, unlocks the suite. */
+export const hasClerkTestUser =
+  Boolean(E2E_EMAIL) || (Boolean(E2E_USERNAME) && Boolean(E2E_PASSWORD));
 
 /**
- * Signs in with Clerk's password strategy. `clerk.signIn` installs the Testing Token
- * on the context itself and waits for `window.Clerk.loaded`, so the only requirement
- * is that we are already on a page that mounts `<ClerkProvider/>` and is not gated by
- * `src/proxy.ts` — `/` is both.
+ * Signs the E2E user in. Preferred path: `clerk.signIn({ page, emailAddress })`, which
+ * looks the user up on the Backend API, mints a 5-minute sign-in token and signs in with
+ * the `ticket` strategy (verified in @clerk/testing 2.2.33 dist/playwright/index.mjs).
+ * That bypasses first/second factors — including the instance's device-trust step,
+ * which turns a plain password sign-in into `needs_client_trust` on a fresh browser and
+ * never creates a session. Password stays as the fallback for instances without it.
+ *
+ * `clerk.signIn` installs the Testing Token on the context itself and waits for
+ * `window.Clerk.loaded`, so the only requirement is that we are already on a page that
+ * mounts `<ClerkProvider/>` and is not gated by `src/proxy.ts` — `/` is both.
  */
 export async function signIn(page: Page): Promise<void> {
   await page.goto("/");
+  if (E2E_EMAIL) {
+    await clerk.signIn({ page, emailAddress: E2E_EMAIL });
+    return;
+  }
   await clerk.signIn({
     page,
     signInParams: {

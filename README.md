@@ -245,7 +245,8 @@ and no server is spawned. First run only: `pnpm exec playwright install chromium
 | Variable | Purpose |
 | --- | --- |
 | `E2E_BASE_URL` | Optional. Where to point the browser; defaults to `http://localhost:3000` and, when unset **or left empty** (as in `.env.example`), the config also starts the dev server. |
-| `E2E_CLERK_USER_USERNAME` | The test user's sign-in identifier (username or email). |
+| `E2E_CLERK_USER_EMAIL` | Preferred. The test user's email; the suite mints a Clerk sign-in token for it and signs in with the `ticket` strategy, which bypasses device trust and second factors. |
+| `E2E_CLERK_USER_USERNAME` | Fallback identifier for the password strategy (only works when the instance's device trust is off; otherwise the sign-in stops at `needs_client_trust`). |
 | `E2E_CLERK_USER_PASSWORD` | That user's password. |
 
 `playwright.config.ts` reads `.env.local` (then `.env`) through Node's own

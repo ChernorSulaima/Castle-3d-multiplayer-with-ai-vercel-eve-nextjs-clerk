@@ -40,7 +40,8 @@ const startsOwnServer = !process.env.E2E_BASE_URL;
  * running `clerkSetup()` would fail the whole run on a missing `CLERK_SECRET_KEY`.
  */
 const hasClerkTestUser =
-  Boolean(process.env.E2E_CLERK_USER_USERNAME) && Boolean(process.env.E2E_CLERK_USER_PASSWORD);
+  Boolean(process.env.E2E_CLERK_USER_EMAIL) ||
+  (Boolean(process.env.E2E_CLERK_USER_USERNAME) && Boolean(process.env.E2E_CLERK_USER_PASSWORD));
 
 export default defineConfig({
   testDir: path.join(rootDir, "e2e"),

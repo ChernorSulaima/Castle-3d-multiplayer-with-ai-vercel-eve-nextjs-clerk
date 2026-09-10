@@ -100,8 +100,14 @@ test.describe("authenticated flows", () => {
 
     // The colour radio defaults to White, so the player opens.
     await expect(turnIndicator(page)).toContainText("You to move");
+    // In AI games the board stays locked until the engine worker is ready (Stockfish 18
+    // is a 5.6 MB first download), so wait for the squares to enable before moving.
+    await expect(square(page, "e2")).toBeEnabled({ timeout: 90_000 });
 
     await playMove(page, "e2", "e4");
+    // `games.makeMove` is a server round trip; wait for the subscription to deliver the
+    // move before reading the list synchronously (the local-game test does the same).
+    await expect(moveHistory(page).getByRole("button", { name: "e4", exact: true })).toBeVisible();
     expect(await sanMoves(page)).toEqual(["e4"]);
 
     // --- the AI answers ----------------------------------------------------
@@ -175,8 +181,10 @@ test.describe("authenticated flows", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: username })).toBeVisible();
     await expect(page.getByText("Playing since")).toBeVisible();
+    // The stat tiles are a <dl>; scope to its <dt>s, because the sparkline's pool
+    // buttons carry the same "vs Humans" / "vs AI" text.
     for (const stat of ["Overall", "vs Humans", "vs AI", "Record"]) {
-      await expect(page.getByText(stat, { exact: true })).toBeVisible();
+      await expect(page.getByRole("term").filter({ hasText: new RegExp(`^${stat}$`) })).toBeVisible();
     }
   });
 });
