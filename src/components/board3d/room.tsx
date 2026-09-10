@@ -2,11 +2,11 @@
 // FR-21h..FR-21n: every visual difference between rooms comes from `src/lib/rooms.ts`.
 // Adding a room = one entry there plus an .hdr in public/hdri — no change in this file.
 "use client";
-import { useEffect } from "react";
+import { Suspense, useCallback, useEffect } from "react";
 import { Backdrop, Environment, Grid, Sparkles, Stars, useTexture } from "@react-three/drei";
-import { SRGBColorSpace } from "three";
-import type { RoomPreset } from "@/lib/rooms";
-import { PLINTH_HEIGHT, PLINTH_TOP_Y } from "./layout";
+import { EquirectangularReflectionMapping, SRGBColorSpace, type Texture } from "three";
+import type { LightRig, RoomPreset } from "@/lib/rooms";
+import { PLINTH_HEIGHT, PLINTH_TOP_Y, TABLE_FOOT_Y } from "./layout";
 
 /** Blurred photo backdrop for a player-uploaded room image (FR-21k, v1 scope in §I-16). */
 function ImageBackdrop({ url }: { url: string }) {
@@ -31,6 +31,63 @@ function ImageBackdrop({ url }: { url: string }) {
   );
 }
 
+/**
+ * THE SKYBOX THE VISITOR ACTUALLY LOOKS AT.
+ *
+ * The room's `.hdr` is a 1k light probe: 1024x512 of HDR data, which is ample for
+ * irradiance and reflections and nowhere near enough to fill a hero canvas. Showing it
+ * raw put visible pixels on screen, which is why every room carried a
+ * `backgroundBlurriness` — the blur was there to hide the resolution, and it is the
+ * reason the background looked like a smear. This attaches Poly Haven's TONEMAPPED JPG
+ * of the same shot (4096x2048, sRGB, see docs/research/assets.md §A2b) to
+ * `scene.background` instead: sixteen times the pixels and no blur at all. The .hdr goes
+ * on lighting the board, so nothing about the room's light or its reflections changes.
+ *
+ * It rides on drei's own `<Environment map background="only">` rather than writing
+ * `scene.background` by hand, deliberately: drei restores the previous skybox from a
+ * dependency-less layout effect (see the ordering note below), and the only safe way to
+ * take part in that dance is to be inside it. `background="only"` leaves
+ * `scene.environment` alone, so the HDRI above keeps the IBL.
+ *
+ * Every one of the five scene properties has to be re-stated here even though only two
+ * of them are ours: `setEnvProps` fills the ones it was not given with three's defaults
+ * and applies all five, so a backdrop that mentioned only the background would silently
+ * reset the room's `environmentIntensity` and `environmentRotation` to 1 and 0 — and
+ * relight the whole room — every time it rendered.
+ */
+function RoomBackdrop({ url, lights }: { url: string; lights: LightRig }) {
+  const configure = useCallback((texture: Texture) => {
+    // An equirectangular photo, and a colour one: without these three lines the skybox
+    // is drawn as a flat quad in the wrong colour space.
+    texture.mapping = EquirectangularReflectionMapping;
+    texture.colorSpace = SRGBColorSpace;
+  }, []);
+  const texture = useTexture(url, configure);
+
+  // A room swap unmounts this. Drop the GPU upload AND drei's loader-cache entry
+  // together: a disposed texture left in the cache would be handed to the next mount as
+  // a dead handle.
+  useEffect(
+    () => () => {
+      texture.dispose();
+      useTexture.clear(url);
+    },
+    [texture, url],
+  );
+
+  return (
+    <Environment
+      map={texture}
+      background="only"
+      backgroundBlurriness={0}
+      backgroundIntensity={lights.bgIntensity}
+      backgroundRotation={[0, lights.envYaw, 0]}
+      environmentIntensity={lights.envIntensity}
+      environmentRotation={[0, lights.envYaw, 0]}
+    />
+  );
+}
+
 export interface RoomProps {
   room: RoomPreset;
   /** Optional custom backdrop image the player uploaded. */
@@ -40,6 +97,10 @@ export interface RoomProps {
 export function Room({ room, imageUrl }: RoomProps) {
   const { lights, floor, extras } = room;
   const showHdriBackground = room.background === "hdri" && !imageUrl;
+  // A room that paints its own floor has to paint it under the TABLE's feet, not under
+  // the board's: leave it where the plinth used to rest and the legs would go through it.
+  const standing = room.table.base === "legs";
+  const floorY = standing ? TABLE_FOOT_Y : PLINTH_TOP_Y - PLINTH_HEIGHT;
 
   return (
     <>
@@ -63,9 +124,20 @@ export function Room({ room, imageUrl }: RoomProps) {
           dependency-less layout effect whose cleanup runs in the mutation phase, in child
           order — put this first and switching an HDRI room to a flat-colour room leaves
           the OLD room's HDRI as the background (FR-21j/FR-21m live preview). Ordered
-          after, the restore happens first and this attach wins. */}
+          after, the restore happens first and this attach wins. Same rule, same reason,
+          for the sharp backdrop below. */}
       {room.background === "colour" && (
         <color attach="background" args={[room.backgroundColor ?? "#0f1115"]} />
+      )}
+
+      {/* The 1k HDRI above is the skybox only until this lands, which is exactly the
+          fallback we want: the room is lit and backed the moment the .hdr is in, and the
+          sharp photograph takes over a beat later without a blank frame in between. Its
+          own boundary so a 1.5 MB JPEG never holds the lighting up. */}
+      {showHdriBackground && room.backdrop && (
+        <Suspense fallback={null}>
+          <RoomBackdrop url={room.backdrop} lights={lights} />
+        </Suspense>
       )}
 
       {imageUrl && <ImageBackdrop url={imageUrl} />}
@@ -93,13 +165,19 @@ export function Room({ room, imageUrl }: RoomProps) {
         />
       )}
 
+      {/* A cyclorama, and the size of it is load-bearing. Dropping the floor by the height
+          of a table moves the point where the camera's lowest ray meets it several units
+          NEARER the lens and further out sideways, and past the sweep's own edge the
+          skybox shows through as a hard grey wedge in the bottom corners. The standing
+          size keeps the wall exactly where the seated one put it (`z0 - depth/2` is -16
+          either way) and only lets the floor out. */}
       {floor.kind === "backdrop" && (
         <Backdrop
           floor={0.3}
           segments={20}
           receiveShadow
-          scale={[40, 16, 14]}
-          position={[0, -PLINTH_HEIGHT, -9]}
+          scale={standing ? [90, 19, 32] : [40, 16, 14]}
+          position={[0, floorY, standing ? -0.3 : -9]}
         >
           <meshStandardMaterial color={floor.color ?? "#f4f5f7"} roughness={0.9} metalness={0} />
         </Backdrop>
@@ -107,7 +185,7 @@ export function Room({ room, imageUrl }: RoomProps) {
 
       {floor.kind === "grid" && (
         <Grid
-          position={[0, PLINTH_TOP_Y - PLINTH_HEIGHT - 0.01, 0]}
+          position={[0, floorY - 0.01, 0]}
           args={[40, 40]}
           cellSize={1}
           cellThickness={0.6}

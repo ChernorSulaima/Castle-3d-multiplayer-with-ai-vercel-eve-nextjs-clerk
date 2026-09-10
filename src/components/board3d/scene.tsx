@@ -17,6 +17,7 @@ import { Highlights } from "./highlights";
 import { Pieces } from "./pieces";
 import { Room } from "./room";
 import { Squares } from "./squares";
+import { Board3DTable } from "./table";
 import { CONTACT_SHADOW_Y, PLINTH_SIZE } from "./layout";
 
 export interface SceneProps {
@@ -113,6 +114,11 @@ export function Scene({
         shadow-camera-far={30}
       />
 
+      {/* Furniture, drawn before the board so the board is still the first thing the
+          reader of this file meets. `lowDetail` reads the reflector because that is the
+          one tier flag that is off on Low and on everywhere else (see camera.ts). */}
+      <Board3DTable table={room.table} lowDetail={!quality.reflector.enabled} />
+
       <BoardSurface3D room={room} quality={quality} />
 
       <Squares
@@ -169,6 +175,9 @@ export function Scene({
         reducedMotion={reducedMotion}
         controlsRef={controlsRef}
         onUserInteract={onUserInteract}
+        // FR-24's idle sweep is aimed per room: `rooms.ts` owns which way it looks and
+        // how far it swings, exactly as it owns the lights and the yaw.
+        orbit={room.orbit}
         persistSession={persistSession}
         paused={paused}
       />

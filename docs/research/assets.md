@@ -49,26 +49,28 @@ Files live at `public/hdri/<room>.hdr` and are served statically by Next.js at `
 
 | Room (PRD FR-21i) | `players.roomPreset` | Poly Haven id | Source URL | Bytes | md5 (matches API) | Author(s) | Licence |
 |---|---|---|---|---|---|---|---|
-| Classic Study (warm indoor, wood) | `study` | `fireplace` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/fireplace_1k.hdr | 1,529,229 | `42ea9e4241d230a343955f4921b9ab30` | Greg Zaal | CC0 |
+| Classic Study (warm indoor, wood) | `study` | `combination_room` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/combination_room_1k.hdr | 1,661,444 | `490f50c323b9329e5aa4a2ea32dc23aa` | Sergej Majboroda | CC0 |
 | Space (dark) | `space` | `qwantani_night_puresky` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/qwantani_night_puresky_1k.hdr | 1,389,258 | `e8691211295e505f77c8c3bdcf3055d9` | Greg Zaal (photo), Jarod Guest (processing) | CC0 |
 | Park (outdoor daylight, greenery) | `park` | `meadow_2` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/meadow_2_1k.hdr | 1,552,993 | `7deac04bbf250f12a4daf1afaa6cab5f` | Sergej Majboroda | CC0 |
-| Neon Arcade (dark, coloured lights) | `arcade` | `wooden_studio_10` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/wooden_studio_10_1k.hdr | 1,453,939 | `884fd235db23ab0c2e4424f7aad5c66e` | Alexander Scholten | CC0 |
+| Neon Arcade (dark, coloured lights) | `arcade` | `ferndale_studio_06` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/ferndale_studio_06_1k.hdr | 1,228,415 | `87eb6541fcc367bce545a458c18190ec` | Dimitrios Savva, Greg Zaal | CC0 |
 | Minimal White (bright clean studio) | `minimal` | `white_studio_06` | https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/white_studio_06_1k.hdr | 1,330,672 | `d9950d6316c57b1b92494d909bd1a92a` | Grzegorz Wronkowski | CC0 |
 
-Total: **7,256,091 bytes (6.92 MiB)**. All five are `#?RADIANCE` RGBE files, 1024x512, HTTP 200.
+Total: **7,162,782 bytes (6.83 MiB)** since the Study swap (§A2d). All five are
+`#?RADIANCE` RGBE files, 1024x512, HTTP 200. Four are inside NFR-9's 1,572,864-byte cap;
+the Study is 1,661,444 under a written waiver (§A2d).
 
 What each one looks like (checked against the Poly Haven thumbnails):
-- `fireplace`: night lounge, amber lamps + fireplace glow, wood/brick, couch. High contrast. Reads as a study/den. Pair with a warm key light (`#ffd9a8`) and a polished-wood board material.
+- `combination_room`: a college combination room — gold damask walls, an inlaid parquet floor, a buttoned settee, a gilt armchair, a marble side table, a brass chandelier, and one bay window blown to white. Daylit and medium contrast, so the room is lit DOWN and keyed warm (see §A2d). It replaced `fireplace` — a night lounge whose amber fireplace was only a third of it and whose other two thirds were a couch under a mustard blanket (§A2c, §A2d).
 - `qwantani_night_puresky`: pure sky, clear low-contrast night, visible Milky Way, faint horizon glow, no ground/props. The darkest suitable sky Poly Haven has; there is **no true starfield HDRI**. Add drei `<Stars>` on top (A4) and consider `backgroundIntensity` 0.6–0.8 so the horizon glow does not read as "dawn". Board: dark glass/metal.
 - `meadow_2`: bright morning/afternoon meadow clearing, clear blue sky, direct sun, trees all round. Strong natural key from the sun; a directional light at roughly the sun azimuth gives matching shadows. Board: light wood / stone.
-- `wooden_studio_10`: dark studio, black floor, wooden ceiling, magenta + blue LED panels and a softbox. Reads as neon arcade once the board is glossy black with emissive square highlights in cyan/magenta.
+- `ferndale_studio_06`: an unlit black room washed magenta from a big practical globe lamp, with a violet panel opposite; magenta floor, dark walls, almost nothing else in it. Reads as a club floor rather than a photo studio. (It replaced `wooden_studio_10` — see §A2c.)
 - `white_studio_06`: bright white studio, big skylight, soft low-contrast natural light. Board: matte white/light grey, subtle reflections.
 
 Runner-ups that also fit the size cap (all verified via `/files/<id>`; swap without re-researching):
 
 | Room | id | 1k hdr bytes | Why |
 |---|---|---|---|
-| study | `warm_bar` | 1,487,340 | cosy pub, amber night light, wood |
+| study | `warm_bar` | 1,487,340 | cosy pub, amber night light, wood — but see §A2c, its bar carries brand marks |
 | study | `lythwood_lounge` | 1,538,903 | warm hotel lounge, daytime |
 | study | `brown_photostudio_06` | 1,569,967 | herringbone wood floor, warm sunlight through curtains (only 2.9 KB under the cap) |
 | study | `christmas_photo_studio_05` | 1,513,182 | Victorian room with fireplace (has Christmas decor) |
@@ -79,7 +81,7 @@ Runner-ups that also fit the size cap (all verified via `/files/<id>`; swap with
 | park | `binnenalster` | 1,564,865 | overcast lakeside city park |
 | park | `misty_dawn` / `spruit_sunrise` | 1,512,633 / 1,500,948 | field at dawn/sunrise |
 | arcade | `ferndale_studio_05` | 1,373,092 | dark studio flooded pink/purple |
-| arcade | `ferndale_studio_06` | 1,228,415 | dark studio, red/blue gels (smallest option) |
+| arcade | `wooden_studio_10` | 1,453,939 | the ORIGINAL Arcade pick, replaced in §A2c |
 | arcade | `newman_lobby` | 1,534,472 | real magenta neon sign, glossy floor, but brighter/mall-like |
 | arcade | `wooden_studio_09` | 1,516,235 | red/teal/blue LEDs, black floor |
 | minimal | `cyclorama_hard_light` | 1,409,707 | white cyc, hard umbrella light (its 1k exr is only 882,171 B) |
@@ -87,6 +89,295 @@ Runner-ups that also fit the size cap (all verified via `/files/<id>`; swap with
 | minimal | `story_studio_04` / `studio_wizja_01` | 1,368,186 / 1,359,911 | white infinity cove |
 
 Rejected because 1k hdr > 1,572,864 B: `studio_small_09` (1,615,248), `neon_photostudio` (1,618,638), `moonless_golf` (1,672,754), `dikhololo_night` (1,745,132), `greenwich_park_02` (1,854,789), `comfy_cafe` (1,609,391), `brown_photostudio_01` (1,649,529), `rooitou_park` (1,588,504), `photo_studio_01` (1,597,273), `hotel_room` (1,572,830 - technically under by 34 bytes, too tight).
+
+### A2b. Tonemapped skybox JPGs (the visible background)
+
+The 1k `.hdr` above is a **light probe**: 1024x512 of HDR data, ample for irradiance and
+reflections and nowhere near enough to fill a hero canvas. Showing it raw put visible
+pixels on screen, so every room carried a `backgroundBlurriness` of 0.15-0.4 to hide the
+resolution — which is exactly why the background read as a smear. Poly Haven publishes a
+**tonemapped JPG** of every HDRI at 8192x4096; those are now the skybox, and the `.hdr`
+does nothing but light the scene (`board3d/room.tsx` renders them through drei's
+`<Environment map background="only">`, which leaves `scene.environment` on the HDRI).
+
+The API exposes them at the TOP LEVEL of `/files/<id>`, not inside `hdri`:
+
+```
+GET https://api.polyhaven.com/files/fireplace
+{ "tonemapped": { "url": "...", "size": 4528196, "md5": "..." }, "hdri": { "1k": {...}, ... } }
+```
+
+URL pattern (note the encoded space — the directory really is `Tonemapped JPG`):
+
+```
+https://dl.polyhaven.org/file/ph-assets/HDRIs/extra/Tonemapped%20JPG/<id>.jpg
+```
+
+Downscaled and re-compressed with macOS `sips` (`-Z <width>`, then
+`-s format jpeg -s formatOptions <q>`), md5 of every source verified against the API
+before processing. Served from `public/backdrops/<room>.jpg` at `/backdrops/<room>.jpg`,
+with the same 30-day `Cache-Control` as `/hdri/*` (added to `next.config.ts`).
+
+| Room | Poly Haven id | Source bytes | Shipped | Bytes | Author | Licence |
+|---|---|---|---|---|---|---|
+| Classic Study | `combination_room` | 5,285,998 (8192x4096) | 3584x1792 q72 | 1,489,755 | Sergej Majboroda | CC0 |
+| Park | `meadow_2` | 51,148,187 (8192x4096) | 3072x1536 q70 | 1,546,531 | Sergej Majboroda | CC0 |
+| Neon Arcade | `ferndale_studio_06` | 13,979,828 (8192x4096) | 4096x2048 q72 | 562,968 | Dimitrios Savva, Greg Zaal | CC0 |
+| Minimal White | `white_studio_06` | 15,553,777 (8192x4096) | 4096x2048 q72 | 545,037 | Grzegorz Wronkowski | CC0 |
+
+Source md5s, from `/files/<id>` and checked against the download before processing (the
+shipped JPGs are re-encoded, so their own hashes differ):
+
+| Poly Haven id | tonemapped md5 |
+|---|---|
+| `combination_room` | `2b279b4ca8ffe85a4851c35d81c8aa7d` |
+| `meadow_2` | `5c34334a1e9d276f2390dce0f9e9d3e1` |
+| `ferndale_studio_06` | `1650956c719cbde51a04311c8361e7b3` |
+| `white_studio_06` | `eac2afbe7a370155e4e334b875fb0ded` |
+
+Total 4,144,291 bytes, and never fetched together: one room is one extra JPG — 1.49 /
+1.55 / 0.56 / 0.55 MB. **Space has none** — that room's background is
+a flat `#04060d` plus drei `<Stars>`, by design (see A2).
+
+Study and Park are the odd sizes. `combination_room`'s inlaid parquet fills most of the
+frame and costs 2,047,644 B at 4096 q72; 3584 q72 is 1,489,755 B and keeps q72's detail,
+where 4096 at the q55-q60 that would have fitted puts visible blocking into the room's
+flat plaster. Meadow grass is high-entropy and would not come under the 1.6 MB
+budget at 4096 (3.18 MB at q72, still 1.80 MB at q45), so it ships at 3072 wide instead,
+where q70 buys more detail per byte than 4096 at q45 would.
+
+Three things had to be true for these to render correctly, all verified in
+`three@0.185.1`:
+- `texture.mapping = EquirectangularReflectionMapping` and `texture.colorSpace =
+  SRGBColorSpace`. Without the mapping, `WebGLBackground` falls through to its
+  *plane* branch and paints the photo flat across the screen with no perspective and no
+  `backgroundRotation`.
+- `scene.backgroundBlurriness = 0`. Above zero, `WebGLEnvironments.get` runs the texture
+  through `PMREMGenerator` instead of a plain cube conversion — i.e. the blur is not a
+  post-effect you can dial back, it changes which texture is sampled.
+- three tone-maps a background only when its colour space is NOT sRGB
+  (`WebGLBackground.js`: `material.toneMapped = getTransfer(colorSpace) !== SRGBTransfer`),
+  so an already-tonemapped JPG is passed through untouched. This is why `bgIntensity`
+  still means what it meant.
+
+VRAM, worth knowing before raising the resolution again: `scene.background` with an
+equirect texture is converted to a `WebGLCubeRenderTarget` whose faces are `image.height`
+square. A 4096x2048 backdrop therefore costs 6 x 2048² x 4 B = **100 MB** of cube target
+plus 33 MB for the source texture; the 3072-wide Park costs 57 MB + 19 MB. That is the
+real budget of this change, not the download.
+
+### A2c. Which way the room faces (`lights.envYaw`), and the Arcade swap
+
+Verified 2026-09-10 in the browser, not from thumbnails: a Playwright script
+(`shoot.mjs`, kept in the curation scratchpad) loaded `/dev/board3d?room=&seat=` with a
+temporary `?yaw=&hdri=&backdrop=` override, screenshotted the canvas at eight yaws 45 deg
+apart from both seats, and laid the frames out as one contact sheet per asset.
+
+**The thing that decides every yaw.** A seat camera sits at y 7.5 and looks at the board,
+which is 40 deg below the horizon; with a 40 deg vertical fov the panorama is only ever
+visible between roughly 20 and 60 deg BELOW its horizon. That is the LOWER WALL AND THE
+FLOOR of the room and nothing else — no ceiling, no skyline, and none of the part of an
+HDRI that its Poly Haven thumbnail shows off. Judge a candidate by cropping v 0.42-0.78
+of the equirect into a strip and reading that; the rest of the image is only lighting.
+
+Empirical mapping, measured on `fireplace` and confirmed on `ferndale_studio_06` (three
+of the four terms in `<Environment>` cancel, so it is worth writing down rather than
+deriving):
+
+```
+centre_u(yaw) = 0.25 + yaw / 2*PI     (mod 1)     // what the WHITE seat faces
+yaw(u)        = 2*PI * (u - 0.25)     (mod 2*PI)
+```
+
+The black seat faces `centre_u + 0.5`, and a 16:9 canvas sees about +/- 0.085 in u
+(61 deg of horizontal fov), so a feature more than ~0.09 away in u is safely out of frame.
+
+| Room | Asset | `envYaw` | Why |
+|---|---|---|---|
+| study | `fireplace` (REPLACED in §A2d) | **1.65** | Faces the stove and the stone chimney breast. Was 0, which faced the far corner of the lounge — the yellow blanket over the couch, and the tiled floor. The exact value is set by a pair of shoes on the hearthrug at u 0.634-0.671, only 18 deg from the fire: 1.65 clears them by ~11 deg on a 16:9 canvas, 1.78 frames the fire better but let a toecap into the corner at 1440x900, and 1.90 and up puts them in properly. |
+| space | `qwantani_night_puresky` | 0.6 (unchanged) | Background is a flat colour plus `<Stars>`; the HDRI is IBL only, so the yaw only turns the reflections. |
+| park | `meadow_2` | -0.4 (unchanged) | Re-checked at 4 yaws. Grass and trees the whole way round, and `floor: ground` projects the meadow under the board, so the seat view barely changes; -0.4 keeps the mown path rather than the bald patches at u 0.6 / 0.75 behind the board. |
+| arcade | `ferndale_studio_06` (NEW) | **2.83** | The wash just right of the studio's big magenta globe lamp: a clean gradient from a hot centre to black in the corners, with the lamp, its stand, the floor cable and the bench all out of frame. |
+| minimal | `white_studio_06` | 0 (unchanged) | Re-checked at 4 yaws. It is a working photo studio (beauty dish, stands, cables, a black curtain) but this is the one room with `floor: backdrop`, and drei's `<Backdrop>` cyclorama fills the seat frame edge to edge — the skybox is never on screen and the yaw makes no visible difference. |
+
+**Why the Arcade asset was replaced.** `wooden_studio_10`'s visible band is a wooden
+floor with a power strip, trailing cables, light stands, a prop sphere and two windows
+with venetian blinds; there is no arc of it that is clean, so no yaw could save it.
+`ferndale_studio_06` is a black room washed magenta by one practical globe lamp: dark
+walls, a magenta floor, a bench and a doorway in one quadrant, one cable across the floor
+in another, and about 140 deg of nothing but gradient — which is what the room card
+("Black gloss, magenta and cyan") actually describes. It is also the smallest 1k `.hdr`
+of any candidate (1,228,415 B) and its tonemapped JPG compresses to 562,968 B at
+4096x2048 q72, against 1,574,766 B for the one it replaces.
+
+Rejected for the Arcade, all verified in the harness: `ferndale_studio_05` (clean, but a
+flat even purple with no gradient — reads as a painted wall); `ferndale_studio_10` (the
+only candidate with real magenta AND real cyan, but its band is tripods, stands, a
+monitor and cables from end to end, and it blows the board's blacks out); `ferndale_studio_02`
+(blue/teal, not magenta); `newman_lobby` (a genuine magenta neon sign — spelling
+"TRAPDOOR", plus posters: text and brand marks, disqualified on sight); `wooden_studio_09`
+(same room and same blinds and cables as `wooden_studio_10`, in red/teal).
+
+**Nothing on Poly Haven beat `fireplace` for the Study under the 1,572,864-byte cap**, so
+that room ships a better yaw rather than a new asset. Rejected, all rendered in the
+harness first: `warm_bar` (the best-looking room of the lot — timber roof, stone bar,
+terracotta — but its counter carries branded bar runners, beer taps, menu cards and two
+TVs showing a rugby match, and cold daylight glass doors sit a quarter turn from the
+fire); `warm_restaurant_night` (a lodge dining room with laid tables — plates, napkins,
+wicker chairs — in frame from both seats); `warm_reception_dinner` (a bare concrete-floored
+banquet barn; warm, but nothing in the band except a stove and a barrel);
+`lythwood_lounge` (one lovely parquet-and-chandelier third, five-sixths pale daylight
+lounge). Over the cap and therefore never rendered: `wooden_lounge` (1,631,135),
+`combination_room` (1,661,444), `pine_attic` (1,644,300), `cowboy_town_saloon` (1,733,523),
+`billiard_hall` (1,629,669), `glasshouse_interior` (1,636,636), `music_hall_01` (1,650,132),
+`colorful_studio` (1,666,933), `cayley_interior` (1,709,967), `aft_lounge` (1,776,815).
+
+**Known limitation, Classic Study — FIXED in §A2d**, by both halves of it: the orbit is
+now a bounded sweep and the asset is now a club room. The paragraph below is the record of
+the problem.
+
+`envYaw` fixes the two SEATS, which is where a
+player spends a game, and it cannot fix the landing hero: FR-24's cinematic orbit turns a
+full circle every ~42 s, so every part of the panorama eventually comes round. About 60%
+of `fireplace` is a couch under a mustard blanket, and the hero lands on it roughly 5-25 s
+after a room is chosen. The one candidate that is uniformly acceptable all the way round —
+`warm_restaurant_night` — was rendered through a full orbit for exactly this comparison
+and is worse in every frame: flat, monotone terracotta with no dark and no fire, and the
+board's dark squares disappear into the floor. Fixing this properly needs an asset Poly
+Haven does not have under the size cap (a real panelled library or club room), or a
+modelled room instead of a photograph. See the orbit contact sheets in the curation
+scratchpad.
+
+**Light retune that came with the two changes** (`src/lib/rooms.ts`):
+
+| Room | Before | After | Why |
+|---|---|---|---|
+| study | key `#ffd9a8` 2.2, env 1.0, bg 1.0 | key `#ffd9a8` **2.3**, env **0.9**, bg **0.95** | With the fire in frame the panorama does more of the lighting; the env comes down and the key up so the dark squares stay walnut instead of going orange. |
+| arcade | key `#ff6ad5` 1.8, env 1.2, bg 1.0 | key **`#7cf7ff`** **1.7**, env **0.9**, bg **0.85** | The new panorama is magenta wall to wall, and a magenta key on top of it made every piece the same pink. The key becomes the room's own cyan — the token the sparkles and the legal-move highlight already use — so the two of them are the "magenta and cyan" of the room card. `glow` stays `#ff6ad5`: the ENVIRONMENT is what spills onto the page. 1.7 rather than 2.0 because the squares are metalness 0.75 / roughness 0.14 and a 2.0 key blew them to white at the top of the cinematic orbit. |
+
+### A2d. The bounded hero sweep, and the Study swap (2026-09-10)
+
+Two changes, and the first is the reason for the second.
+
+**1. FR-24's idle camera no longer turns a full circle.** It swings. `RoomPreset.orbit`
+(`{ centerAzimuth, halfArc }`, radians — `src/lib/camera.ts` `OrbitSweep`) gives every
+room an arc, and `camera-rig.tsx` eases the azimuth back and forth across it:
+
+```
+azimuth(t) = centerAzimuth + halfArc * sin(omega * t),   omega = cinematicSpeed / halfArc
+```
+
+- `centerAzimuth` is a CAMERA azimuth in camera-controls' terms — three's
+  `Spherical.theta = atan2(x, z)` measured from the board — so **0 is the white seat** and
+  a positive value turns the camera anticlockwise seen from above. The exact relation to
+  `envYaw` is `u_faced(A) = 0.25 + (envYaw - A) / 2*PI`: the §A2c mapping with the camera
+  turned instead of the room, so one radian of centre walks the view one radian the OTHER
+  way round the panorama.
+- `halfArc` defaults to **0.95 rad (~55 deg)**, a 110 deg sweep. Every room ships that.
+- `omega` is set so the speed at the middle of the arc is exactly `cinematicSpeed`
+  (0.15 rad/s) — the pace the full circle ran at. A wider arc therefore takes longer
+  rather than moving faster. One there-and-back is `2*PI*halfArc / cinematicSpeed` =
+  **39.8 s** at the default, against ~42 s for the old full turn.
+- The motion is a sine, so the SPEED is a cosine: fastest across the middle, easing to
+  nothing and away again at each end. No corner, no stop, no rewind.
+- The per-frame turn is RELATIVE (`orbitStep` returns a delta for `controls.rotate`), so a
+  visitor who drags the hero board keeps their own view instead of being pulled back onto
+  a line — which is exactly what the old orbit did.
+- The cinematic PRESET pose is rotated to `centerAzimuth` (`rotatePoseAzimuth`), so the
+  camera opens in the middle of the arc; under `prefers-reduced-motion` it stops there and
+  stays. A room change re-aims it; a resize does not (the transition is keyed on the
+  centre, never on the aspect).
+- The exact projected-bounds fit follows the arc: `orbitFitDistance(..., halfArc)` takes
+  its worst case over the azimuths the sweep actually visits. For every room shipped today
+  that is the same number as before, and provably so: the board's footprint is square, so
+  the fit peaks every 90 deg, and any arc wider than 45 deg either side of anywhere
+  contains a peak. The bounded sweep buys a better view, not a nearer camera. Covered by
+  `src/lib/__tests__/camera-fit.test.ts`, which projects all sixteen box corners at 41
+  azimuths per room at aspects 1.6 (1440x900), 1.333 (1024x768), 1, 0.87 and 0.7.
+
+Arcs, all verified in the browser with five samples across one full swing
+(`sweep.mjs`, curation scratchpad `backdrop-curation-2`):
+
+| Room | `centerAzimuth` | `halfArc` | Why |
+|---|---|---|---|
+| study | **-0.85** | 0.95 | The white seat sits in the middle of what the ROOM allows, not of what is worth looking at (see the yaw below). The hero is free of that constraint and takes the better half: at the far end it faces the buttoned settee across the darkest stretch of parquet, at the near end it is all but back in the white seat, and the bay window is 1.5 rad outside the arc. |
+| space | 0 | 0.95 | Flat colour plus `<Stars>`; every azimuth is the same azimuth. |
+| park | 0 | 0.95 | Grass and trees the whole way round, and `floor: ground` projects the meadow under the board. Five samples across the swing are indistinguishable. |
+| arcade | 0 | 0.95 | `envYaw` 2.83 already centres the ~140 deg of clean gradient (§A2c), and 110 deg fits inside it with ~15 deg either side. Both shifts were rendered and are worse: **-1.2** puts the floor cables over the doorway into three frames of five, **+1.2** reaches the practical lamp, where the metalness-0.75 squares blow to white. |
+| minimal | 0 | 0.95 | drei's `<Backdrop>` cyclorama fills the frame at every azimuth of the sweep, so the studio behind it is never on screen. |
+
+**2. The Classic Study is `combination_room`, not `fireplace`.** §A2c recorded the reason
+this had to wait: nothing under NFR-9's 1,572,864-byte cap beat `fireplace`, and
+`fireplace` is a domestic lounge of which only a third is the fire. The owner has since
+**waived NFR-9 for the Study only, to ~1.85 MB**, on the grounds that the room card
+promises a panelled club and a photograph of somebody's couch is not one.
+
+| | Before | After |
+|---|---|---|
+| Poly Haven id | `fireplace` (Greg Zaal) | **`combination_room`** (Sergej Majboroda) |
+| 1k `.hdr` | 1,529,229 B, md5 `42ea9e4241d230a343955f4921b9ab30` | **1,661,444 B**, md5 `490f50c323b9329e5aa4a2ea32dc23aa` (over the cap, under the 1.9 MB waiver) |
+| Backdrop JPG | 4096x2048 q72, 1,464,354 B | **3584x1792 q72, 1,489,755 B** (source 5,285,998 B, md5 `2b279b4ca8ffe85a4851c35d81c8aa7d`) |
+| `envYaw` | 1.65 | **4.05** |
+| Lights | key `#ffd9a8` 2.3, ambient 0.15, env 0.90, bg 0.95 | key `#ffd9a8` **2.4**, ambient **0.11**, env **0.72**, bg **0.80** |
+| Description | "Warm lamplight, polished wood, a fire in the corner." | "Warm lamplight, polished parquet, and a settee nobody sits on." |
+
+`combination_room` is a college combination room: gold damask walls over a white dado, an
+inlaid parquet floor, a buttoned settee, a gilt armchair, a marble side table with a
+painted urn on it, a brass chandelier — and one bay window blown to white. No people, no
+text, no screens, no brand marks, no cables, level horizon, shot at standing height. It is
+a **daylit** room where `fireplace` was a night one, which is what the light retune is for:
+the key goes up and stays warm, the environment and the background come down, and the
+result reads as a gold room late in the afternoon rather than a photograph at noon. The
+board's amber and brown squares separate cleanly from the parquet, which is darker and
+redder than either.
+
+**The yaw is set by the window and by the fact that there are two seats.** The visible
+band from a seat is 20-60 deg below the panorama's horizon (§A2c); here that is parquet
+the whole way round, with the furniture standing on it and the window occupying about
+1.4 rad of it (yaw ~1.5-3.2 blown out, ~1.2 and ~3.4 pale but usable). The seats are half
+a turn apart, so a yaw is only legal if BOTH `E` and `E + PI` miss the window: that is
+`E` in 3.15-4.89, and **4.05** is the middle of it. White gets the gilt armchair, the
+marble table and the parquet; black gets the gold damask wall with the settee under it.
+The hero then takes `centerAzimuth -0.85` (above) to reach the half of the room the seats
+could not have.
+
+**The Study candidates, all checked against `/files/<id>` and, where they survived the
+panorama, rendered in `/dev/board3d` at eight yaws.** Every one of the ten below is inside
+the 1.9 MB waiver, so size stopped being the filter; the room did.
+
+Rendered, and rejected on what the camera actually sees:
+
+| id | 1k hdr | Why not |
+|---|---|---|
+| `billiard_hall` | 1,629,669 | A real games room, and the band is oatmeal contract carpet, a red tile strip and the yellow flank of an air-hockey cabinet. Flat, cool, and the board's light squares sink into the carpet. |
+| `cowboy_town_saloon` | 1,733,523 | The warmest runner-up — mahogany tables, spindle chairs, terracotta tile, hanging lamps — but it is a western saloon, not a club, and the board's dark squares are the same value as the table tops it stands against. |
+| `music_hall_01` | 1,650,132 | A Victorian theatre: rows of orange seats and a patterned red carpet, edge to edge. The amber squares disappear into it. |
+| `music_hall_02` | 1,596,653 | Clean honey herringbone parquet and nothing else — an empty hall floor — and the two quadrants that do have content have teal walls and a blue curtain. |
+| `wooden_lounge` | 1,631,135 | Pale pine and grey concrete, with wall-mounted TVs; the floor is within a shade of the board's light squares. |
+
+Rejected on the panorama, before rendering (the equirect preview at
+`https://cdn.polyhaven.com/asset_img/primary/<id>.png?width=1024`, with the visible band
+marked; sheets `eq-00`..`eq-06` in the scratchpad):
+
+`aft_lounge` (1,776,815 — a liner's lounge: mustard sofas over a swirling brown carpet,
+which is the exact failure `fireplace` was replaced for), `cayley_interior` (1,709,967 —
+a modern lodge, tiled floor, glass balcony, sea view), `pine_attic` (1,644,300 — green
+carpet, bean bags and a plywood hoop), `ballroom` (1,670,493 — pale cream and daylight),
+`country_club` (1,728,719 — a mural in blue and orange, wall to wall), `cinema_hall` and
+`pretville_cinema` (1,691,550 / 1,547,747 — both have a lit screen in frame),
+`christmas_photo_studio_01` (1,679,082 — the right furniture, a Christmas tree),
+`entrance_hall` / `mirrored_hall` / `dancing_hall` / `st_fagans_interior` / `decor_shop` /
+`colorful_studio` / `blue_photo_studio` / `old_room` / `anniversary_lounge` /
+`lythwood_room` / `hayloft` / `industrial_wooden_attic` / `warm_restaurant` /
+`cowboy_town_hall` / `glasshouse_interior` / `comfy_cafe` / `hotel_room` /
+`brown_photostudio_01`/`_03`/`_05`/`_06` (pale, modern, domestic, signed, screened or all
+four). The §A2c rejections — `warm_bar`, `warm_restaurant_night`, `warm_reception_dinner`,
+`lythwood_lounge` — still stand and were not re-rendered.
+
+The search was the whole 994-asset index (`GET /assets?t=hdris`) filtered to indoor
+categories and tags matching panelled / library / club / lounge / mahogany / leather /
+fireplace / chandelier / evening / billiard / saloon / hall / attic / manor / salon —
+124 assets, 39 of which were worth pricing.
 
 ### A3. Size budget note
 
@@ -111,7 +402,7 @@ export const ROOMS = {
   study:   { hdri: '/hdri/study.hdr',   polyhaven: 'fireplace',              bgIntensity: 1.0, envIntensity: 1.0, stars: false },
   space:   { hdri: '/hdri/space.hdr',   polyhaven: 'qwantani_night_puresky', bgIntensity: 0.7, envIntensity: 0.6, stars: true  },
   park:    { hdri: '/hdri/park.hdr',    polyhaven: 'meadow_2',               bgIntensity: 1.0, envIntensity: 1.0, stars: false },
-  arcade:  { hdri: '/hdri/arcade.hdr',  polyhaven: 'wooden_studio_10',       bgIntensity: 1.0, envIntensity: 1.2, stars: false },
+  arcade:  { hdri: '/hdri/arcade.hdr',  polyhaven: 'ferndale_studio_06',     bgIntensity: 0.85, envIntensity: 0.9, stars: false },
   minimal: { hdri: '/hdri/minimal.hdr', polyhaven: 'white_studio_06',        bgIntensity: 1.0, envIntensity: 1.0, stars: false },
 } as const;
 

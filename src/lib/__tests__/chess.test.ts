@@ -798,8 +798,12 @@ describe("camera presets and quality tiers", () => {
     // The horizontal half-angle is the vertical fov widened by the aspect, so the
     // distance is exactly inversely proportional to it.
     expect(square / wide).toBeCloseTo(16 / 9, 5);
-    // FR-22's ceiling is never crossed, however narrow the box.
-    expect(minFitDistance(4.7, 0.01)).toBe(CAMERA_LIMITS.maxDistance);
+    // The automatic fit may pass FR-22's player-dolly ceiling (the rig raises
+    // `controls.maxDistance` to match) but never the fit ceiling, however narrow the
+    // box: a portrait fullscreen canvas needs ~28 units, and 22 cropped a fifth of it.
+    expect(tall).toBeLessThanOrEqual(CAMERA_LIMITS.maxFitDistance);
+    expect(minFitDistance(4.7, 0.01)).toBe(CAMERA_LIMITS.maxFitDistance);
+    expect(CAMERA_LIMITS.maxFitDistance).toBeGreaterThan(CAMERA_LIMITS.maxDistance);
   });
 
   it("minFitDistance survives a canvas that has not been measured yet", () => {

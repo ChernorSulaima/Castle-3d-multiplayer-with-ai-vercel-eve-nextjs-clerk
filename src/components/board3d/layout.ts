@@ -34,6 +34,32 @@ export const FRAME_WIDTH = 0.55;
 export const BOARD_SIZE = BOARD_EXTENT; // 8 units across
 export const PLINTH_SIZE = BOARD_SIZE + FRAME_WIDTH * 2;
 
+/* ------------------------------------------------------------------- the table */
+/**
+ * The table the board stands on (`table` in src/lib/rooms.ts). Its TOP FACE is exactly
+ * where the plinth's underside already was, so the table is pure addition: not one square
+ * moves, `SQUARE_TOP_Y` is untouched, and the reflective playing surface — which lives a
+ * quarter of a unit above this — is never intersected.
+ */
+export const TABLE_TOP_Y = PLINTH_TOP_Y - PLINTH_HEIGHT;
+export const TABLE_THICKNESS = 0.35;
+/**
+ * A shade wider than the plinth: enough for the board to sit ON something rather than
+ * flush with it, and no wider than the showcase orbit can hold. Its corners kiss the
+ * frame edge at 45 deg of azimuth by design (see ORBIT_FIT_BOXES in camera-rig.tsx —
+ * the fit keeps the BOARD whole, and lets the furniture bleed).
+ */
+export const TABLE_SIZE = PLINTH_SIZE + 0.7;
+/** The rail under the top that the legs are joined into. */
+export const TABLE_APRON_INSET = 0.6;
+export const TABLE_APRON_HEIGHT = 0.34;
+/** Where the feet land — and, in a room that paints its own floor, where that floor goes. */
+export const TABLE_FOOT_Y = -2.9;
+/** Distance from the table's centre to a leg's axis, on both X and Z. */
+export const TABLE_LEG_INSET = TABLE_SIZE / 2 - TABLE_APRON_INSET - 0.32;
+/** Scales the turned leg's lathe profile, whose radii are written normalised to ~0.18. */
+export const TABLE_LEG_RADIUS = 1.7;
+
 /** Squares are drawn slightly inset so the checker reads as separate tiles. */
 export const TILE_SIZE = 0.98;
 /** Overlay disc/ring radii (base diameter of a piece is ~0.49 units). */

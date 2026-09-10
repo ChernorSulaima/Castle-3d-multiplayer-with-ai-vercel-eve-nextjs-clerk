@@ -9,10 +9,10 @@
 "use client";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { useEnvironment, type CameraControlsImpl } from "@react-three/drei";
+import { useEnvironment, useTexture, type CameraControlsImpl } from "@react-three/drei";
 import { ACESFilmicToneMapping, type Mesh } from "three";
 import { CAMERA_LIMITS, QUALITY_TIERS, poseForPreset } from "@/lib/camera";
-import { resolveRoom } from "@/lib/rooms";
+import { ROOMS, resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn, useReducedMotion } from "@/lib/ui";
 import type {
@@ -33,10 +33,19 @@ import { clampDpr, resolveShowcase, type Board3DShowcase, type ResolvedShowcase 
 import { preloadChessPieces } from "./use-chess-pieces";
 import { WebglFallbackNotice, WebglProbe, notifyRenderFailure } from "./webgl-fallback";
 
-/** Warms the 3D chunk's assets: the piece GLB plus any HDRIs passed in (FR-21m, NFR-2a). */
+/**
+ * Warms the 3D chunk's assets: the piece GLB plus any HDRIs passed in (FR-21m, NFR-2a),
+ * and — because a room is a light probe AND a skybox — the sharp backdrop that goes with
+ * each of those HDRIs. Callers keep passing `.hdr` paths; the pairing lives in
+ * `src/lib/rooms.ts`, so nothing on the calling side has to know a backdrop exists.
+ */
 export function preloadAssets(hdriFiles?: string[]): void {
   preloadChessPieces();
-  for (const files of hdriFiles ?? []) useEnvironment.preload({ files });
+  for (const files of hdriFiles ?? []) {
+    useEnvironment.preload({ files });
+    const backdrop = Object.values(ROOMS).find((room) => room.hdri === files)?.backdrop;
+    if (backdrop) useTexture.preload(backdrop);
+  }
 }
 
 export type { Board3DShowcase } from "./showcase";
@@ -193,33 +202,43 @@ export default function Board3D(props: Board3DProps) {
     if (useUiStore.getState().cinematic) useUiStore.getState().setCinematic(false);
   }, [showcase]);
 
+  // UI_UPGRADE_2 §4.8 item 5: the camera no longer takes the review keys. Bare
+  // arrows step through the game and R turns the board around, everywhere on the
+  // screen; orbiting is Shift+arrows, zoom is `[` / `]`, and resetting the view
+  // moved to the Camera menu in the action bar, where it can be named.
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const controls = controlsRef.current;
     if (!controls) return;
+    if (event.shiftKey) {
+      switch (event.key) {
+        case "ArrowLeft":
+          controls.rotate(-KEY_ROTATE, 0, true);
+          break;
+        case "ArrowRight":
+          controls.rotate(KEY_ROTATE, 0, true);
+          break;
+        case "ArrowUp":
+          controls.rotate(0, -KEY_POLAR, true);
+          break;
+        case "ArrowDown":
+          controls.rotate(0, KEY_POLAR, true);
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      return;
+    }
     switch (event.key) {
-      case "ArrowLeft":
-        controls.rotate(-KEY_ROTATE, 0, true);
-        break;
-      case "ArrowRight":
-        controls.rotate(KEY_ROTATE, 0, true);
-        break;
-      case "ArrowUp":
-        controls.rotate(0, -KEY_POLAR, true);
-        break;
-      case "ArrowDown":
-        controls.rotate(0, KEY_POLAR, true);
-        break;
+      case "]":
       case "+":
       case "=":
         controls.dolly(KEY_DOLLY, true);
         break;
+      case "[":
       case "-":
       case "_":
         controls.dolly(-KEY_DOLLY, true);
-        break;
-      case "r":
-      case "R":
-        void controls.normalizeRotations().reset(true);
         break;
       default:
         return;
@@ -348,7 +367,7 @@ export default function Board3D(props: Board3DProps) {
       role={widget ? "application" : "img"}
       aria-label={
         widget
-          ? "3D chess board. Arrow keys orbit the camera, plus and minus zoom, R resets it."
+          ? "3D chess board. Click a piece, then a highlighted square; press T for the 2D board with keyboard squares. Shift with the arrow keys orbits the camera and the bracket keys zoom; reset the view from Camera in the action bar."
           : `A 3D chess board in the ${room.label} room.`
       }
       tabIndex={widget ? 0 : undefined}

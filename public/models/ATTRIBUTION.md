@@ -23,4 +23,6 @@ Modifications made (see `docs/research/assets.md` section B3): merged into one G
 base, uniformly scaled (x3.930078), creased normals recomputed at 35 deg, single shared
 `PieceMaterial`. CC-BY 3.0 permits derivatives; attribution is still required.
 
-HDRIs in `public/hdri/` are CC0 from https://polyhaven.com (no attribution required).
+HDRIs in `public/hdri/` are CC0 from https://polyhaven.com (no attribution required), and
+so are the tonemapped skybox JPGs in `public/backdrops/` — see
+`public/backdrops/ATTRIBUTION.md` for the photographers.

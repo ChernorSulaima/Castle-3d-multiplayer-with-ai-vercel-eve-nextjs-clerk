@@ -16,8 +16,14 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
       {
-        // HDRIs are content-stable but not hashed -> 30 days (NFR-9)
+        // HDRIs and the tonemapped skybox JPGs that go with them are content-stable but
+        // not hashed -> 30 days (NFR-9). Without this they ship at `max-age=0` and every
+        // room switch re-validates ~1.5 MB.
         source: "/hdri/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=2592000" }],
+      },
+      {
+        source: "/backdrops/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=2592000" }],
       },
     ];

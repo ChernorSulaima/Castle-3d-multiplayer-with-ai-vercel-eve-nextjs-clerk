@@ -15,11 +15,13 @@ import { Button } from "@/components/ui/button";
 import { CAMERA_FLIP_MS } from "@/lib/constants";
 import { capturedFromMoves, checkSquareOf, fenAtPly, lastMoveAtPly, legalTargetsFor, needsPromotion } from "@/lib/chess";
 import { PieceTracker } from "@/lib/piece-tracker";
-import { ROOM_ORDER } from "@/lib/rooms";
+import { DEFAULT_ORBIT_SWEEP } from "@/lib/camera";
+import { DEFAULT_ROOM, ROOMS, ROOM_ORDER } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/ui";
 import type {
   BoardPiece,
+  CameraPresetId,
   CapturedPieces,
   Colour,
   LastMove,
@@ -31,6 +33,80 @@ import type {
 } from "@/lib/types";
 import { Board3DLoader } from "./board-3d-loader";
 import type { Board3DShowcase } from "./showcase";
+
+/**
+ * Deep-link overrides for this harness, e.g. `/dev/board3d?room=arcade&seat=black`.
+ *
+ * `room` is any `RoomPresetId` and `seat` any `CameraPresetId` (white | black | top |
+ * cinematic). Both only call the store setters the buttons in the header call, so
+ * nothing here can reach a shipped code path; they exist so a screenshot script can ask
+ * for one room from one seat without clicking through the toolbar. Dev-only twice over:
+ * the route itself `notFound()`s in production, and this returns null there anyway.
+ */
+function devParam(name: string): string | null {
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return null;
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+function devNumber(name: string): number | null {
+  const raw = devParam(name);
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * ROOM-TUNING OVERRIDES, dev only: `?room=study&hdri=/hdri/_cand/x.hdr&backdrop=...`
+ * plus `&yaw=`, `&envIntensity=`, `&bgIntensity=`, `&keyColor=`, `&keyIntensity=`,
+ * `&orbitCenter=`, `&halfArc=`.
+ *
+ * This is the harness that curates the rooms: a screenshot script can put a candidate
+ * panorama, a yaw and an arc on screen without a commit, which is how every value in
+ * `src/lib/rooms.ts` was chosen (docs/research/assets.md §A2c, §A2d).
+ *
+ * It PATCHES the `ROOMS` table rather than threading a prop, because a room reaches the
+ * scene through `resolveRoom` and nothing in the render path takes an override. That is
+ * only safe because of where it runs: at module scope in a chunk that is imported by
+ * `/dev/board3d` alone, on the client alone, in development alone — the route itself
+ * `notFound()`s in production. Before the first render, so nothing has read the table.
+ */
+function applyRoomOverrides(): void {
+  const id = ROOM_ORDER.find((room) => room === devParam("room")) ?? DEFAULT_ROOM;
+  if (id === "custom") return;
+  const room = ROOMS[id];
+  const hdri = devParam("hdri");
+  const backdrop = devParam("backdrop");
+  if (hdri) room.hdri = hdri;
+  if (backdrop) room.backdrop = backdrop;
+
+  const numbers: [string, "envYaw" | "envIntensity" | "bgIntensity" | "backgroundBlur" | "ambientIntensity"][] = [
+    ["yaw", "envYaw"],
+    ["envIntensity", "envIntensity"],
+    ["bgIntensity", "bgIntensity"],
+    ["bgBlur", "backgroundBlur"],
+    ["ambient", "ambientIntensity"],
+  ];
+  for (const [param, field] of numbers) {
+    const value = devNumber(param);
+    if (value !== null) room.lights[field] = value;
+  }
+  const keyIntensity = devNumber("keyIntensity");
+  if (keyIntensity !== null) room.lights.key.intensity = keyIntensity;
+  const keyColor = devParam("keyColor");
+  if (keyColor) room.lights.key.color = keyColor.startsWith("#") ? keyColor : `#${keyColor}`;
+
+  const orbitCenter = devNumber("orbitCenter");
+  const halfArc = devNumber("halfArc");
+  if (orbitCenter !== null || halfArc !== null) {
+    const base = room.orbit ?? DEFAULT_ORBIT_SWEEP;
+    room.orbit = {
+      centerAzimuth: orbitCenter ?? base.centerAzimuth,
+      halfArc: halfArc ?? base.halfArc,
+    };
+  }
+}
+
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") applyRoomOverrides();
 
 const SCRIPTS: Record<string, string[]> = {
   // Ruy Lopez with a queen trade — exercises slides, captures and the tray.
@@ -46,6 +122,8 @@ const SCRIPTS: Record<string, string[]> = {
 const SCRIPT_NAMES = Object.keys(SCRIPTS);
 const ROOM_CHOICES: RoomPresetId[] = [...ROOM_ORDER, "custom"];
 const TIER_CHOICES: QualityTier[] = ["auto", "low", "medium", "high"];
+/** Accepted by `?seat=` (see devParam). */
+const SEAT_CHOICES: CameraPresetId[] = ["white", "black", "top", "cinematic"];
 /** No "custom" here: a showcase room without colours is just Minimal twice. */
 const SHOWCASE_ROOMS: RoomPresetId[] = [...ROOM_ORDER];
 /** No report for this long means the render loop is not running. */
@@ -98,6 +176,17 @@ export function Board3DDevPreview() {
   const mountedAt = useRef(0);
   useEffect(() => {
     mountedAt.current = performance.now();
+  }, []);
+
+  // `?room=` / `?seat=` (see devParam above). One shot, on mount: after this the
+  // toolbar and the store own both, exactly as if the buttons had been clicked.
+  useEffect(() => {
+    // Validated, not cast: an unknown `?room=` would put a key with no entry in `ROOMS`
+    // into the store and take the whole scene down on the next `resolveRoom`.
+    const room = ROOM_CHOICES.find((id) => id === devParam("room"));
+    if (room) useUiStore.getState().setRoomPreset(room);
+    const seat = SEAT_CHOICES.find((id) => id === devParam("seat"));
+    if (seat) useUiStore.getState().setCameraPreset(seat);
   }, []);
 
   const onFrameRate = useCallback((value: number) => {
