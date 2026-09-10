@@ -57,3 +57,7 @@ next-env.d.ts
 
 # codex cli local state
 .codex/
+
+# impeccable live-server runtime state (config.json is project config and stays tracked)
+.impeccable/live/*
+!.impeccable/live/config.json
