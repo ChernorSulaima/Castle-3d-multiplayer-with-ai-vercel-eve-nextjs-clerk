@@ -31,20 +31,20 @@ export const metadata: Metadata = {
 
 /**
  * The Clerk card headings name the CLERK APPLICATION, which is not this product's name.
- * Overriding them here is the only way to say "3D Chess" on the auth screens without a
+ * Overriding them here is the only way to say "Castle" on the auth screens without a
  * dashboard change — and the copy voice of UI_REDESIGN §2 applies to them like anything
  * else: sentence case, plain verbs, no exclamation marks.
  */
 const CLERK_COPY = {
   signIn: {
     start: {
-      title: "Sign in to 3D Chess",
+      title: "Sign in to Castle",
       subtitle: "Welcome back. Pick up where you left off.",
     },
   },
   signUp: {
     start: {
-      title: "Join 3D Chess",
+      title: "Join Castle",
       subtitle: "Free, and it runs in your browser.",
     },
   },
