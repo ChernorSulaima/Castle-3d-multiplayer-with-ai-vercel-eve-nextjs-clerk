@@ -4,7 +4,7 @@
 // The credential check is what turns "this deployment cannot reach a model" into a
 // 503 the panel can explain, instead of a charged turn and a stream that dies.
 import { afterEach, describe, expect, test } from "vitest";
-import { gatewayCredentialPresent, isExpiredJwt, TUTOR_MODEL_ID } from "../model";
+import { gatewayCredentialPresent, isExpiredJwt, TUTOR_MODEL_ID, isVercelOidcIssued, resolveOidcToken } from "../model";
 
 const KEY = "AI_GATEWAY_API_KEY";
 const OIDC = "VERCEL_OIDC_TOKEN";
@@ -79,5 +79,29 @@ describe("isExpiredJwt", () => {
     for (const token of ["opaque-token", "a.b.c", "a.!!!.c", `header.${Buffer.from("[]").toString("base64url")}.sig`]) {
       expect(isExpiredJwt(token, now)).toBe(false);
     }
+  });
+});
+
+describe("the inbound OIDC header is the last resort, and only when Vercel minted it", () => {
+  const jwt = (claims: Record<string, unknown>) =>
+    "eyJhbGciOiJSUzI1NiJ9." + Buffer.from(JSON.stringify(claims)).toString("base64url") + ".sig";
+
+  test("accepts a token whose issuer is Vercel's OIDC issuer", () => {
+    expect(isVercelOidcIssued(jwt({ iss: "https://oidc.vercel.com/some-team", exp: 9e9 }))).toBe(true);
+  });
+
+  test("rejects any other issuer, an opaque string and garbage", () => {
+    expect(isVercelOidcIssued(jwt({ iss: "https://evil.example" }))).toBe(false);
+    expect(isVercelOidcIssued("not-a-jwt")).toBe(false);
+    expect(isVercelOidcIssued("a.b.c")).toBe(false);
+  });
+
+  test("prefers the environment over the request header", () => {
+    const previous = process.env.VERCEL_OIDC_TOKEN;
+    process.env.VERCEL_OIDC_TOKEN = jwt({ iss: "https://oidc.vercel.com/team", exp: 9e9 });
+    const headers = new Headers({ "x-vercel-oidc-token": jwt({ iss: "https://oidc.vercel.com/other", exp: 9e9 }) });
+    expect(resolveOidcToken(headers)).toBe(process.env.VERCEL_OIDC_TOKEN);
+    if (previous === undefined) delete process.env.VERCEL_OIDC_TOKEN;
+    else process.env.VERCEL_OIDC_TOKEN = previous;
   });
 });

@@ -75,9 +75,31 @@ const OIDC_HEADER = "x-vercel-oidc-token";
  * opponent's agent, on the same credential, was answering fine.
  */
 export function resolveOidcToken(requestHeaders?: Headers): string | undefined {
-  const fromRequest = requestHeaders?.get(OIDC_HEADER) ?? undefined;
+  // Trusted sources first: the runtime context and the environment cannot be set by
+  // a caller. The inbound header is the last resort, and only when it is shaped like
+  // a token Vercel minted. A caller who forges one changes nothing for anyone else —
+  // the route has already required Clerk auth and the Pro feature, the token is only
+  // ever presented to the AI Gateway as a bearer, and a bad one fails there for that
+  // caller's own request — but it should never outrank the platform's own copy.
   const fromContext = getContext().headers?.[OIDC_HEADER];
-  return fromRequest ?? fromContext ?? process.env.VERCEL_OIDC_TOKEN;
+  if (hasValue(fromContext)) return fromContext;
+  if (hasValue(process.env.VERCEL_OIDC_TOKEN)) return process.env.VERCEL_OIDC_TOKEN;
+  const fromRequest = requestHeaders?.get(OIDC_HEADER) ?? undefined;
+  return hasValue(fromRequest) && isVercelOidcIssued(fromRequest) ? fromRequest : undefined;
+}
+
+/** Vercel's OIDC issuer for every team is `https://oidc.vercel.com/<team-slug>`. */
+export function isVercelOidcIssued(token: string): boolean {
+  const payload = token.split(".")[1];
+  if (payload === undefined) return false;
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (typeof claims !== "object" || claims === null) return false;
+    const iss = (claims as { iss?: unknown }).iss;
+    return typeof iss === "string" && iss.startsWith("https://oidc.vercel.com/");
+  } catch {
+    return false;
+  }
 }
 
 function hasValue(value: string | undefined): value is string {

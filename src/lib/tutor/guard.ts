@@ -149,6 +149,10 @@ export async function guardTutorRequest(request: Request): Promise<TutorGuardRes
     const message = error instanceof Error ? error.message : "";
     if (message.includes("tutor-limit")) return fail(429, "quota");
     if (message.includes("game-not-found")) return fail(404, "game-not-found");
+    // Anything else is the backend, not the member: say so in the logs. On
+    // 2026-09-11 this branch hid a production Convex deployment that did not have
+    // `useTutorTurn` yet behind the same "tutor-unavailable" the credential check uses.
+    console.error("[tutor] quota charge failed", message || String(error));
     return fail(503, "tutor-unavailable");
   }
 

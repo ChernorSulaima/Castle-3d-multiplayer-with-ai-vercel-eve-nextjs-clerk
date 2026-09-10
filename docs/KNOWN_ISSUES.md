@@ -409,3 +409,8 @@ model turn, the browser-side Stockfish tool round trip, annotations on both boar
 6. **The e2e test user `castle-e2e` is now a Pro subscriber** (dev gateway, test card), so
    `e2e/pro.spec.ts` skips the checkout branch and annotates the run; cancel the subscription
    from the Clerk dashboard to re-exercise checkout.
+7. **Convex production is deployed by hand.** Vercel builds the Next app only; new Convex
+   functions (the tutor's `games.useTutorTurn`) reach `hallowed-impala-527` with
+   `npx convex deploy --yes`. Forgetting it made production answer 503 `tutor-unavailable`
+   from the quota step on 2026-09-11 while the dev deployment worked. Deploy Convex before
+   Vercel whenever `convex/` changed.
