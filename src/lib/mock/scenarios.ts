@@ -125,7 +125,7 @@ const BASE: Omit<MockScenario, "id" | "label" | "summary"> = {
 const AI_COMMENTARY: MockCommentaryRow[] = [
   { ply: 4, text: "Knights before bishops — that is what my club captain says, anyway.", source: "eve", persona: "pip" },
   { ply: 8, text: "You have the centre. I am going to poke at it and see what falls over.", source: "eve", persona: "pip" },
-  { ply: 12, text: "Check! Not a scary one, but I had to try it before you castled.", source: "eve", persona: "pip" },
+  { ply: 12, text: "Check — not a scary one, but I had to try it before you castled.", source: "eve", persona: "pip" },
 ];
 
 export const MOCK_SCENARIOS: Record<MockScenarioId, MockScenario> = {

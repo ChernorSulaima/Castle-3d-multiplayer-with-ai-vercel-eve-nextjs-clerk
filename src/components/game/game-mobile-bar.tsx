@@ -90,6 +90,7 @@ function BarButton({
   label,
   srLabel,
   onClick,
+  count,
   disabled = false,
   tone = "default",
   className,
@@ -97,6 +98,8 @@ function BarButton({
   icon: typeof BoxIcon;
   label: string;
   srLabel?: string;
+  /** A mono count that sits under the label, e.g. "2 left". */
+  count?: string;
   onClick(): void;
   disabled?: boolean;
   tone?: "default" | "primary";
@@ -109,16 +112,27 @@ function BarButton({
       aria-disabled={disabled || undefined}
       aria-label={srLabel}
       className={cn(
-        "h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0.5 py-1.5 text-[12px] font-medium",
+        // `px-0!`: the shared ActionBar styles every descendant button with
+        // `px-2`, which out-ranks a plain `px-0` here and left "Fullscreen" 10px
+        // short of its own width at 390 (48px box, 58px word).
+        "h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0! py-1.5 text-[12px] font-medium",
         tone === "primary" && "text-primary",
         disabled && "opacity-50",
         className,
       )}
     >
       <Icon aria-hidden className="size-5" />
-      <span aria-hidden={srLabel ? true : undefined} className="truncate">
+      <span
+        aria-hidden={srLabel ? true : undefined}
+        className="max-w-full truncate"
+      >
         {label}
       </span>
+      {count ? (
+        <span aria-hidden className="tabular font-mono text-[12px] text-muted-foreground">
+          {count}
+        </span>
+      ) : null}
     </Button>
   );
 }
@@ -139,7 +153,8 @@ function MoreItem({
   return (
     <Button
       variant={danger ? "destructive" : "outline"}
-      className="justify-start"
+      // §4.8 item 3: a destructive row in this sheet is a 44px target.
+      className={cn("justify-start", danger && "min-h-11")}
       disabled={disabled}
       onClick={onClick}
     >
@@ -179,7 +194,9 @@ export function GameMobileBar({
   return (
     <ActionBar
       label="Game actions"
-      className={cn("gap-0 overflow-visible px-0.5", className)}
+      // Pro Max: 44px targets with 8px gaps. Edge-to-edge buttons met the size
+      // floor and still sent a thumb aimed at Fullscreen to Flip.
+      className={cn("gap-2 overflow-visible px-1", className)}
     >
       <BarButton
         icon={is3d ? Grid2x2Icon : BoxIcon}
@@ -189,7 +206,6 @@ export function GameMobileBar({
           if (is3d || !noWebgl) onToggleView();
         }}
       />
-      <BarButton icon={RefreshCwIcon} label="Flip" onClick={flip} />
       <BarButton
         icon={focus ? MinimizeIcon : ExpandIcon}
         label={focus ? "Exit" : "Fullscreen"}
@@ -197,16 +213,17 @@ export function GameMobileBar({
         onClick={onToggleFocus}
       />
       {hint.available ? (
-        // The count is on the face, not in a tooltip a thumb cannot summon: a hint
-        // is spent, so "2 left" is the part of the label that decides the tap. The
-        // face is short because a thumb bar is narrow; the accessible name is the
-        // action's ONE name, the same words the bar and the composer use.
+        // §4.8 item 6: the hint action keeps ONE accessible name, "Ask for a hint",
+        // on every surface. On a 390px bar five buttons share 324px, so the visible
+        // cap is the same word shortened ("Hint") with the count on the face, not in
+        // a tooltip a thumb cannot summon: a hint is spent, so "2 left" is the part
+        // that decides the tap. "Ask for a hint" as a visible cap truncated to
+        // "Ask for a …" at 390, which named nothing.
         <BarButton
           icon={LightbulbIcon}
-          label={`Hint · ${hint.remaining} left`}
+          label="Hint"
+          count={`${hint.remaining} left`}
           srLabel={`Ask for a hint · ${hint.remaining} left`}
-          tone="primary"
-          className="flex-[1.3]"
           disabled={hint.disabledReason !== null}
           onClick={() => {
             if (hint.disabledReason === null) hint.request();
@@ -230,14 +247,14 @@ export function GameMobileBar({
             <Button
               variant="ghost"
               aria-label="More game actions"
-              className="h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0.5 py-1.5 text-[12px] font-medium"
+              className="h-auto min-h-11 min-w-0 flex-1 flex-col gap-0.5 px-0 py-1.5 text-[12px] font-medium"
             />
           }
         >
           <EllipsisIcon aria-hidden className="size-5" />
           <span>More</span>
         </DrawerTrigger>
-        <DrawerContent className="max-h-[80dvh]">
+        <DrawerContent className="max-h-[80dvh] transition-[transform,opacity,filter]">
           <DrawerHeader>
             <DrawerTitle>More actions</DrawerTitle>
             <DrawerDescription>
@@ -245,9 +262,14 @@ export function GameMobileBar({
             </DrawerDescription>
           </DrawerHeader>
           <div className="grid gap-2 overflow-y-auto px-4 pb-8">
+            {/* Flip left the bar so five buttons fit 390px without truncating
+                their caps; it is cosmetic in a live game and a thumb aimed at
+                Fullscreen kept landing on it (critique, 2026-09-10). */}
+            <p className="eyebrow pt-1">Board</p>
+            <MoreItem icon={RefreshCwIcon} label="Flip the board" onClick={flip} />
             {is3d && !noWebgl ? (
               <>
-                <p className="eyebrow pt-1">Camera</p>
+                <p className="eyebrow pt-2">Camera</p>
                 <div className="grid grid-cols-2 gap-2">
                   {CAMERA_ITEMS.map((item) => (
                     <Button
@@ -309,7 +331,9 @@ export function GameMobileBar({
               }}
             />
             <MoreItem icon={DownloadIcon} label="Download PGN" onClick={actions.downloadPgn} />
-            <MoreItem icon={SettingsIcon} label="Board and room settings" onClick={onOpenRoom} />
+            {/* §4.8 item 6: "Room" is the one name for the room action, in the
+                desktop bar and here. */}
+            <MoreItem icon={SettingsIcon} label="Room" onClick={onOpenRoom} />
             <MoreItem icon={KeyboardIcon} label="Keyboard shortcuts" onClick={onOpenShortcuts} />
           </div>
         </DrawerContent>

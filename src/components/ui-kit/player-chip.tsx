@@ -13,6 +13,11 @@ export interface PlayerChipProps extends React.ComponentProps<"div"> {
   side?: Colour | null;
   /** Adds the baize dot and the "to move" label (§5.1 player rows). */
   toMove?: boolean;
+  /**
+   * What the lit lamp says. Optional and defaults to "to move"; the game screen
+   * passes "reviewing" while the board is rewound (UI_UPGRADE_2 §4.8 item 6).
+   */
+  toMoveLabel?: string;
   /** e.g. "AI · Beginner", "Spectating". */
   subtitle?: React.ReactNode;
   size?: "sm" | "md";
@@ -25,6 +30,7 @@ export function PlayerChip({
   rating,
   side,
   toMove = false,
+  toMoveLabel = "to move",
   subtitle,
   size = "md",
   className,
@@ -73,7 +79,7 @@ export function PlayerChip({
             {toMove ? (
               <>
                 <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-live" />
-                <span className="text-live">to move</span>
+                <span className="text-live">{toMoveLabel}</span>
               </>
             ) : null}
             {subtitle ? <span className="truncate text-muted-foreground">{subtitle}</span> : null}

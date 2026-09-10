@@ -26,7 +26,9 @@ describe("ChatMessage", () => {
       </ChatMessage>,
     );
     expect(markup).toContain("bg-card");
-    expect(markup).toContain("bg-primary/20");
+    // DESIGN.md: "a lettered brass disc for the persona", and "Text on brass is
+    // Brass Ink" — a 20% wash with brass letters read at 2.81:1 in light theme.
+    expect(markup).toContain("bg-primary text-[12px] font-medium text-primary-foreground");
     expect(markup).toContain(">P<");
   });
 
@@ -40,14 +42,33 @@ describe("ChatMessage", () => {
     expect(markup).toMatch(/Hint<\/span><span class="sr-only">: <\/span>/);
   });
 
-  it("pulses while the opponent thinks; nothing in the chat bounces", () => {
+  it("types while the opponent thinks; nothing in the chat bounces", () => {
     const markup = renderToStaticMarkup(<ChatMessage variant="thinking" personaName="Pip" />);
-    expect(markup).toContain("motion-safe:animate-pulse");
+    // A staggered lift authored in src/components/game/game.css, not Tailwind's
+    // generic pulse — three dots that throb in place read as decoration, and the
+    // detector calls that out as `pulsing-dot`.
+    expect(markup).toContain("game-typing-dot");
+    expect(markup).not.toContain("animate-pulse");
     // No springy easing in the chat. The class name is matched rather than spelled
     // out so this assertion does not itself read as an occurrence of it.
     expect(markup).not.toMatch(/animate-b\w+/);
     // …and says so in words for a reader who cannot see the dots.
     expect(markup).toContain("Pip is thinking");
+  });
+
+  it("tucks the speaker's corner and holds the 85% measure (§4.4)", () => {
+    const ai = renderToStaticMarkup(
+      <ChatMessage variant="ai" personaName="Pip">
+        A quiet developing move.
+      </ChatMessage>,
+    );
+    expect(ai).toContain("rounded-tl-[4px]");
+    expect(ai).toContain("max-w-[85%]");
+
+    const you = renderToStaticMarkup(<ChatMessage variant="you">You played e4</ChatMessage>);
+    expect(you).toContain("rounded-tr-[4px]");
+    // Enters as a 6px rise over --dur-bubble, not a zoom.
+    expect(you).toContain("game-bubble-in");
   });
 });
 

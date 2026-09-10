@@ -22,8 +22,14 @@ export interface FocusHudProps extends React.ComponentProps<"div"> {
    */
   persistent?: React.ReactNode;
   /** Top-centre slot, also outside the fading layer — for anything that is
-   *  waiting on an answer (a draw offer). */
+   *  waiting on an answer (the status pill, a draw offer). */
   topCenter?: React.ReactNode;
+  /**
+   * Bottom-left slot, outside the fading layer, sitting clear of `bottom`.
+   * UI_UPGRADE_2 §4.8 item 1: the newest thing the opponent said lives here, so
+   * fullscreen never silences them.
+   */
+  aside?: React.ReactNode;
   /**
    * Fade out after 3s without pointer movement and return on the next move
    * (§5.2 — true for the 3D board, false for 2D where the HUD stays put).
@@ -52,6 +58,7 @@ export function FocusHud({
   bottom,
   persistent,
   topCenter,
+  aside,
   autoHide = false,
   idleMs = HUD_IDLE_MS,
   className,
@@ -137,6 +144,11 @@ export function FocusHud({
       {persistent ? (
         <div className="pointer-events-auto absolute top-3 right-3 z-20 flex items-center gap-1">
           {persistent}
+        </div>
+      ) : null}
+      {aside ? (
+        <div className="pointer-events-auto absolute bottom-20 left-3 z-10 w-[min(22rem,calc(100%-1.5rem))]">
+          {aside}
         </div>
       ) : null}
 

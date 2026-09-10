@@ -230,6 +230,34 @@
     background-color: color-mix(in oklab, var(--accent) 35%, transparent);
     color: var(--fg);
   }
+  /* The surfaces nobody draws still belong to the design: the caret in every
+     field and the scrollbar on every well are themed from the palette so the
+     browser never lends the interface a colour of its own. Lifted here from the
+     lobby's and the game's screen-local stylesheets (UI_UPGRADE_2 §5) so the
+     leaderboard, the profile and the settings pages get them too.
+     `no-scrollbar` still wins where a scroller must show nothing: a class beats
+     a bare pseudo-element. */
+  html {
+    caret-color: var(--accent);
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-color: var(--line);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  }
 }
 
 /* --------------------------------------------------------------- utilities */
@@ -248,6 +276,23 @@
   letter-spacing: -0.02em;
 }
 
+/**
+ * `headline-sm` (DESIGN.md type ramp): 2rem / 1.1 / 500, tracking -0.01em.
+ * The app frame's verdicts and overlays — the result dialog, the turn overlay,
+ * the promotion picker — sit here, one step under the marketing headline.
+ * Named without a `font-` prefix on purpose, like `eyebrow` and `tabular`:
+ * tailwind-merge reads `font-*` as the font-family group and would drop the
+ * `font-display` beside it, taking Fraunces off the headline. Declared after
+ * `font-display` so that, paired with it, this step's tighter letter-spacing
+ * wins while the family and the optical axes come from `font-display`.
+ */
+@utility headline-sm {
+  font-size: 2rem;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
 /** 13px uppercase label that sits above a headline (§1.2 type scale). */
 @utility eyebrow {
   font-size: 0.8125rem;
@@ -264,13 +309,13 @@
 }
 
 /**
- * Scroll reveal (§1.3): opacity + 8px translate, once, 400ms.
+ * Scroll reveal (§1.3): opacity + 12px translate, once, 400ms (UI_UPGRADE_2 §2.6).
  * Set `data-revealed="true"` when the IntersectionObserver fires — see
  * `useReveal` in src/lib/ui/use-reveal.ts, which does exactly that.
  */
 @utility reveal {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(12px);
   transition:
     opacity var(--dur-reveal) var(--ease-out-soft),
     transform var(--dur-reveal) var(--ease-out-soft);
@@ -334,6 +379,55 @@
   }
 }
 
+/* ---------------------------------------------------------------- the chat
+   `ChatMessage` (ui-kit) is rendered by the game screen and by the landing
+   page's pass-and-play artefact, so its two motions live here rather than in a
+   screen-local stylesheet: a new line rises 6px over `--dur-bubble`, and the
+   opponent's thinking dots lift in turn — the rhythm of someone working, not a
+   generic pulse. Both resolve to their final state under reduced motion. */
+@keyframes game-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.game-bubble-in {
+  animation: game-bubble-in var(--dur-bubble) var(--ease-out-soft) both;
+}
+
+@keyframes game-typing-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.game-typing-dot {
+  animation: game-typing-dot 1.2s var(--ease-out-soft) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-bubble-in {
+    animation: none;
+  }
+
+  .game-typing-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 /* Landing hero: the room's backdrop dissolves into the page ground instead of
    stopping at a rectangle. A soft ellipse biased to the right (the board sits
    right of centre) plus a longer fade on the left so the glow never touches the
@@ -358,6 +452,18 @@
   mask-size: 100% 100%;
 }
 
+/* Below `lg` the hero is a stacked block, not a diagonal, so the desktop mask's
+   corner bias has nothing to bias toward and the canvas reads as a photo card with
+   four straight edges. DESIGN.md: "its light is its edge" — an even feather off all
+   four sides, over a canvas that bleeds to the viewport edges. */
+@media (max-width: 63.999rem) {
+  .hero-canvas-blend {
+    --hero-mask:
+      linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%),
+      linear-gradient(to right, transparent 0%, #000 10%, #000 90%, transparent 100%);
+  }
+}
+
 /* The game board's canvas, unframed. DESIGN.md: "Don't frame the 3D board with a
    border, card or box; its light is its edge." A hairline ring used to do exactly
    that, so the room now dissolves into the page instead — the hero's technique at
@@ -369,6 +475,27 @@
   --board-mask:
     linear-gradient(to bottom, transparent 0%, #000 5%, #000 95%, transparent 100%),
     linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
+  -webkit-mask-image: var(--board-mask);
+  mask-image: var(--board-mask);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+/* UI_UPGRADE_2 §4.2: in the game the canvas is no longer the board square — it fills
+   the whole board column, so the mask can be a real dissolve instead of the polite 5%
+   hem above. 12% left and right, 8% top and 14% bottom (the ground is warmer under the
+   board than over it, and the action bar wants a softer hand-off than the nameplate).
+   Because the canvas now extends far past the board, none of these stops ever reaches
+   a corner square. `.board-canvas-feather` stays for the lobby preview, where the
+   canvas IS the board square. */
+.board-canvas-dissolve {
+  --board-mask:
+    linear-gradient(to bottom, transparent 0%, #000 8%, #000 86%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
   -webkit-mask-image: var(--board-mask);
   mask-image: var(--board-mask);
   -webkit-mask-composite: source-in;

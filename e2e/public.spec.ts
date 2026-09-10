@@ -7,9 +7,14 @@
 // The `/dev/*` routes are the ONLY way this suite can see the signed-in surfaces: no
 // agent and no CI job can sign in, and `notFound()` keeps them out of production.
 import { expect, test } from "@playwright/test";
+import { hideNextDevOverlay } from "./helpers/app";
 import { watchConsole } from "./helpers/console";
 
 test.describe("public routes", () => {
+  test.beforeEach(async ({ page }) => {
+    await hideNextDevOverlay(page);
+  });
+
   test("the landing page renders the hero, the replay and the live section", async ({ page }) => {
     await page.goto("/");
 
@@ -259,8 +264,11 @@ test.describe("public routes", () => {
   test("the ui-kit gallery renders every primitive", async ({ page }) => {
     await page.goto("/dev/ui-kit");
 
-    // §7's shared components, each in its own anchored section. If one of them threw,
-    // its section would be missing rather than merely ugly.
+    // The shared kit, each primitive in its own anchored section. If one of them
+    // threw, its section would be missing rather than merely ugly.
+    // PersonaCard and ModeCard are deliberately absent: UI_UPGRADE_2 §2.3 replaced the
+    // persona card grid with the landing roster and §3.2.2's lobby roster replaced
+    // ModeCard, so neither is shared surface any more.
     for (const id of [
       "palette",
       "type-scale",
@@ -270,8 +278,6 @@ test.describe("public routes", () => {
       "move-list",
       "mini-boards",
       "room-cards",
-      "persona-cards",
-      "mode-cards",
       "podium",
     ]) {
       await expect(page.locator(`#${id}`)).toBeVisible();

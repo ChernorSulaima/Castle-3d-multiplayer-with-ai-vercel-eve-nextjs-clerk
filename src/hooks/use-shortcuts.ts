@@ -3,6 +3,9 @@
 // UI_REDESIGN §5.1 keyboard map: F fullscreen, T 2D/3D, R flip, ←/→ review,
 // Home/End first/last, ? shortcuts, Esc exits fullscreen or review.
 //
+// UI_UPGRADE_2 §4.8 item 5: Shift+arrows are the 3D board's orbit and are left
+// alone here, so one key never means two things on one screen.
+//
 // One document-level listener, installed once. It is deliberately conservative:
 // a key is only claimed when the user is demonstrably NOT typing and no MODAL
 // dialog is on screen, because silently stealing "r" from a text box is far worse
@@ -130,10 +133,19 @@ export function useShortcuts(
           run(h.onFlip);
           return;
         case "ArrowLeft":
+          // Shift+arrow belongs to the 3D camera (UI_UPGRADE_2 §4.8 item 5), so
+          // the review keys and the orbit keys never fight over one press.
+          if (event.shiftKey) return;
           run(h.onStep === undefined ? undefined : () => h.onStep?.(-1));
           return;
         case "ArrowRight":
+          if (event.shiftKey) return;
           run(h.onStep === undefined ? undefined : () => h.onStep?.(1));
+          return;
+        case "ArrowUp":
+        case "ArrowDown":
+          // Not claimed here at all: with Shift they orbit the board, without it
+          // they scroll whatever the reader is in.
           return;
         case "Home":
           run(h.onFirst);

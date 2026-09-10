@@ -13,7 +13,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/ui";
 
 /** Both hero buttons are taller than the app's default 36px control. */
-const HERO_BUTTON = "h-11 px-5 text-[15px]";
+/* `transition-colors` replaces buttonVariants' `transition-all`, which would
+   otherwise animate height and width too. */
+const HERO_BUTTON = "h-11 cursor-pointer px-5 text-[15px] transition-colors duration-(--dur-micro)";
 
 export function HeroCtas({ className }: { className?: string }) {
   const { isLoaded, isSignedIn } = useAuth();

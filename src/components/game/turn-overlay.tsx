@@ -36,12 +36,15 @@ export function TurnOverlay({ visible, turn, name }: TurnOverlayProps) {
       >
         <div
           className={cn(
-            "max-w-[80%] rounded-xl border border-border bg-card px-7 py-5 text-center shadow-soft",
+            // §4.5: a floating layer relies on the soft shadow alone — no hairline
+            // under a 60px blur.
+            "max-w-[80%] rounded-xl bg-card px-7 py-5 text-center shadow-soft",
             "motion-safe:transition-transform motion-safe:duration-200",
             visible ? "scale-100" : "motion-safe:scale-95",
           )}
         >
-          <Display level={3} as="p" className="text-[1.75rem] sm:text-[2rem]">
+          {/* headline-sm — the app-frame verdict step of DESIGN.md's ramp. */}
+          <Display level={4} as="p">
             {formatColour(turn)} to move
           </Display>
           <p className="mt-1 text-sm text-muted-foreground">Pass the device to {name}</p>

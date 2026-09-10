@@ -33,7 +33,8 @@ export function PromotionPicker({ prompt, onChoose }: PromotionPickerProps) {
       <DialogContent showCloseButton={false} className="sm:max-w-xs">
         <DialogHeader>
           <DialogTitle>
-            <Display level={3} as="span" className="block text-[1.5rem] sm:text-[1.75rem]">
+            {/* headline-sm — the app-frame overlay step of DESIGN.md's ramp. */}
+            <Display level={4} as="span" className="block">
               Promote your pawn
             </Display>
           </DialogTitle>
@@ -54,7 +55,7 @@ export function PromotionPicker({ prompt, onChoose }: PromotionPickerProps) {
               autoFocus={piece === "q"}
               onClick={() => onChoose(piece)}
             >
-              <PieceGlyph type={piece} colour={prompt?.colour ?? "w"} className="h-10 w-10" />
+              <PieceGlyph type={piece} colour={prompt?.colour ?? "w"} className="size-10" />
               <span className="text-[12px] capitalize">{PIECE_NAMES[piece]}</span>
             </Button>
           ))}

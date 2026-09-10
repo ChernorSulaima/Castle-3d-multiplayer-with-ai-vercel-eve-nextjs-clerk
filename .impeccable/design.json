@@ -179,6 +179,10 @@
         "displayName": "Headline",
         "purpose": "Section and page titles."
       },
+      "headline-sm": {
+        "displayName": "Headline SM",
+        "purpose": "App-frame verdicts and overlays: the result dialog, the turn overlay, the promotion picker."
+      },
       "title": {
         "displayName": "Title",
         "purpose": "Card, dialog and tab headings."
@@ -186,6 +190,10 @@
       "body": {
         "displayName": "Body",
         "purpose": "Copy; 46-60ch measure."
+      },
+      "body-app": {
+        "displayName": "Body (app frame)",
+        "purpose": "Copy inside the app frame, one step down from the marketing size."
       },
       "label": {
         "displayName": "Label",

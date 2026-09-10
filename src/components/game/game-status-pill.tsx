@@ -24,6 +24,9 @@ export interface GameStatusPillProps {
   canMove?: boolean;
   /** Half-moves played so far; 0 means nobody has touched the board yet. */
   totalPlies?: number;
+  /** The SAN played at `reviewPly`, so every arrow press changes the pill
+   *  (§4.8 item 6) instead of leaving it on the same whole-move number. */
+  reviewSan?: string | null;
   /** Shown once the game is over, e.g. "White wins by checkmate". */
   resultText: string | null;
   onBackToLive(): void;
@@ -38,13 +41,23 @@ export function GameStatusPill({
   inCheck,
   canMove = false,
   totalPlies = 1,
+  reviewSan = null,
   resultText,
   onBackToLive,
   className,
 }: GameStatusPillProps) {
   if (reviewPly !== null) {
     // Ply 0 is the position before White's first move, not "move 0".
-    const where = reviewPly === 0 ? "the start" : `move ${Math.ceil(reviewPly / 2)}`;
+    // From ply 1 the pill reads as a scoresheet entry — "12…Nf6" — so arrowing
+    // one half-move at a time visibly changes it.
+    const number = Math.ceil(reviewPly / 2);
+    const notation =
+      reviewSan === null || reviewSan === ""
+        ? `move ${number}`
+        : reviewPly % 2 === 1
+          ? `${number}. ${reviewSan}`
+          : `${number}…${reviewSan}`;
+    const where = reviewPly === 0 ? "the start" : notation;
     return (
       // Every other state of this pill is a `role="status"` live region, and review
       // is a state change worth hearing. The role cannot go on the button itself —
@@ -52,11 +65,12 @@ export function GameStatusPill({
       // itself as pressable — so the live region wraps it.
       <span role="status" className={cn("inline-flex shrink-0", className)}>
         <Button
-          size="sm"
           variant="ghost"
           onClick={onBackToLive}
           aria-label={`Reviewing ${where}. Go back to the live position.`}
-          className="h-7 gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[13px] text-primary hover:bg-primary/20"
+          // 32px, the DESIGN.md button token (the base adds 36px on a coarse
+          // pointer); shadcn's `sm` was 28px and off the ramp.
+          className="h-8 gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[13px] text-primary hover:bg-primary/20"
         >
           <RotateCcwIcon aria-hidden />
           <span className="tabular">Reviewing {where}</span>

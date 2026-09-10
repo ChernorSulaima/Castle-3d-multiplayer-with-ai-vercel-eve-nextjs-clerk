@@ -22,7 +22,7 @@ const CREDITS: { label: string; body: React.ReactNode }[] = [
           href={PIECE_MODEL_CREDIT.licenseUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="underline underline-offset-4 hover:text-foreground"
+          className="inline-block -my-2 py-2 underline underline-offset-4 hover:text-foreground"
         >
           Licence
         </a>
@@ -38,7 +38,7 @@ const CREDITS: { label: string; body: React.ReactNode }[] = [
           href="https://polyhaven.com"
           target="_blank"
           rel="noreferrer noopener"
-          className="underline underline-offset-4 hover:text-foreground"
+          className="inline-block -my-2 py-2 underline underline-offset-4 hover:text-foreground"
         >
           Poly Haven
         </a>
@@ -58,13 +58,15 @@ export function LandingFooter() {
       <div className="mx-auto w-full max-w-[80rem] px-4 py-10 sm:px-6 sm:py-12">
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <span aria-hidden className="text-lg leading-none text-primary">
+            {/* §2.5: the wordmark at headline size, with the knight that is the
+                brand's mark (PRODUCT.md, "Brand Commitments"). */}
+            <p className="font-display flex items-baseline gap-3 text-[2.5rem] leading-none text-foreground">
+              <span aria-hidden className="text-primary">
                 ♞
               </span>
               Castle
             </p>
-            <p className="mt-2 max-w-[42ch] text-[13px] text-muted-foreground">
+            <p className="mt-4 max-w-[42ch] text-[13px] text-muted-foreground">
               An online chess club with rooms you can sit in. Free, and it runs in your browser.
             </p>
           </div>
@@ -76,7 +78,8 @@ export function LandingFooter() {
                 prefetch={false}
                 href={item.href}
                 className={cn(
-                  "rounded-md text-[13px] text-muted-foreground hover:text-foreground",
+                  "inline-flex min-h-9 items-center rounded-md px-2 -mx-2 text-[13px]",
+                  "text-muted-foreground transition-colors duration-(--dur-micro) hover:text-foreground",
                   focusRing,
                 )}
               >
@@ -89,7 +92,9 @@ export function LandingFooter() {
         <dl className="mt-10 grid gap-x-8 gap-y-4 border-t border-border pt-6 sm:grid-cols-3">
           {CREDITS.map((credit) => (
             <div key={credit.label}>
-              <dt className="eyebrow text-[11px]">{credit.label}</dt>
+              {/* A definition term, not a kicker: it labels the credit beside it
+                  and sits above nothing. 13px is the label step (§1.2). */}
+              <dt className="eyebrow">{credit.label}</dt>
               <dd className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
                 {credit.body}
               </dd>

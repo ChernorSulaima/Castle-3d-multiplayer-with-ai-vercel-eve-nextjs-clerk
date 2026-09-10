@@ -113,7 +113,7 @@ export function formatGameResult(
 const MODE_LABEL: Record<GameMode, string> = {
   online: "Online",
   ai: "vs AI",
-  local: "Local 2P",
+  local: "Local",
 };
 
 export function formatMode(mode: GameMode): string {

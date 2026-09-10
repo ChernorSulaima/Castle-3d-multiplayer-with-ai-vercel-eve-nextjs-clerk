@@ -87,6 +87,9 @@ function seatOf(role: ViewerRole): Colour | "both" | null {
   return null;
 }
 
+/** 2026-09-10, 19:04 UTC — a stable "started at" for every harness scenario. */
+const MOCK_STARTED_AT = 1_788_030_240_000;
+
 export function useMockGameController(scenario: MockScenario): GameController {
   const [moves, setMoves] = useState<string[]>(scenario.moves);
   const [status, setStatus] = useState<GameStatus>(scenario.status);
@@ -379,9 +382,13 @@ export function useMockGameController(scenario: MockScenario): GameController {
     undoCount: scenario.undoCount,
     hintsUsed: scenario.hintsUsed,
     spectatorCount: scenario.spectatorCount,
-    createdAt: 0,
-    lastMoveAt: 0,
-    endedAt: active ? undefined : 0,
+    // A fixed, plausible stamp rather than 0: the Info tab formats this, and
+    // "1 Jan 1970" in a design harness reads as a bug in the screen under review.
+    // Fixed (not `Date.now()`) so the harness renders identically on every load
+    // and a screenshot diff stays meaningful.
+    createdAt: MOCK_STARTED_AT,
+    lastMoveAt: MOCK_STARTED_AT,
+    endedAt: active ? undefined : MOCK_STARTED_AT,
   };
 
   const view: GameView = {

@@ -1,30 +1,31 @@
 "use client";
-// src/components/play/spectate-list.tsx  [U4]
-// "Live now" (UI_REDESIGN §6): a grid of spectate cards, each with a MiniBoard
-// thumbnail of the current position, both player chips, the move count and a
-// Watch button.
+// src/components/play/spectate-list.tsx  [U5]
+// "At the boards" (UI_UPGRADE_2 §3.4): the games in progress as the SAME board
+// tiles the landing shows — `BoardTile` from the shared kit, a MiniBoard of the
+// live position with a player chip at each end, the baize live dot and the whole
+// tile as one link. This file keeps the Convex plumbing; the tile itself is
+// shared so the two surfaces cannot drift apart.
 //
 // Why a per-card subscription for the position: `games.listLive` returns names,
 // ratings and counts but no FEN, and its return validator is shared with the
-// landing ticker (U1), so widening it is not this package's call. `games.get` is
-// the existing query that carries the position, and a live game is a document
-// that changes a few times a minute — a handful of extra subscriptions on a
-// lobby page is the cheaper half of that trade. The grid is capped at
-// LIVE_GRID_LIMIT for exactly that reason.
-import Link from "next/link";
+// landing ticker, so widening it is not this package's call. `games.get` is the
+// existing query that carries the position, and a live game is a document that
+// changes a few times a minute — a handful of extra subscriptions on a lobby page
+// is the cheaper half of that trade. The grid is capped at LIVE_GRID_LIMIT for
+// exactly that reason.
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { MiniBoard, PlayerChip } from "@/components/ui-kit";
+import { BoardTile } from "@/components/ui-kit";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buttonVariants } from "@/components/ui/button";
-import { DEFAULT_FEN } from "@/lib/constants";
-import { pluralize } from "@/lib/format";
 import type { SquareId } from "@/lib/types";
-import { cn } from "@/lib/ui";
 
 /** Nine cards fill three rows at the widest breakpoint and cap the subscriptions. */
 export const LIVE_GRID_LIMIT = 9;
+
+const GRID_CLASS = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3";
+
+const EMPTY_TEXT = "No live games right now. Start one and it will show up here.";
 
 export interface SpectateGame {
   _id: string;
@@ -43,46 +44,21 @@ export interface SpectateCardViewProps {
   lastMove?: { from: SquareId; to: SquareId } | null;
 }
 
-/** Pure — the /dev/pages harness renders this with fixed positions. */
+/** Pure — the /dev/pages harness renders this with fixed positions.
+ *
+ *  §3.4: "the same board tiles as the landing". It IS the landing's tile now —
+ *  `BoardTile` moved into the shared kit so the two surfaces cannot drift apart
+ *  again. `fen === undefined` is the loading state (a skeleton, not a made-up
+ *  position), which is exactly what the per-card subscription below hands it. */
 export function SpectateCardView({ game, fen, lastMove = null }: SpectateCardViewProps) {
+  return <BoardTile game={game} fen={fen} lastMove={lastMove} canWatch />;
+}
+
+function SpectateEmpty() {
   return (
-    <li className="flex min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3">
-      <MiniBoard
-        fen={fen ?? DEFAULT_FEN}
-        size={72}
-        lastMove={lastMove}
-        label={`${game.whiteName} versus ${game.blackName}, after ${pluralize(game.moveCount, "move")}`}
-        className={cn(fen === undefined && "opacity-60")}
-      />
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5 overflow-hidden">
-        <PlayerChip
-          name={game.whiteName}
-          rating={game.whiteRating > 0 ? game.whiteRating : null}
-          side="w"
-          size="sm"
-        />
-        <PlayerChip
-          name={game.blackName}
-          rating={game.blackRating > 0 ? game.blackRating : null}
-          side="b"
-          size="sm"
-        />
-        <p className="tabular font-mono text-[12px] text-muted-foreground">
-          {game.moveCount} moves
-          {game.spectatorCount > 0 ? ` · ${game.spectatorCount} watching` : null}
-        </p>
-      </div>
-
-      <Link
-        prefetch={false}
-        href={`/game/${game._id}`}
-        aria-label={`Watch ${game.whiteName} against ${game.blackName}`}
-        className={buttonVariants({ variant: "outline", size: "sm" })}
-      >
-        Watch
-      </Link>
-    </li>
+    <p className="rounded-xl bg-bg-sunken px-4 py-10 text-center text-sm text-muted-foreground">
+      {EMPTY_TEXT}
+    </p>
   );
 }
 
@@ -117,15 +93,9 @@ export interface SpectateGridViewProps {
 
 /** Pure grid — used directly by the /dev/pages harness. */
 export function SpectateGridView({ games, positions }: SpectateGridViewProps) {
-  if (games.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-        No live games right now. Start one and it will show up here.
-      </p>
-    );
-  }
+  if (games.length === 0) return <SpectateEmpty />;
   return (
-    <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <ul className={GRID_CLASS}>
       {games.map((game) => (
         <SpectateCardView key={game._id} game={game} fen={positions?.[game._id]} />
       ))}
@@ -139,26 +109,22 @@ export function SpectateList({ enabled }: { enabled: boolean }) {
 
   if (games === undefined) {
     return (
-      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy>
+      <ul className={GRID_CLASS} aria-busy>
         {Array.from({ length: 3 }, (_, i) => (
-          <li key={i}>
-            <Skeleton className="h-[6.5rem] w-full rounded-xl" />
+          <li key={i} className="min-w-0 p-2">
+            <Skeleton className="mb-2.5 h-6 w-32 rounded-full" />
+            <Skeleton className="aspect-square w-full rounded-md" />
+            <Skeleton className="mt-2.5 h-6 w-32 rounded-full" />
           </li>
         ))}
       </ul>
     );
   }
 
-  if (games.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-        No live games right now. Start one and it will show up here.
-      </p>
-    );
-  }
+  if (games.length === 0) return <SpectateEmpty />;
 
   return (
-    <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <ul className={GRID_CLASS}>
       {games.map((game) => (
         <SpectateCard
           key={game._id}

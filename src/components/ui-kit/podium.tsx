@@ -16,6 +16,13 @@ export interface PodiumProps extends React.ComponentProps<"ol"> {
   entries: PodiumEntry[];
   /** Wrap each name in a link to the profile. */
   renderName?(entry: PodiumEntry): React.ReactNode;
+  /**
+   * `"podium"` (default) is the three-column shape: 2 · 1 · 3, first place
+   * raised. `"stack"` is the same three entries in one column — a narrow aside,
+   * for instance — where that visual order would simply reverse the reading
+   * order, so it is dropped.
+   */
+  layout?: "podium" | "stack";
 }
 
 /** Visual order 2 · 1 · 3 on wide screens; reading order stays 1, 2, 3. */
@@ -26,10 +33,21 @@ const ORDER_CLASS: Record<number, string> = {
 };
 
 /** The top three of a leaderboard (§6): avatar 56, rating in Fraunces 40. */
-export function Podium({ entries, renderName, className, ...props }: PodiumProps) {
+export function Podium({
+  entries,
+  renderName,
+  layout = "podium",
+  className,
+  ...props
+}: PodiumProps) {
+  const stacked = layout === "stack";
   return (
     <ol
-      className={cn("grid gap-3 sm:grid-cols-3 sm:items-end", className)}
+      className={cn(
+        "grid gap-3",
+        stacked ? "sm:grid-cols-1" : "sm:grid-cols-3 sm:items-end",
+        className,
+      )}
       aria-label="Top three"
       {...props}
     >
@@ -40,9 +58,13 @@ export function Podium({ entries, renderName, className, ...props }: PodiumProps
             key={entry.rank}
             className={cn(
               "flex flex-col items-center gap-2 rounded-xl border bg-card px-4 text-center",
-              ORDER_CLASS[entry.rank],
+              stacked ? null : ORDER_CLASS[entry.rank],
+              // DESIGN.md, Elevation: cards at rest carry no shadow, and the
+              // soft float is reserved for layers that genuinely float. A
+              // podium entry is page structure — the brass hairline and the
+              // extra padding are what raise first place.
               first
-                ? "border-primary/50 py-6 shadow-soft"
+                ? cn("border-primary/50", stacked ? "py-4 sm:py-5" : "py-6")
                 : "border-border py-4 sm:py-5",
             )}
           >
@@ -53,15 +75,19 @@ export function Podium({ entries, renderName, className, ...props }: PodiumProps
               {entry.avatarUrl ? <AvatarImage src={entry.avatarUrl} alt="" /> : null}
               <AvatarFallback>{initials(entry.name)}</AvatarFallback>
             </Avatar>
-            <span className="max-w-full truncate text-sm font-medium text-foreground">
-              {renderName ? renderName(entry) : entry.name}
-            </span>
+            {/* The Scoresheet Rule: a rating is something a player writes down, so it
+                is Geist Mono with tabular figures, never the display face. The name
+                carries the title weight instead — the podium is about who, and the
+                rating is the evidence. */}
             <span
               className={cn(
-                "font-display tabular text-primary",
-                first ? "text-[2.5rem] leading-none" : "text-[1.75rem] leading-none",
+                "max-w-full truncate text-foreground",
+                first ? "text-xl font-semibold" : "text-sm font-medium",
               )}
             >
+              {renderName ? renderName(entry) : entry.name}
+            </span>
+            <span className="tabular font-mono text-[13px] font-medium text-primary">
               {entry.rating}
             </span>
             {entry.record ? (

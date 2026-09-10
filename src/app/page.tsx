@@ -1,15 +1,19 @@
-// src/app/page.tsx  [U1]
-// `/` — public (§G), and the whole of UI_REDESIGN §3. A server component: only the
-// pieces that need the client (the hero board, the auth-aware CTA, the two Convex
-// queries) are client components, so the copy, the mode cards and the footer are in
-// the first HTML response.
+// src/app/page.tsx  [UI upgrade 2 §2]
+// `/` — public (§G). A server component: only the pieces that need the client
+// (the hero board and its room switcher, the auth-aware CTA, the Convex queries)
+// are client components, so the copy, the ledger and the footer are in the first
+// HTML response.
+//
+// Order, top to bottom (§2): board → invitation → three ways to sit → who you
+// will play → who is playing now → credits. No eyebrows anywhere; the headings
+// carry themselves.
 import type { Metadata } from "next";
 import { Hero } from "@/components/landing/hero";
 import { HeroBodyFlag } from "@/components/landing/hero-body-flag";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import { LiveNow } from "@/components/landing/live-now";
-import { Modes } from "@/components/landing/modes";
-import { Opponents } from "@/components/landing/opponents";
+import { OpponentRoster } from "@/components/landing/opponent-roster";
+import { WaysToSit } from "@/components/landing/ways-to-sit";
 
 export const metadata: Metadata = {
   description:
@@ -18,12 +22,14 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    // 15px base on marketing pages (§1.2).
-    <div className="flex flex-col text-[15px]">
+    // 15px base on marketing pages (§1.2). `landing-page` carries the browser
+    // surfaces this screen themes for itself — caret, selection, scrollbars —
+    // from src/components/landing/landing.css.
+    <div className="landing-page flex flex-col text-[15px]">
       <HeroBodyFlag />
       <Hero />
-      <Modes />
-      <Opponents />
+      <WaysToSit />
+      <OpponentRoster />
       <LiveNow />
       <LandingFooter />
     </div>

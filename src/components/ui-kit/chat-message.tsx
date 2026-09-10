@@ -24,7 +24,7 @@ function PersonaDisc({ initial }: { initial: string }) {
   return (
     <span
       aria-hidden
-      className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/20 text-[12px] font-medium text-primary"
+      className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[12px] font-medium text-primary-foreground"
     >
       {initial}
     </span>
@@ -48,10 +48,13 @@ function ThinkingDots({ personaName, afterMs }: { personaName?: string; afterMs:
     <span className="inline-flex items-center gap-2">
       <span aria-hidden className="inline-flex gap-1">
         {[0, 1, 2].map((i) => (
+          // `game-typing-dot` (src/app/globals.css): a staggered lift and
+          // fade rather than a generic pulse, and nothing at all under reduced
+          // motion.
           <span
             key={i}
-            className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-pulse"
-            style={{ animationDelay: `${i * 300}ms`, animationDuration: "900ms" }}
+            className="game-typing-dot size-1.5 rounded-full bg-muted-foreground"
+            style={{ animationDelay: `${i * 160}ms` }}
           />
         ))}
       </span>
@@ -76,7 +79,8 @@ export function ChatMessage({
   if (variant === "system") {
     return (
       <li className={cn("flex justify-center py-1", className)} {...props}>
-        <span className="rounded-full bg-bg-sunken px-2.5 py-1 text-[12px] text-muted-foreground">
+        {/* §4.4: system events are centred parchment chips. */}
+        <span className="game-bubble-in max-w-[85%] rounded-full bg-bg-sunken px-3 py-1 text-center text-[12px] text-muted-foreground">
           {children}
         </span>
       </li>
@@ -94,7 +98,9 @@ export function ChatMessage({
             4.5:1 floor, so light mode sets the label in ink (--fg on --line, 11.70:1)
             and dark keeps the brass it earns (#c9a24a on #2d241b, 6.34:1). Both
             pairs are asserted against globals.css in src/lib/ui/__tests__/contrast.test.ts. */}
-        <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-line px-3 py-2 text-[13px] text-foreground motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150 dark:text-primary">
+        {/* §4.4: the player's bubble tucks its TOP-RIGHT corner to 4px and enters
+            over `--dur-bubble` as a 6px rise, not a zoom (see game.css). */}
+        <div className="game-bubble-in max-w-[85%] rounded-xl rounded-tr-[4px] bg-line px-3 py-2 text-[13px] text-foreground dark:text-primary">
           {children}
         </div>
       </li>
@@ -106,14 +112,16 @@ export function ChatMessage({
   return (
     <li className={cn("flex gap-2", className)} {...props}>
       <PersonaDisc initial={initial} />
-      <div className="min-w-0 max-w-[88%]">
+      <div className="min-w-0 max-w-[85%]">
         {personaName || moveLabel ? (
           <p className="mb-1 flex items-baseline gap-1.5 text-[12px] text-muted-foreground">
             {personaName ? <span className="font-medium text-foreground">{personaName}</span> : null}
             {moveLabel ? <span className="tabular font-mono">{moveLabel}</span> : null}
           </p>
         ) : null}
-        <div className="rounded-xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] text-foreground motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150">
+        {/* §4.4: opponent bubbles are walnut with the top-LEFT corner tucked to
+            4px, so the tail points at the speaker. */}
+        <div className="game-bubble-in rounded-xl rounded-tl-[4px] border border-border bg-card px-3 py-2 text-[13px] text-foreground">
           {tag ? (
             <>
               <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[12px] font-medium tracking-wide text-primary uppercase">

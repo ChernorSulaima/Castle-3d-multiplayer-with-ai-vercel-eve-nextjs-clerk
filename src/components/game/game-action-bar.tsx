@@ -213,11 +213,16 @@ export function ResignAction({
               render={
                 <Button
                   size={wide ? "lg" : "default"}
-                  variant="destructive"
+                  // §4.3: ember GHOST in the bar — the danger is in the word and
+                  // the confirmation, not in a filled button competing with the
+                  // board. The mobile "More" sheet keeps the full-width row and
+                  // takes the 44px destructive floor (§4.8 item 3).
+                  variant="ghost"
                   aria-label="Resign the game"
                   aria-disabled={blocked || undefined}
                   className={cn(
-                    wide ? "justify-start" : "shrink-0",
+                    "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                    wide ? "min-h-11 justify-start" : "shrink-0",
                     blocked && "pointer-events-none opacity-50",
                   )}
                 />
@@ -230,6 +235,7 @@ export function ResignAction({
         />
         <TooltipContent side="bottom">{disabledReason ?? "Resign the game"}</TooltipContent>
       </Tooltip>
+      {/* §4.5: floating layers rely on the shadow alone. */}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Resign this game?</AlertDialogTitle>
@@ -312,8 +318,12 @@ export function GameActionBar({
       // Only the focus HUD's bar floats over the board; the default one is part of
       // the page and takes tone and a hairline instead of a shadow (DESIGN.md).
       variant={compact ? "focus" : "default"}
-      className={cn(compact && "w-auto bg-card/90 backdrop-blur-md", className)}
+      // §4.5 + the contrast floor: a floating bar over a lit board is
+      // OPAQUE walnut. A translucent plate put ivory text at 1.4:1 against
+      // whatever the room happened to be doing behind it.
+      className={cn(compact && "w-auto bg-card", className)}
     >
+      {/* ------------------------------------------------------------- View */}
       <ActionGroup>
         <ActionButton
           icon={is3d ? Grid2x2Icon : BoxIcon}
@@ -333,18 +343,15 @@ export function GameActionBar({
           label="Flip"
           labelFrom={labelFrom}
           shortcut="R"
-          tooltip="Turn the board around"
+          tooltip="Flip the board to the other seat"
           onClick={() => actions.setOrientation(orientation === "w" ? "b" : "w")}
         />
         {is3d && !noWebgl ? <CameraMenu orientation={orientation} /> : null}
-        {/* §5.2 puts Exit LAST in the focus HUD — it is the way out, so it reads
-            after the things you came here to do — and §5.1 puts Fullscreen with the
-            other view controls. Same button, two homes. */}
-        {compact && seat !== null ? null : fullscreenAction}
       </ActionGroup>
 
       {seat !== null ? (
         <>
+          {/* ----------------------------------------------------------- Play */}
           <ActionSeparator />
           <ActionGroup>
             {hint.available ? (
@@ -352,7 +359,9 @@ export function GameActionBar({
                 icon={LightbulbIcon}
                 label="Ask for a hint"
                 labelFrom={labelFrom}
-                tooltip="Your opponent suggests a move"
+                // The count rides in the tooltip too: below 1280 the bar is
+                // icon-only and the badge goes with the label.
+                tooltip={`Your opponent suggests a move · ${hint.remaining} left`}
                 badge={`${hint.remaining} left`}
                 disabledReason={hint.disabledReason ?? undefined}
                 onClick={hint.request}
@@ -372,7 +381,7 @@ export function GameActionBar({
 
             {/* Both of these used to be dropped from the focus HUD, which left a
                 fullscreen player unable to answer — or make — a draw offer, and
-                unable to concede. They stay (§5.2's HUD bar scrolls if it must). */}
+                unable to concede. They stay (§5.2's HUD bar wraps if it must). */}
             {mode === "online" ? (
               <ActionButton
                 icon={HandshakeIcon}
@@ -385,7 +394,11 @@ export function GameActionBar({
                 }}
               />
             ) : null}
+          </ActionGroup>
 
+          {/* ----------------------------------------------------------- Game */}
+          <ActionSeparator />
+          <ActionGroup>
             <ResignAction
               mode={mode}
               disabledReason={
@@ -395,17 +408,24 @@ export function GameActionBar({
                 void actions.resign();
               }}
             />
-
-            {compact ? fullscreenAction : null}
+            {compact ? null : <PgnMenu actions={actions} />}
           </ActionGroup>
         </>
       ) : null}
 
-      {compact ? null : (
+      {/* ------------------------------------------------------------ Frame */}
+      {compact ? (
+        // §5.2 puts Exit LAST in the focus HUD — it is the way out, so it reads
+        // after the things you came here to do.
+        <>
+          <ActionSeparator />
+          <ActionGroup>{fullscreenAction}</ActionGroup>
+        </>
+      ) : (
         <>
           <ActionSeparator />
           <ActionGroup className="ml-auto">
-            <PgnMenu actions={actions} />
+            {seat === null ? <PgnMenu actions={actions} /> : null}
             <ActionButton
               icon={SettingsIcon}
               label="Room"
@@ -421,6 +441,7 @@ export function GameActionBar({
               tooltip="Keyboard shortcuts"
               onClick={onOpenShortcuts}
             />
+            {fullscreenAction}
           </ActionGroup>
         </>
       )}

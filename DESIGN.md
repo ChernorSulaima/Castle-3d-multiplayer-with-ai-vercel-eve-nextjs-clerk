@@ -42,6 +42,13 @@ typography:
     lineHeight: 1.05
     letterSpacing: "-0.015em"
     fontVariation: "'opsz' 72, 'SOFT' 40, 'WONK' 1"
+  headline-sm:
+    fontFamily: "Fraunces, Georgia, serif"
+    fontSize: "2rem"
+    fontWeight: 500
+    lineHeight: 1.1
+    letterSpacing: "-0.01em"
+    fontVariation: "'opsz' 72, 'SOFT' 40, 'WONK' 1"
   title:
     fontFamily: "Geist, system-ui, sans-serif"
     fontSize: "1.25rem"
@@ -51,6 +58,11 @@ typography:
   body:
     fontFamily: "Geist, system-ui, sans-serif"
     fontSize: "0.9375rem"
+    fontWeight: 400
+    lineHeight: 1.6
+  body-app:
+    fontFamily: "Geist, system-ui, sans-serif"
+    fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.6
   label:
@@ -216,6 +228,7 @@ discipline of a scoresheet.
 ### Hierarchy
 - **Display** (500, clamp(3rem, 6vw, 4.5rem), 0.98): landing headline and result-dialog verdicts only; one italic word per headline at most, set in brass.
 - **Headline** (500, 2.5rem, 1.05): section titles on marketing pages, page titles in the app frame at a smaller size (1.25–2.25rem).
+- **Headline SM** (500, 2rem, 1.1): app-frame verdicts and overlays — the result dialog's verdict, the turn overlay, the promotion picker. One step under Headline, flat at every width because these sit over a board, not over a page.
 - **Title** (600, 1.25rem, 1.3): card titles, dialog titles, sidebar tab headings.
 - **Body** (400, 0.9375rem marketing / 0.875rem app frame, 1.6): copy; keep measure to 46–60 characters.
 - **Label** (500, 0.8125rem, 0.12em tracking, uppercase): eyebrows, section labels, table headers.
@@ -244,8 +257,9 @@ icon-only with a tooltip below that.
 Depth is tonal. Surfaces step up from espresso (ground) to walnut (cards, sidebar) to cellar
 wells that sink back; hairlines in seam separate regions. The single shadow token is warm and
 soft and appears only on layers that genuinely float above the page: popovers, dialogs, the
-fullscreen HUD and the hero board's glow. Cards at rest carry no shadow; the scrolled header
-uses a walnut tint with a blur rather than a shadow.
+fullscreen HUD and the hero board's glow. Floating layers rely on the shadow alone: no hairline.
+Cards at rest carry no shadow; the scrolled header uses a walnut tint with a blur rather than a
+shadow.
 
 ### Shadow Vocabulary
 - **Soft float** (`box-shadow: 0 20px 60px -30px rgb(0 0 0 / 0.35)`): dialogs, popovers, the floating HUD, hero canvas glow. Nothing else.

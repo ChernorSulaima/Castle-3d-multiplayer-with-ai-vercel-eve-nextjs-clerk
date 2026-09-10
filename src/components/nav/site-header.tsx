@@ -72,7 +72,10 @@ export function SiteHeader() {
           href="/"
           aria-label="Castle — home"
           className={cn(
-            "flex shrink-0 items-center gap-2 rounded-lg px-1 py-1 text-foreground",
+            // 36px of tappable area on touch (DESIGN.md, Layout) without
+            // changing the header's density on a mouse-driven pointer.
+            "flex shrink-0 items-center justify-center gap-2 rounded-lg px-1 py-1 text-foreground",
+            "pointer-coarse:min-h-9 pointer-coarse:min-w-9",
             focusRing,
           )}
         >

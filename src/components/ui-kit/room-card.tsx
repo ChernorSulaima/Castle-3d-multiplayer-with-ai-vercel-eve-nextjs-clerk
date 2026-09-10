@@ -54,7 +54,7 @@ export function RoomCard({
       <span className="text-sm font-medium text-foreground">{name}</span>
       <span className="text-[13px] leading-snug text-muted-foreground">{description}</span>
       {hdriName ? (
-        <span className="mt-auto font-mono text-[12px] text-muted-foreground/70">{hdriName}</span>
+        <span className="mt-auto font-mono text-[12px] text-muted-foreground">{hdriName}</span>
       ) : null}
     </button>
   );

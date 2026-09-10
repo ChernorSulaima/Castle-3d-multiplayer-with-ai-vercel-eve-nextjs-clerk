@@ -3,7 +3,7 @@
 // The client half of the §8 harness: it seeds the two client stores from the
 // chosen scenario and renders the real `GameShellView` with a mock controller.
 // No Clerk, no Convex, no network.
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { GameShellView, type GameShellMeta } from "@/components/game/game-shell-view";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
@@ -21,45 +21,56 @@ import { cn, focusRing } from "@/lib/ui";
 
 const DEFAULT_SCENARIO = "ai-midgame";
 
-/** A collapsed pill in the corner so it never covers the layout being reviewed. */
+/** A collapsed pill in the corner so it never covers the layout being reviewed.
+ *  Rendered open/closed from state rather than with <details>: a closed
+ *  <details> keeps its contents laid out, and a dev control must not be part of
+ *  what an audit of this screen measures. */
 function ScenarioSwitcher({ current }: { current: string }) {
+  const [open, setOpen] = useState(false);
   return (
     // Top-centre, not top-left: the §5.2 focus HUD puts its player chip in the
-    // top-left corner and a dev control must never sit on top of the thing under review.
-    // It stays in the header's row even at 390, where it overlaps the site nav: the
-    // alternative — dropping below the 56px header — lands it on the game's own player
-    // row and status pill, and covering the chrome is better than covering the subject.
-    <details className="fixed top-1.5 left-1/2 z-60 -translate-x-1/2 text-[12px]">
-      <summary
+    // top-left corner and a dev control must never sit on top of the thing under
+    // review. It stays in the header's row even at 390, where it overlaps the site
+    // nav: the alternative — dropping below the 56px header — lands it on the game's
+    // own nameplate and status pill, and covering the chrome is better than
+    // covering the subject.
+    <div className="fixed top-1.5 left-1/2 z-60 -translate-x-1/2 text-[12px]">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
         className={cn(
-          "cursor-pointer list-none rounded-full border border-border bg-card/95 px-2.5 py-1",
-          "font-mono text-muted-foreground shadow-soft backdrop-blur-md",
+          "flex min-h-7 cursor-pointer items-center rounded-full bg-card px-2.5 py-1",
+          "font-mono text-foreground shadow-soft pointer-coarse:min-h-9",
           focusRing,
         )}
       >
         ◆ {current}
-      </summary>
-      <ul className="mt-1 flex w-56 flex-col gap-0.5 rounded-xl border border-border bg-card p-1.5 shadow-soft">
-        {MOCK_SCENARIO_IDS.map((id) => (
-          <li key={id}>
-            <Link
-              prefetch={false}
-              href={`/dev/game?scenario=${id}`}
-              className={cn(
-                "block rounded-lg px-2 py-1.5",
-                focusRing,
-                id === current
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
-            >
-              <span className="block font-medium">{MOCK_SCENARIOS[id].label}</span>
-              <span className="block text-[11px] opacity-80">{MOCK_SCENARIOS[id].summary}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </details>
+      </button>
+      {open ? (
+        <ul className="mt-1 flex w-56 flex-col gap-0.5 rounded-xl bg-card p-1.5 shadow-soft">
+          {MOCK_SCENARIO_IDS.map((id) => (
+            <li key={id}>
+              <Link
+                prefetch={false}
+                href={`/dev/game?scenario=${id}`}
+                aria-current={id === current ? "page" : undefined}
+                className={cn(
+                  "block rounded-lg px-2 py-1.5",
+                  focusRing,
+                  id === current
+                    ? "font-semibold text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span className="block font-medium">{MOCK_SCENARIOS[id].label}</span>
+                <span className="block text-[12px] opacity-80">{MOCK_SCENARIOS[id].summary}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

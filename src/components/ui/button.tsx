@@ -3,7 +3,15 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  // `pointer-coarse:min-h-9 min-w-9` is UI_UPGRADE_2 §4.8 item 3: a 36px touch floor on
+  // every button, so the game's HUD and sheets inherit it instead of patching each
+  // call site. Additive only — it changes nothing on a mouse-driven pointer.
+  //
+  // The transition is a named property list, not `transition-all`: `all` animates
+  // height, width, padding and margin, which is the `layout-transition` finding and
+  // costs a layout pass on every hover. DESIGN.md, Components: "crisp 120ms colour
+  // changes" — colour, border, ring and the 1px active nudge, nothing that reflows.
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity,translate] duration-(--dur-micro) outline-none select-none cursor-pointer pointer-coarse:min-h-9 pointer-coarse:min-w-9 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {

@@ -29,7 +29,12 @@ export function ActionBar({ label, variant = "default", className, ...props }: A
         // scroll. §5.1's rule is that every game action is visible and labelled, so
         // the bar takes a second line instead — the board box above it is `flex-1`
         // inside the column, so the square recomputes off the height that is left.
-        "flex w-full flex-wrap items-center gap-x-1 gap-y-1 rounded-xl border border-border",
+        "flex w-full flex-wrap items-center gap-x-0.5 gap-y-1 rounded-xl",
+        // UI_UPGRADE_2 §4.5: structural layers carry a hairline and no shadow;
+        // floating layers rely on the soft shadow ALONE and drop the hairline —
+        // a 1px edge under a 60px blur is the generated-UI signature the
+        // detector calls `gpt-thin-border-wide-shadow`.
+        variant === "focus" ? "shadow-soft" : "border border-border",
         // Buttons run tighter inside a bar than they do standing alone (8px flanks,
         // 4px icon-to-label, against the base 10px/6px): that is ~110px across ten
         // actions, and it is the difference between one line and two at 1440.
@@ -38,11 +43,10 @@ export function ActionBar({ label, variant = "default", className, ...props }: A
         // lets the outer part win the attribute, so each one is
         // `data-slot="tooltip-trigger"` in the DOM.
         "[&_button]:gap-1 [&_button]:px-2",
+        // §4.3's touch floor, inherited by every button in the bar rather than
+        // patched at the call sites.
+        "[&_button]:pointer-coarse:min-h-9",
         "bg-card p-1.5",
-        // DESIGN.md, The Only-Floating-Things-Cast-Shadows Rule: the bar beneath
-        // the board is part of the page and gets tone and a hairline; only the
-        // focus HUD's bar genuinely floats, so only it casts the soft shadow.
-        variant === "focus" && "shadow-soft",
         className,
       )}
       {...props}
@@ -66,7 +70,7 @@ export function ActionGroup({ className, ...props }: React.ComponentProps<"div">
 /** Hairline between two ActionGroups. */
 export function ActionSeparator({ className, ...props }: React.ComponentProps<"span">) {
   return (
-    <span aria-hidden className={cn("mx-1 h-5 w-px shrink-0 bg-border", className)} {...props} />
+    <span aria-hidden className={cn("mx-0.5 h-5 w-px shrink-0 bg-border", className)} {...props} />
   );
 }
 
@@ -129,7 +133,14 @@ export function ActionButton({
             size="default"
             variant={BUTTON_VARIANT[variant]}
             aria-disabled={blocked || undefined}
-            className={cn("shrink-0", blocked && "opacity-50", className)}
+            className={cn(
+              // §4.8 item 3: a 36px floor wherever the pointer is a thumb. Applied
+              // here (and on the shared Button) so the focus HUD and the mobile
+              // sheet inherit it instead of patching it per call site.
+              "shrink-0 pointer-coarse:min-h-9",
+              blocked && "opacity-50",
+              className,
+            )}
             onClick={(event) => {
               if (blocked) {
                 event.preventDefault();
@@ -146,8 +157,16 @@ export function ActionButton({
         {/* The leading space is load-bearing: an accessible name is the concatenated
             text of the inline children with no separator inserted, so without it the
             Hint button announced as "Hint2 left". */}
+        {/* The badge follows the LABEL: below the label breakpoint the bar is
+            icon-only, and "2 left" beside a bulb with no noun is unanswerable. The
+            tooltip carries it there instead (see `tooltip` at the call site). */}
         {badge ? (
-          <span className="tabular text-[12px] font-medium opacity-70">
+          <span
+            className={cn(
+              "tabular text-[12px] font-medium text-muted-foreground",
+              LABEL_CLASS[labelFrom],
+            )}
+          >
             {" "}
             {badge}
           </span>

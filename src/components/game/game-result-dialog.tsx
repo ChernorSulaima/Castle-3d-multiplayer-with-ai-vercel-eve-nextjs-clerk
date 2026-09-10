@@ -1,16 +1,19 @@
 "use client";
-// src/components/game/game-result-dialog.tsx  [P3 → rebuilt U2]
-// FR-45 / §E.9.4 / UI_REDESIGN §5.4: 'Fraunces headline ("You won", "Draw", "You
-// resigned"), result line, rating change in mono with a brass/ember delta, "Won
-// with 2 take-backs" when applicable, buttons: Play again (same mode), Review
-// game, Back to lobby.'
+// src/components/game/game-result-dialog.tsx  [P3 → rebuilt U2 → UI_UPGRADE_2 §4.5 / §4.8 item 4]
+// The verdict, said once. A Fraunces headline, one result line, one rating line
+// in mono, and the three ways out in a single row.
 //
-// The delta and the take-back line are EXCLUSIVE: a game with take-backs is
-// unrated (FR-43), so it gets the sentence and no brass pill.
+// What this round removed: the inner box (a card inside a dialog is a nested
+// card), and the badge cluster that restated in three chips what the sentence
+// above it had already said. Initial focus lands on "Play again"; the page
+// behind is inert while the dialog is open (Base UI's modal dialog does that).
+//
+// The delta and the take-back line stay EXCLUSIVE: a game with take-backs is
+// unrated (FR-43), so it gets the sentence and no number.
 //
 // PURE: the rating row and the rematch mutation are fed in by `GameShell`, so
 // /dev/game can open this dialog with no Convex at all.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import {
   Dialog,
@@ -20,15 +23,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Display } from "@/components/ui-kit";
-import {
-  formatEndReason,
-  formatGameResult,
-  formatRatingDelta,
-  outcomeFor,
-} from "@/lib/format";
+import { formatEndReason, formatGameResult, formatRatingDelta, outcomeFor } from "@/lib/format";
 import { cn } from "@/lib/ui";
 import type { Colour, GameView } from "@/lib/types";
 
@@ -86,6 +83,9 @@ export function GameResultDialog({
   const { game } = view;
   const finished = game.status !== "active" && game.status !== "waiting";
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
+  // §4.8 item 4: focus lands on the thing most players want next, not on the
+  // close button in the corner.
+  const playAgainRef = useRef<HTMLButtonElement | null>(null);
   // `games.undo` resurrects a finished game (FR-43), so the SAME game can finish the
   // same way twice. `endedAt` is cleared by the take-back and rewritten by the next
   // finalize, which is what makes this key distinguish the two endings.
@@ -99,87 +99,114 @@ export function GameResultDialog({
     blackName: view.blackName,
   });
 
-  // FR-43: `games.undo` writes `rated: false`, so a game with take-backs moved
-  // nobody's rating. Showing a brass delta NEXT TO "Won with one take-back" gave
-  // the player two answers to one question. One sentence answers it instead, and
-  // the delta is kept for the games that actually earned one.
   const takeBacks = game.undoCount;
   const seated = myColour !== null;
-  const myRating = myColour === null ? null : (view[myColour === "w" ? "white" : "black"]?.rating ?? null);
-  const verb = !seated
-    ? "Played"
-    : outcome === "win"
-      ? "Won"
-      : outcome === "loss"
-        ? "Lost"
-        : "Drew";
+  const myRating =
+    myColour === null ? null : (view[myColour === "w" ? "white" : "black"]?.rating ?? null);
+  const verb = !seated ? "Played" : outcome === "win" ? "Won" : outcome === "loss" ? "Lost" : "Drew";
+  // §4.8 item 4 and the Scoresheet Rule: this line is set in mono like the rating
+  // line below it, and the rating itself is its own token, not a numeral buried in a
+  // sentence.
   const takeBackLine =
     takeBacks === 0
       ? null
-      : `${verb} with ${spellCount(takeBacks)} take-back${takeBacks === 1 ? "" : "s"}` +
-        (!seated
-          ? "."
-          : myRating === null
-            ? ", so the rating stays put."
-            : `, so the rating stays put — ${myRating}.`);
+      : {
+          text:
+            `${verb} with ${spellCount(takeBacks)} take-back${takeBacks === 1 ? "" : "s"}` +
+            (!seated ? "." : ", so the rating stays put"),
+          rating: seated && myRating !== null ? myRating : null,
+        };
+
+  // One rating line, in mono, as prose. Never alongside the take-back sentence:
+  // a take-back already unrated the game, and two answers to one question is
+  // exactly the repetition this round set out to remove.
+  const ratingLine =
+    takeBacks > 0
+      ? null
+      : rating !== null
+        ? {
+            text: `Rating ${rating.after - rating.delta} → ${rating.after}`,
+            delta: formatRatingDelta(rating.delta),
+            up: rating.delta >= 0,
+          }
+        : null;
+
+  const abandoned = game.status === "abandoned";
+  const reason = game.endReason ? formatEndReason(game.endReason).replace(/^by /, "") : null;
 
   return (
     <Dialog
       open={open}
+      modal
       onOpenChange={(next) => {
         if (!next) setDismissedFor(dismissKey);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        // §4.5: dialogs float, so they rely on the shadow alone. The shadcn port
+        // gives every popup a `ring-1` hairline; this one drops it.
+        className="gap-3 sm:max-w-md"
+        initialFocus={seat === null ? true : playAgainRef}
+      >
         <DialogHeader>
-          {/* The Fraunces face rides on a child span, not on DialogTitle itself:
-              the shadcn title already carries `font-heading text-base`, and two
-              font-family utilities on one element resolve by stylesheet order. */}
+          {/* The face and the size both ride on a child span, not on DialogTitle
+              itself: the shadcn title already carries `font-heading text-base`,
+              and a size set on the title loses to that `text-base` whichever way
+              it is spelt. The span is what the reader sees and what the dialog is
+              named by, and it sits on DESIGN.md's headline-sm step. */}
           <DialogTitle>
-            <Display level={3} as="span" className="block text-[2rem]">
+            <Display level={4} as="span" className="block">
               {headlineFor(view, seat)}
             </Display>
           </DialogTitle>
-          <DialogDescription>{detail}</DialogDescription>
+          {/* §4.8 item 4: never state the same fact twice. When the viewer has a
+              seat the verdict above already says who won ("You won"), so this line
+              carries only what the verdict does not — how it ended. Spectators and
+              local games, where the verdict is "Game over" or "Draw", still get the
+              full sentence with the names in it. */}
+          <DialogDescription>
+            {seated
+              ? reason
+                ? `${reason[0]?.toUpperCase()}${reason.slice(1)}.`
+                : detail
+              : `${detail}${
+                  reason && !detail.toLowerCase().includes(reason.toLowerCase())
+                    ? ` — ${reason}`
+                    : ""
+                }`}
+            {abandoned ? " Your opponent left the game." : ""}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {takeBacks > 0 ? null : rating !== null ? (
+        {ratingLine ? (
+          <p className="tabular font-mono text-[13px] text-muted-foreground">
+            {ratingLine.text}{" "}
             <span
-              className={cn(
-                "tabular inline-flex items-baseline gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[13px]",
-                rating.delta >= 0
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-destructive/40 bg-destructive/10 text-destructive",
-              )}
+              className={cn("font-medium", ratingLine.up ? "text-primary" : "text-destructive")}
             >
-              <span className="font-medium">{formatRatingDelta(rating.delta)}</span>
-              <span aria-hidden className="opacity-50">
-                →
-              </span>
-              <span className="sr-only">new rating</span>
-              <span className="opacity-75">{rating.after}</span>
+              {ratingLine.delta}
             </span>
-          ) : game.rated ? (
-            <Badge variant="outline">Rated</Badge>
-          ) : (
-            <Badge variant="outline">Unrated</Badge>
-          )}
-          {game.status === "abandoned" ? (
-            <Badge variant="outline">Opponent disconnected</Badge>
-          ) : null}
-          {game.endReason ? (
-            <Badge variant="ghost" className="capitalize">
-              {formatEndReason(game.endReason).replace(/^by /, "")}
-            </Badge>
-          ) : null}
-        </div>
-
-        {takeBackLine === null ? null : (
-          <p className="text-[13px] text-muted-foreground">{takeBackLine}</p>
+          </p>
+        ) : takeBackLine ? (
+          <p className="tabular font-mono text-[13px] text-muted-foreground">
+            {takeBackLine.text}
+            {takeBackLine.rating === null ? null : (
+              <>
+                {" — "}
+                <span className="font-medium text-foreground">{takeBackLine.rating}</span>
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="text-[13px] text-muted-foreground">
+            {game.rated ? "This game counted toward your rating." : "This game was unrated."}
+          </p>
         )}
 
-        <DialogFooter className="sm:justify-between">
+        {/* One order at both widths: the shadcn footer reverses its column on
+            mobile, which turned "Review game … Back to lobby, Play again" into
+            "Back to lobby, Play again … Review game" on a phone. */}
+        <DialogFooter className="flex-row flex-wrap items-center sm:justify-between">
           <Button variant="ghost" onClick={() => setDismissedFor(dismissKey)}>
             Review game
           </Button>
@@ -187,12 +214,21 @@ export function GameResultDialog({
             <Link
               prefetch={false}
               href={lobbyHref}
-              className={buttonVariants({ variant: "outline" })}
+              // Ghost, not outline: a bordered, filled control inside a dialog is a
+              // card inside a card, and this row already has its one brass action.
+              className={buttonVariants({ variant: "ghost" })}
             >
               Back to lobby
             </Link>
             {seat === null ? null : (
-              <Button disabled={playAgainPending} onClick={onPlayAgain}>
+              <Button
+                ref={playAgainRef}
+                // The brass fill is its own edge inside a dialog, so it drops the
+                // shared Button's 1px transparent border.
+                className="border-0"
+                disabled={playAgainPending}
+                onClick={onPlayAgain}
+              >
                 Play again
               </Button>
             )}

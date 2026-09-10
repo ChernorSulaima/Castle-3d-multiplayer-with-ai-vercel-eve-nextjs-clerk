@@ -54,7 +54,7 @@ export function NotationStrip({ moves, ply, className }: NotationStripProps) {
           return (
             <li key={`${index}-${san}`} className="flex shrink-0 items-center gap-1.5">
               {index % 2 === 0 ? (
-                <span className="text-muted-foreground/60">{index / 2 + 1}.</span>
+                <span className="text-muted-foreground">{index / 2 + 1}.</span>
               ) : null}
               <span
                 data-newest={newest ? "true" : "false"}

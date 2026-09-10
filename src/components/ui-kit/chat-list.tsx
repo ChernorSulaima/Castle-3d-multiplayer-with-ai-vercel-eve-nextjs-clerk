@@ -76,7 +76,10 @@ export function ChatList({
         ref={scrollerRef}
         onScroll={handleScroll}
         aria-label={label}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
+        // DESIGN.md Elevation: the chat scroll region is a cellar well that sinks
+        // back from the walnut sidebar, so the opponent's walnut bubbles read as
+        // sitting IN it rather than on it.
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-bg-sunken p-3"
       >
         {messageCount === 0 && empty ? (
           <li className="m-auto max-w-[80%] text-center text-[13px] text-muted-foreground">

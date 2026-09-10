@@ -5,11 +5,12 @@
 // 390x844) without a Clerk session. Every component below is the SAME one the
 // real page renders — only the data source is faked.
 import { useState } from "react";
-import { BotIcon, UsersIcon } from "lucide-react";
 import { AiSetup } from "@/components/play/ai-setup";
 import { LocalSetup } from "@/components/play/local-setup";
-import { QueuePanelView } from "@/components/play/find-match-panel";
+import { MatchSeatView, QueuePanelView } from "@/components/play/find-match-panel";
+import { ScoresheetView, type ScoresheetGame } from "@/components/play/scoresheet";
 import { SpectateGridView, type SpectateGame } from "@/components/play/spectate-list";
+import { TablePreview } from "@/components/play/table-preview";
 import {
   LeaderboardBody,
   type LeaderboardRow,
@@ -20,10 +21,13 @@ import { RatingSparklineView } from "@/components/profile/rating-sparkline";
 import { RecentGamesView, type RecentGame } from "@/components/profile/recent-games-table";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { SettingsPreview } from "@/components/settings/settings-preview";
-import { Display, Eyebrow, ModeCard, Section } from "@/components/ui-kit";
+import { Display, Eyebrow, Section } from "@/components/ui-kit";
 import { Tabs } from "@/components/ui/tabs";
 import type { RatingPool } from "@/lib/types";
 import type { SectionId } from "./sections";
+// The lobby's own stylesheet: the real page loads it from `mode-picker.tsx`, which
+// the harness deliberately does not mount.
+import "@/components/play/play.css";
 
 /* ------------------------------------------------------------------- fixtures */
 
@@ -85,6 +89,18 @@ const RECENT_POSITIONS: Record<string, string> = {
   r4: ITALIAN,
 };
 
+const SCORESHEET: ScoresheetGame[] = [
+  { _id: "s1", mode: "online", status: "checkmate", winner: "w", opponentName: "viktor", myColour: "w", rated: true, ratingDelta: 16 },
+  { _id: "s2", mode: "online", status: "resigned", winner: "b", opponentName: "kasparova", myColour: "w", rated: true, ratingDelta: -8 },
+  { _id: "s3", mode: "ai", difficulty: "grandmaster", status: "checkmate", winner: "w", opponentName: "Kasparova", myColour: "b", rated: false },
+  { _id: "s4", mode: "online", status: "draw", winner: "draw", opponentName: "marco", myColour: "b", rated: true, ratingDelta: 0 },
+  { _id: "s5", mode: "local", status: "checkmate", winner: "w", opponentName: "Player 2", myColour: "w", rated: false },
+  { _id: "s6", mode: "online", status: "active", opponentName: "ada", myColour: "w", rated: true },
+];
+
+/** The FR-26 reason the seats show when a game is already going. */
+const IN_GAME_REASON = "You have a game in progress. Finish or resign it first.";
+
 const NOOP = () => {};
 
 /* ---------------------------------------------------------------------- shell */
@@ -93,21 +109,28 @@ function Slice({
   id,
   eyebrow,
   title,
+  line,
   only,
   children,
 }: {
   id: SectionId;
-  eyebrow: string;
+  /** Omitted for the play slice: the lobby has no eyebrow, and the harness
+   *  must not put one above a heading the real page does not have. */
+  eyebrow?: string;
   title: string;
+  line?: string;
   only: SectionId | null;
   children: React.ReactNode;
 }) {
   if (only !== null && only !== id) return null;
   return (
     <Section width="app" padding="md" id={id} className="border-t border-border first:border-t-0">
-      <header className="mb-6 grid gap-2">
-        <Eyebrow>{eyebrow}</Eyebrow>
+      <header className="mb-8 grid gap-2">
+        {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
         <Display level={3} as="h2">{title}</Display>
+        {line ? (
+          <p className="text-[0.9375rem] leading-relaxed text-muted-foreground">{line}</p>
+        ) : null}
       </header>
       {children}
     </Section>
@@ -129,36 +152,100 @@ export function PagesGallery({ only = null }: { only?: SectionId | null }) {
         </Section>
       ) : null}
 
-      <Slice only={only} id="play" eyebrow="Choose a mode" title="Play">
-        <div className="grid items-stretch gap-4 lg:grid-cols-3">
-          <QueuePanelView elapsedMs={47_000} range={400} myRating={1482} onCancel={NOOP} onPlayAi={NOOP} />
+      <Slice only={only} id="play" title="Play" line="Take a seat.">
+        {/* The lobby of UI_UPGRADE_2 §3, in its pure form: the two columns, the
+            three seats, the waiting state frozen, the preview in its 2D fallback,
+            the board tiles and the scoresheet. The Convex-connected containers
+            (ModePicker, FindMatchPanel, SpectateList, Scoresheet) are deliberately
+            not mounted — nothing here starts a game. */}
+        <div className="lobby grid gap-12">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,34rem)_minmax(0,1fr)]">
+            <div className="lobby-seats min-w-0">
+              <MatchSeatView myRating={1482} onFind={NOOP} />
+              <AiSetup onStart={NOOP} />
+              <LocalSetup onStart={NOOP} />
+            </div>
 
-          <ModeCard
-            title="Play the AI"
-            icon={BotIcon}
-            description="Five opponents from Beginner to Grandmaster. Each one explains its moves."
-          >
-            <AiSetup onStart={NOOP} />
-          </ModeCard>
+            {/* §3.5: the preview in its 2D fallback form — the harness never
+                mounts a WebGL context, so a screenshot pass is deterministic. */}
+            <TablePreview
+              className="hidden lg:sticky lg:top-20 lg:block"
+              username="ada"
+              rating={1482}
+              roomPreset="study"
+              orientation="w"
+              onSelectRoom={NOOP}
+              force2d
+            />
+          </div>
 
-          <ModeCard
-            title="Pass and play"
-            icon={UsersIcon}
-            description="Two people, one device. The board turns to face whoever is to move."
-          >
-            <LocalSetup onStart={NOOP} />
-          </ModeCard>
+          <section aria-labelledby="harness-queue" className="grid gap-4">
+            <h2 id="harness-queue" className="lobby-title text-foreground">
+              Online seat · waiting
+            </h2>
+            <div className="lobby-seats max-w-[34rem]">
+              <QueuePanelView
+                elapsedMs={47_000}
+                range={400}
+                myRating={1482}
+                onCancel={NOOP}
+                onPlayAi={NOOP}
+              />
+            </div>
+          </section>
+
+          <section aria-labelledby="harness-deeplink" className="grid gap-4">
+            <h2 id="harness-deeplink" className="lobby-title text-foreground">
+              Seat · deep-linked from the landing
+            </h2>
+            <div className="lobby-seats max-w-[34rem]">
+              <LocalSetup onStart={NOOP} flash />
+            </div>
+          </section>
+
+          <section aria-labelledby="harness-seats-disabled" className="grid gap-4">
+            <h2 id="harness-seats-disabled" className="lobby-title text-foreground">
+              Seats · already in a game
+            </h2>
+            <div className="lobby-seats max-w-[34rem]">
+              <MatchSeatView
+                myRating={1482}
+                disabled
+                disabledReason={IN_GAME_REASON}
+                onFind={NOOP}
+              />
+              <LocalSetup onStart={NOOP} disabled disabledReason={IN_GAME_REASON} />
+            </div>
+          </section>
+
+          <section aria-labelledby="harness-boards" className="grid gap-4">
+            <h2 id="harness-boards" className="lobby-title text-foreground">
+              At the boards
+            </h2>
+            <SpectateGridView games={LIVE_GAMES} positions={LIVE_POSITIONS} />
+          </section>
+
+          <section aria-labelledby="harness-boards-empty" className="grid gap-4">
+            <h2 id="harness-boards-empty" className="lobby-title text-foreground">
+              At the boards · empty
+            </h2>
+            <SpectateGridView games={[]} />
+          </section>
+
+          <section aria-labelledby="harness-scoresheet" className="grid gap-4">
+            <h2 id="harness-scoresheet" className="lobby-title text-foreground">
+              Your recent games
+            </h2>
+            <ScoresheetView games={SCORESHEET} />
+          </section>
+
+          <section aria-labelledby="harness-scoresheet-empty" className="grid gap-4">
+            <h2 id="harness-scoresheet-empty" className="lobby-title text-foreground">
+              Your recent games · empty
+            </h2>
+            <ScoresheetView games={[]} />
+          </section>
         </div>
-
-        <section className="mt-10 grid gap-4">
-          <Eyebrow as="span">Live now</Eyebrow>
-          <SpectateGridView games={LIVE_GAMES} positions={LIVE_POSITIONS} />
-        </section>
-
-        <section className="mt-10 grid gap-4">
-          <Eyebrow as="span">Live now · empty state</Eyebrow>
-          <SpectateGridView games={[]} />
-        </section>
       </Slice>
 
       <Slice only={only} id="leaderboard" eyebrow="Rated players" title="Leaderboard">

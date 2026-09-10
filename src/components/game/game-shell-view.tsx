@@ -11,8 +11,8 @@
 // Layout, in one place so nothing remounts when it changes (§5.2): the board box
 // is the SAME element in the default and focus layouts, only its classes differ.
 // Remounting it would tear down the WebGL context and re-download the room.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDownIcon, EyeIcon, MinimizeIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDownIcon, EyeIcon, MessagesSquareIcon, MinimizeIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -35,6 +35,7 @@ import { useFullscreen } from "@/hooks/use-fullscreen";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { formatGameResult, pgnResult } from "@/lib/format";
+import { resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/ui";
 import type { Colour, GameController, ViewerRole } from "@/lib/types";
@@ -43,14 +44,18 @@ import { BoardSurface } from "./board-surface";
 import { DrawOfferDialog } from "./draw-offer-dialog";
 import { GameActionBar } from "./game-action-bar";
 import { GameMobileBar } from "./game-mobile-bar";
-import { GamePlayerRow } from "./game-player-row";
+import { GameNameplate, type NameplateLamp } from "./game-nameplate";
 import { GameResultDialog } from "./game-result-dialog";
 import { GameSheetPeek, GameSidebar, type SidebarTab } from "./game-sidebar";
 import { GameStatusPill } from "./game-status-pill";
-import { GAME_SHORTCUTS } from "./game-shortcuts";
+import { GAME_SHORTCUTS, GAME_SHORTCUTS_NOTE } from "./game-shortcuts";
 import { PromotionPicker } from "./promotion-picker";
 import { TurnOverlay } from "./turn-overlay";
 import { useIsCompact } from "./use-viewport";
+// Screen-local CSS (UI_UPGRADE_2 §1): keyframes, the turn lamp's glow and the
+// app frame's own scrollbar/caret theming, imported once from the top of the
+// screen so nothing lands in globals.css.
+import "./game.css";
 
 /** Everything the screen needs that `GameController` does not carry. */
 export interface GameShellMeta {
@@ -151,6 +156,18 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
 
   const boardView = useUiStore((s) => s.boardView);
   const webglAvailable = useUiStore((s) => s.webglAvailable);
+  const roomPreset = useUiStore((s) => s.roomPreset);
+  const roomColors = useUiStore((s) => s.roomColors);
+  // True when the column is showing the room, which is the only time the ground
+  // behind it should be tinted by one.
+  const boardIs3d = boardView === "3d" && webglAvailable !== false;
+  // The room's key light — study is a warm lamp, space a cold one, arcade magenta.
+  // A custom room has no key light of its own (it borrows Minimal's), so it uses the
+  // glow derived from its own squares instead.
+  const roomGlow = useMemo(() => {
+    const room = resolveRoom(roomPreset, roomColors);
+    return roomPreset === "custom" ? room.glow : room.lights.key.color;
+  }, [roomPreset, roomColors]);
   const layoutMode = useUiStore((s) => s.layoutMode);
   const settingsDrawerOpen = useUiStore((s) => s.settingsDrawerOpen);
   const setSettingsDrawerOpen = useUiStore((s) => s.setSettingsDrawerOpen);
@@ -179,6 +196,27 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   // §5.3's sheet is now opened, never defaulted open: at rest the panel is the
   // one-line peek strip above the action bar, so the board keeps the phone.
   const [sheetOpen, setSheetOpen] = useState(false);
+  // §4.8 item 1: fullscreen must never silence the opponent. The conversation is
+  // one pill away, and the newest thing they said sits on the board as a card
+  // the player can put down.
+  const [focusChatOpen, setFocusChatOpen] = useState(false);
+  // Read by the Escape handler, which is registered once and must not re-bind on
+  // every open/close. Written in an effect, never during render.
+  const focusChatOpenRef = useRef(focusChatOpen);
+  useEffect(() => {
+    focusChatOpenRef.current = focusChatOpen;
+  }, [focusChatOpen]);
+  // §4.8 item 1's panel is a layer, so it behaves like one: focus moves into it when
+  // it opens and comes back to the pill that opened it when it closes.
+  const chatPillRef = useRef<HTMLButtonElement>(null);
+  const panelCloseRef = useRef<HTMLButtonElement>(null);
+  const panelWasOpen = useRef(false);
+  useEffect(() => {
+    if (focusChatOpen) panelCloseRef.current?.focus();
+    else if (panelWasOpen.current) chatPillRef.current?.focus();
+    panelWasOpen.current = focusChatOpen;
+  }, [focusChatOpen]);
+  const [dismissedNote, setDismissedNote] = useState<string | null>(null);
 
   const presenceChips = usePresenceChips(meta.opponentOnline);
   const drawChips = useDrawChips(
@@ -196,7 +234,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
     presenceChips.length +
     drawChips.length +
     (controller.drawOfferFrom === null ? 0 : 1);
-  const panelHidden = focus || (compact && !sheetOpen);
+  // The focus panel counts as the panel: while it is open the player is reading the
+  // very conversation the badge is counting, so the count re-baselines the moment it
+  // opens, exactly as it already does for the mobile sheet.
+  const panelHidden = (focus && !focusChatOpen) || (compact && !sheetOpen);
   const [unreadFrom, setUnreadFrom] = useState({ hidden: panelHidden, at: messageCount });
   if (unreadFrom.hidden !== panelHidden) setUnreadFrom({ hidden: panelHidden, at: messageCount });
   const unread =
@@ -259,6 +300,14 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
     onLast: () => actions.goToPly(null),
     onHelp: () => setShortcutsOpen(true),
     onEscape: () => {
+      // The panel is a layer over the focus layout, so it is what Escape dismisses
+      // first. `useShortcuts` only skips Escape for real popups (`[data-open]`), and
+      // this panel is a plain div, so without this branch Escape tore down the whole
+      // fullscreen layout out from under an open conversation.
+      if (focusChatOpenRef.current) {
+        setFocusChatOpen(false);
+        return;
+      }
       if (useUiStore.getState().layoutMode === "focus") toggleFocus();
       else if (reviewPly !== null) actions.goToPly(null);
     },
@@ -278,14 +327,6 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
 
   const nameOf = (colour: Colour) => (colour === "w" ? view.whiteName : view.blackName);
   const playerOf = (colour: Colour) => (colour === "w" ? view.white : view.black);
-  const subtitleOf = (colour: Colour): string | undefined => {
-    if (game.mode === "ai" && game.aiColor === colour && persona) {
-      return `AI · ${persona.label}`;
-    }
-    if (game.mode === "local" && colour === "b") return "Same device";
-    return undefined;
-  };
-
   const resultText = finished
     ? formatGameResult(game.status, game.winner, game.endReason, {
         whiteName: view.whiteName,
@@ -328,6 +369,16 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const lastComment = meta.commentary.at(-1) ?? null;
   const peekText = lastChip?.text ?? lastComment?.text ?? null;
   const peekSpeaker = lastChip !== null ? null : (persona?.persona.name ?? null);
+  // §4.6's persona header line, compressed: the same vocabulary the Chat tab's plate
+  // uses, from the truth the shell already holds.
+  const peekStatus =
+    (game?.status ?? "active") !== "active"
+      ? { text: "game over", live: false }
+      : viewerRole === "spectator"
+        ? { text: "watching", live: false }
+        : seat !== null && seat !== "both" && game?.turn === seat
+          ? { text: "your move", live: true }
+          : { text: "to move", live: true };
 
   const statusPill = (
     <GameStatusPill
@@ -338,13 +389,32 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       inCheck={board.checkSquare !== null}
       canMove={controller.canMove}
       totalPlies={totalPlies}
+      // §4.8 item 6: the pill names the HALF-move being reviewed, so an arrow
+      // press always changes what it says.
+      reviewSan={reviewPly === null || reviewPly === 0 ? null : (game.moves[reviewPly - 1] ?? null)}
       resultText={resultText}
       onBackToLive={() => actions.goToPly(null)}
     />
   );
 
+  // §4.1's mode chip, one string per mode.
+  const modeChip =
+    game.mode === "ai"
+      ? `AI · ${persona?.label ?? "Computer"}`
+      : game.mode === "local"
+        ? "Local"
+        : `Online · ${game.rated ? "Rated" : "Unrated"}`;
+
+  // §4.1 / §4.8 item 6: the lamp lights for the side to move and says
+  // "reviewing" instead while the board is rewound.
+  const lampFor = (colour: Colour): NameplateLamp => {
+    if (!active || game.turn !== colour) return "off";
+    return reviewPly === null ? "to-move" : "reviewing";
+  };
+
   const sidebar = (
     <GameSidebar
+      onOpenRoom={() => setSettingsDrawerOpen(true)}
       view={view}
       mode={game.mode}
       seat={seat}
@@ -375,10 +445,62 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       offerFrom={controller.drawOfferFrom}
       seat={seat}
       pending={controller.pending}
+      // §4.8 item 2: the banner names the person, not the colour.
+      offerName={controller.drawOfferFrom === null ? null : nameOf(controller.drawOfferFrom)}
       onRespond={actions.respondDraw}
-      className={focus ? "border-primary/50 bg-card/95 shadow-soft backdrop-blur-md" : undefined}
+      // §4.5: floating layers rely on the shadow alone, so the focus copy drops
+      // the hairline the in-page banner keeps.
+      className={focus ? "border-transparent bg-card shadow-soft" : undefined}
     />
   );
+
+  // §4.8 item 1: the newest thing the opponent said, as a card on the board in
+  // the focus layout. Dismissible, outside the fading layer, desktop only — on a
+  // phone the board is already the whole screen.
+  const lastOpponentLine = isAi ? (meta.commentary.at(-1) ?? null) : null;
+  const focusNote =
+    // Not while the conversation is on screen: the card exists to carry the
+    // opponent's voice when the panel is NOT visible, and showing both put the same
+    // sentence on the board twice with one copy the player had to dismiss by hand.
+    focus &&
+    !compact &&
+    !focusChatOpen &&
+    lastOpponentLine !== null &&
+    dismissedNote !== lastOpponentLine.id ? (
+      <div className="rounded-xl bg-card p-3 shadow-soft">
+        <div className="flex items-start gap-2">
+          <span
+            aria-hidden
+            className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[12px] font-medium text-primary-foreground"
+          >
+            {(persona?.persona.name ?? "?")[0]?.toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {persona?.persona.name ?? "Opponent"}
+              </span>
+              {lastOpponentLine.ply ? (
+                <span className="tabular ml-1.5 font-mono">
+                  {Math.ceil(lastOpponentLine.ply / 2)}
+                  {lastOpponentLine.ply % 2 === 1 ? ". " : "… "}
+                </span>
+              ) : null}
+            </p>
+            <p className="text-[13px] text-foreground">{lastOpponentLine.text}</p>
+          </div>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Put this message down"
+            className="shrink-0"
+            onClick={() => setDismissedNote(lastOpponentLine.id)}
+          >
+            <XIcon aria-hidden />
+          </Button>
+        </div>
+      </div>
+    ) : undefined;
 
   const barProps = {
     mode: game.mode,
@@ -409,6 +531,9 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
         focus ? "fixed inset-0 z-50 h-[100dvh]" : "h-[calc(100dvh-3.5rem)] overflow-hidden",
       )}
       data-layout={focus ? "focus" : "default"}
+      // Scope for game.css: the app frame themes its own caret, scrollbars and
+      // selection rather than inheriting the browser's.
+      data-slot="game-frame"
     >
       {/* The screen is full-bleed by design (§5.1) — the status pill, not a title,
           carries the state — but a document with no heading at all is a dead end for
@@ -430,19 +555,35 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       >
         {/* ------------------------------------------------- board column */}
         <div className="flex min-h-0 min-w-0 flex-col lg:border-r lg:border-border">
+          {/* The plates and the board travel together. Below `lg` the square is
+              capped by the column WIDTH, so the leftover height would otherwise
+              open as dead space above and below the board with the near plate
+              stranded at the bottom of the screen; centring the GROUP puts the
+              two nameplates back against the board where they belong. The
+              wrapper is unconditional — the board box below has to stay the same
+              element in both layouts or the WebGL context is torn down (§5.2). */}
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 flex-col",
+              // In 3D the canvas fills the column (§4.2), so the plates sit at the
+              // column's edges and the room, not the page ground, fills what is left
+              // above and below the board on a phone. The 2D square still centres.
+              focus || boardIs3d ? null : "justify-center",
+            )}
+          >
           {focus ? null : (
-            <GamePlayerRow
+            <GameNameplate
               name={nameOf(far)}
               player={playerOf(far)}
               colour={far}
-              toMove={active && game.turn === far}
+              lamp={lampFor(far)}
               captured={board.captured}
-              subtitle={subtitleOf(far)}
+              modeChip={modeChip}
               stale={meta.opponentStale && seat !== null && far !== seat}
-              className="border-b border-border/60"
+              seam="bottom"
             >
               <div className="shrink-0">{statusPill}</div>
-            </GamePlayerRow>
+            </GameNameplate>
           )}
 
           {viewerRole === "spectator" && !focus ? (
@@ -468,10 +609,37 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               WIDTH, so every pixel of side padding comes straight off the board.
               The desk keeps its 8px margin, the phone gives it to the hero. */}
           <div
-            className="relative grid min-h-0 flex-1 place-items-center p-0 [container-type:size] lg:p-2"
+            className={cn(
+              "relative grid min-h-0 flex-1 place-items-center p-0 [container-type:size] lg:p-2",
+              // The cap that turns the leftover height into space the group can
+              // centre in, rather than a box that grows past the square.
+              focus || boardIs3d ? null : "max-lg:max-h-[100vw]",
+            )}
+            // §4.2 item 2: the ground the canvas dissolves INTO, tinted by the room
+            // the player is actually sitting in, so the edge of the render is not an
+            // edge you can see. No new colour: `--room-glow` is the room's own key
+            // light, mixed 18% into the page ground.
+            style={
+              boardIs3d
+                ? ({
+                    "--room-glow": roomGlow,
+                    background:
+                      "radial-gradient(ellipse 70% 60% at 50% 45%, color-mix(in oklab, var(--room-glow) 18%, var(--bg)), var(--bg) 75%)",
+                  } as React.CSSProperties)
+                : undefined
+            }
           >
             <div
-              className="relative aspect-square h-[min(100cqw,100cqh)] w-[min(100cqw,100cqh)]"
+              className={cn(
+                "relative",
+                // §4.2 item 1: the square is the 2D board's constraint, not the
+                // column's. In 3D the canvas fills the column and the camera frames
+                // by height, so the board keeps its size and the room simply runs to
+                // the edges, under the plates and up to the sidebar hairline.
+                boardIs3d
+                  ? "size-full"
+                  : "aspect-square h-[min(100cqw,100cqh)] w-[min(100cqw,100cqh)]",
+              )}
             >
               <BoardSurface {...board} />
               {game.mode === "local" ? (
@@ -487,7 +655,8 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               <FocusHud
                 autoHide={boardView === "3d"}
                 topLeft={
-                  <div className="rounded-full border border-border bg-card/90 px-3 py-1.5 shadow-soft backdrop-blur-md">
+                  // §4.5: it floats, so it takes the shadow and drops the hairline.
+                  <div className="rounded-full bg-card px-3 py-1.5 shadow-soft">
                     <PlayerChip
                       size="sm"
                       name={nameOf(game.turn)}
@@ -495,39 +664,43 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                       rating={playerOf(game.turn)?.rating ?? null}
                       side={game.turn}
                       toMove={active}
+                      toMoveLabel={reviewPly === null ? "to move" : "reviewing"}
                       subtitle={active ? undefined : resultText}
                     />
                   </div>
                 }
-                topCenter={drawOfferOpen ? drawOffer : undefined}
+                aside={focusNote}
+                topCenter={
+                  // §4.8 item 1: the status — Check included — never hides with
+                  // the HUD, so it lives outside the fading layer alongside
+                  // anything still waiting on an answer.
+                  <div className="flex flex-col items-center gap-2">
+                    {statusPill}
+                    {drawOfferOpen ? drawOffer : null}
+                  </div>
+                }
                 // Outside the fading layer on purpose: the way out, and the way
                 // to find out what the keys do, are the two things that must
                 // never be a guess on a screen with no header (§5.2).
                 persistent={
                   <>
+                    {/* §4.5: every one of these floats, so each keeps the soft
+                        shadow and drops the 1px hairline. The surface is opaque
+                        enough (95%) to hold 4.5:1 over a lit board. */}
                     <Button
-                      size="icon"
+                      ref={chatPillRef}
                       variant="ghost"
-                      aria-label="Keyboard shortcuts"
-                      className="border border-border bg-card/85 shadow-soft backdrop-blur-md"
-                      onClick={() => setShortcutsOpen(true)}
-                    >
-                      <Kbd aria-hidden className="border-0 bg-transparent px-0">
-                        ?
-                      </Kbd>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="relative border border-border bg-card/85 shadow-soft backdrop-blur-md"
+                      className="relative bg-card shadow-soft"
                       aria-label={
                         unread === 0
-                          ? undefined
-                          : `Exit fullscreen, ${unread} new ${unread === 1 ? "message" : "messages"}`
+                          ? "Chat"
+                          : `Chat, ${unread} new ${unread === 1 ? "message" : "messages"}`
                       }
-                      onClick={toggleFocus}
+                      aria-expanded={focusChatOpen}
+                      onClick={() => setFocusChatOpen((open) => !open)}
                     >
-                      <MinimizeIcon aria-hidden />
-                      Exit fullscreen
+                      <MessagesSquareIcon aria-hidden />
+                      <span aria-hidden>Chat</span>
                       {unread === 0 ? null : (
                         <span
                           aria-hidden
@@ -537,6 +710,25 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                         </span>
                       )}
                     </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Keyboard shortcuts"
+                      className="bg-card shadow-soft"
+                      onClick={() => setShortcutsOpen(true)}
+                    >
+                      <Kbd aria-hidden className="border-0 bg-transparent px-0">
+                        ?
+                      </Kbd>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="bg-card shadow-soft"
+                      onClick={toggleFocus}
+                    >
+                      <MinimizeIcon aria-hidden />
+                      Exit fullscreen
+                    </Button>
                   </>
                 }
                 bottom={<GameActionBar {...barProps} variant="focus" />}
@@ -545,17 +737,18 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
           </div>
 
           {focus ? null : (
-            <GamePlayerRow
+            <GameNameplate
               name={nameOf(near)}
               player={playerOf(near)}
               colour={near}
-              toMove={active && game.turn === near}
+              lamp={lampFor(near)}
               captured={board.captured}
-              subtitle={subtitleOf(near)}
+              watching={meta.spectatorCount}
               stale={meta.opponentStale && seat !== null && near !== seat}
-              className="border-t border-border/60"
+              seam="top"
             />
           )}
+          </div>
 
           {/* §5.3 calls this "sticky": with the column pinned to one viewport it is
               always the last visible row, so plain flow does the job without a
@@ -568,7 +761,14 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                   {sheetOpen ? null : (
                     <GameSheetPeek
                       speaker={peekSpeaker}
+                      speakerMeta={
+                        peekSpeaker === null || persona === null
+                          ? null
+                          : `${persona.label} · ${persona.aiRating}`
+                      }
                       text={peekText}
+                      status={peekStatus.text}
+                      statusLive={peekStatus.live}
                       quiet={isAi ? "Chat, moves and game info" : "Moves and game info"}
                       unread={unread}
                       onExpand={() => setSheetOpen(true)}
@@ -593,6 +793,35 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
         )}
       </div>
 
+      {/* ------------------------------------------- focus conversation
+          §4.8 item 1: the same three tabs, as an overlay panel, so a fullscreen
+          player can read what the opponent said and answer a draw without
+          leaving the layout. Only ever ONE GameSidebar is mounted — the aside
+          and the mobile sheet are both absent in focus. */}
+      {focus && focusChatOpen ? (
+        <div
+          role="dialog"
+          aria-label="Game panel"
+          // Starts below the persistent cluster so the way OUT of fullscreen is
+          // never covered by the panel (WCAG 2.2 "focus not obscured", and
+          // DESIGN.md's rule that the exit is never a guess).
+          className="absolute top-14 right-0 bottom-0 z-40 flex w-full flex-col rounded-tl-xl bg-card shadow-soft sm:max-w-sm"
+        >
+          <div className="flex shrink-0 items-center justify-end p-1.5">
+            <Button
+              ref={panelCloseRef}
+              size="icon"
+              variant="ghost"
+              aria-label="Hide the game panel"
+              onClick={() => setFocusChatOpen(false)}
+            >
+              <XIcon aria-hidden />
+            </Button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{sidebar}</div>
+        </div>
+      ) : null}
+
       {/* ------------------------------------------- mobile bottom sheet */}
       {compact && !focus ? (
         <Drawer
@@ -610,6 +839,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               the board never loses the screen to a sheet nobody opened. */}
           <DrawerContent
             aria-label="Game panel"
+            // §4.5: this screen animates no box dimension. The sheet is a fixed
+            // size and slides on a transform, so trimming the property list to
+            // transform/opacity/filter costs nothing and clears the detector.
+            className="transition-[transform,opacity,filter]"
             style={{ "--drawer-height": "60dvh" } as React.CSSProperties}
           >
             <DrawerHeader className="sr-only">
@@ -642,7 +875,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
           open={settingsDrawerOpen}
           onOpenChange={meta.onRoomOpenChange ?? setSettingsDrawerOpen}
         >
-          <DrawerContent className="max-h-[85dvh]">
+          <DrawerContent className="max-h-[85dvh] transition-[transform,opacity,filter]">
             <DrawerHeader>
               <DrawerTitle>Board &amp; room settings</DrawerTitle>
               <DrawerDescription>
@@ -656,6 +889,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
 
       <ShortcutsDialog
         shortcuts={GAME_SHORTCUTS}
+        note={GAME_SHORTCUTS_NOTE}
         open={shortcutsOpen}
         onOpenChange={setShortcutsOpen}
       />

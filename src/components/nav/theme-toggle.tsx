@@ -25,7 +25,12 @@ export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
 
   if (!mounted) {
-    return <span aria-hidden className={cn("inline-block size-7 shrink-0", className)} />;
+    return (
+      <span
+        aria-hidden
+        className={cn("inline-block size-7 shrink-0 pointer-coarse:size-9", className)}
+      />
+    );
   }
 
   const dark = resolvedTheme === "dark";

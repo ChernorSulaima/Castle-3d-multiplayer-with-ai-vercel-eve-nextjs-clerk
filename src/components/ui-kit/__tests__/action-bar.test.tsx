@@ -36,6 +36,14 @@ describe("ActionBar", () => {
     const markup = renderToStaticMarkup(<ActionBar label="Game actions" variant="focus" />);
     expect(rootClasses(markup)).toContain("shadow-soft");
   });
+
+  it("drops the hairline once it floats — UI_UPGRADE_2 §4.5", () => {
+    // A 1px edge under a 60px blur is the generated-UI signature the detector
+    // calls `gpt-thin-border-wide-shadow`. Structure gets the edge; floating
+    // layers get the shadow, and never both.
+    const markup = renderToStaticMarkup(<ActionBar label="Game actions" variant="focus" />);
+    expect(rootClasses(markup)).not.toContain("border-border");
+  });
 });
 
 describe("ActionGroup", () => {
@@ -54,6 +62,11 @@ describe("ActionButton", () => {
     expect(markup).toContain("h-8");
     // shadcn's `sm` size, which the bar used to take, is 28px.
     expect(markup).not.toContain("h-7");
+  });
+
+  it("holds a 36px floor wherever the pointer is a thumb (§4.8 item 3)", () => {
+    const markup = renderToStaticMarkup(<ActionButton icon={FlagIcon} label="Resign" />);
+    expect(markup).toContain("pointer-coarse:min-h-9");
   });
 
   it("keeps the label in the accessible name once it is visually hidden", () => {

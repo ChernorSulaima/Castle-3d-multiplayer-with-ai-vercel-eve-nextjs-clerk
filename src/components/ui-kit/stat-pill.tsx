@@ -37,16 +37,13 @@ export function StatPill({
       {...props}
     >
       {dot ? (
-        <span
-          aria-hidden
-          className={cn(
-            "size-1.5 shrink-0 rounded-full bg-current",
-            tone === "live" && "motion-safe:animate-pulse",
-          )}
-        />
+        // A steady baize dot, not a blinking one: DESIGN.md asks for "a leading
+        // baize dot when the chip means live", and a dot that throbs next to a
+        // 3D board is one more thing moving on a screen that already moves.
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
       ) : null}
       <span className="tabular font-medium">{value}</span>
-      {label ? <span className="opacity-80">{label}</span> : null}
+      {label ? <span>{label}</span> : null}
     </span>
   );
 }

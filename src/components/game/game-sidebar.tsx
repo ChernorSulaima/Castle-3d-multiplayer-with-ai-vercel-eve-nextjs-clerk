@@ -15,6 +15,7 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
+  SettingsIcon,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -35,6 +36,8 @@ import { MoveList } from "@/components/ui-kit";
 import { PIECE_MODEL_CREDIT } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { formatDateTime, formatMode, pluralize } from "@/lib/format";
+import { resolveRoom } from "@/lib/rooms";
+import { useUiStore } from "@/lib/stores/ui-store";
 import { cn, focusRing } from "@/lib/ui";
 import type {
   Colour,
@@ -67,6 +70,8 @@ export interface GameSidebarProps {
   hint: ChatHintState;
   spectatorCount: number;
   onRetryEngine?(): void;
+  /** Opens the Board & room drawer from the Info tab's ghost actions (§4.4). */
+  onOpenRoom?(): void;
   tab: SidebarTab;
   onTabChange(tab: SidebarTab): void;
   className?: string;
@@ -89,9 +94,12 @@ function ReplayControls({
   const live = reviewPly === null;
 
   return (
-    <div className="flex items-center gap-1" role="group" aria-label="Replay controls">
+    // §4.4: the autoplay controls sit in a 36px row. `icon-lg` is the 36px token;
+    // `disabled` is honest here — a first move that does not exist yet has no
+    // reason worth a tooltip, and the arrows say so by going quiet.
+    <div className="flex h-9 items-center gap-1" role="group" aria-label="Replay controls">
       <Button
-        size="icon-sm"
+        size="icon-lg"
         variant="ghost"
         aria-label="First move"
         disabled={totalPlies === 0 || atStart}
@@ -100,7 +108,7 @@ function ReplayControls({
         <ChevronFirstIcon />
       </Button>
       <Button
-        size="icon-sm"
+        size="icon-lg"
         variant="ghost"
         aria-label="Previous move"
         disabled={totalPlies === 0 || atStart}
@@ -109,7 +117,7 @@ function ReplayControls({
         <ChevronLeftIcon />
       </Button>
       <Button
-        size="sm"
+        size="lg"
         variant={autoplay ? "secondary" : "ghost"}
         aria-pressed={autoplay}
         disabled={totalPlies === 0}
@@ -119,7 +127,7 @@ function ReplayControls({
         {autoplay ? "Pause" : "Autoplay"}
       </Button>
       <Button
-        size="icon-sm"
+        size="icon-lg"
         variant="ghost"
         aria-label="Next move"
         disabled={live}
@@ -128,7 +136,7 @@ function ReplayControls({
         <ChevronRightIcon />
       </Button>
       <Button
-        size="icon-sm"
+        size="icon-lg"
         variant="ghost"
         aria-label="Latest position"
         disabled={live}
@@ -227,7 +235,7 @@ function MovesTab({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-bg-sunken">
         <MoveList
           rows={history}
           currentPly={reviewPly ?? totalPlies}
@@ -248,7 +256,7 @@ function MovesTab({
         />
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-border p-3">
+      <div className="flex flex-col gap-2 border-t border-border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <ReplayControls
             reviewPly={reviewPly}
@@ -259,7 +267,17 @@ function MovesTab({
           {reviewPly === null ? <LivePositionNote /> : null}
         </div>
         {seat !== null ? (
-          <SanInput disabled={!canMove || pending} onSubmitSan={actions.submitSan} />
+          <SanInput
+            disabled={!canMove || pending}
+            disabledReason={
+              pending
+                ? "That move is still on its way."
+                : reviewPly !== null
+                  ? "You are reviewing an earlier position. Go back to live to play."
+                  : "It is not your move yet."
+            }
+            onSubmitSan={actions.submitSan}
+          />
         ) : null}
       </div>
     </div>
@@ -309,15 +327,26 @@ function CreditLink({ href, children }: { href: string; children: React.ReactNod
 function InfoTab({
   view,
   mode,
+  seat,
   totalPlies,
   spectatorCount,
   actions,
-}: Pick<GameSidebarProps, "view" | "mode" | "totalPlies" | "spectatorCount" | "actions">) {
+  onOpenRoom,
+}: Pick<
+  GameSidebarProps,
+  "view" | "mode" | "seat" | "totalPlies" | "spectatorCount" | "actions" | "onOpenRoom"
+>) {
   const { game } = view;
   const difficulty = game.difficulty ? DIFFICULTIES[game.difficulty] : null;
+  // Client state, not Convex: the sidebar stays pure enough for /dev/game.
+  const roomPreset = useUiStore((s) => s.roomPreset);
+  const roomColors = useUiStore((s) => s.roomColors);
+  const resolvedTier = useUiStore((s) => s.resolvedTier);
+  const qualityTier = useUiStore((s) => s.qualityTier);
+  const room = resolveRoom(roomPreset, roomColors);
 
   // "Rated: Yes/No" is a database column, not an answer. The player is asking one
-  // question — does this game move my rating? — so the panel answers it in a
+  // question — does this game move my rating? — so the card answers it in a
   // sentence, and says WHY when the answer is no (FR-43 unrates on a take-back).
   const ratingNote =
     mode === "local"
@@ -328,9 +357,41 @@ function InfoTab({
           ? "This game counts toward your rating."
           : "This game does not count toward your rating.";
 
+  // Who the VIEWER is playing, which is only knowable from their own seat: a player
+  // sat as Black was previously shown their own name and their own rating here. In a
+  // local game (`seat === "both"`) and for a spectator (`seat === null`) there is no
+  // "opponent" to name, and the White and Black rows below already say who is playing,
+  // so the row is dropped rather than guessed.
+  const opponentSide: Colour | null =
+    mode === "ai" ? "b" : seat === "w" ? "b" : seat === "b" ? "w" : null;
+  const opponentName =
+    mode === "ai"
+      ? (difficulty?.persona.name ?? "The AI")
+      : opponentSide === "w"
+        ? view.whiteName
+        : view.blackName;
+  const opponentPlayer = opponentSide === "w" ? view.white : view.black;
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-3">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-card p-3">
+      {/* §4.4: the Info tab is a MATCH CARD — one definition list, no boxes
+          inside boxes, each row a fact a player might actually ask for. */}
       <dl className="divide-y divide-border/60">
+        <InfoRow label="Mode">{formatMode(game.mode)}</InfoRow>
+        {opponentSide !== null || mode === "ai" ? (
+          <InfoRow label="Opponent">
+            <span className="font-medium">{opponentName}</span>
+            {difficulty ? (
+              <span className="tabular ml-1.5 font-mono text-muted-foreground">
+                {difficulty.label} · {difficulty.aiRating}
+              </span>
+            ) : opponentPlayer ? (
+              <span className="tabular ml-1.5 font-mono text-muted-foreground">
+                {opponentPlayer.rating}
+              </span>
+            ) : null}
+          </InfoRow>
+        ) : null}
         <InfoRow label="White">
           <span className="font-medium">{view.whiteName}</span>
           {view.white ? (
@@ -347,27 +408,33 @@ function InfoTab({
             </span>
           ) : null}
         </InfoRow>
-        <InfoRow label="Mode">{formatMode(game.mode)}</InfoRow>
-        {difficulty ? (
-          <InfoRow label="Difficulty">
-            {difficulty.label}
-            <span className="ml-1.5 text-muted-foreground">{difficulty.persona.name}</span>
-          </InfoRow>
-        ) : null}
-        <div className="py-1.5">
-          <dt className="sr-only">Rating</dt>
-          <dd className="text-[13px] text-muted-foreground">{ratingNote}</dd>
-        </div>
+        <InfoRow label="Rating">{ratingNote}</InfoRow>
         {game.undoCount > 0 ? (
           <InfoRow label="Take-backs">
             <span className="tabular font-mono">{game.undoCount}</span>
           </InfoRow>
         ) : null}
+        <InfoRow label="Room">{room.label}</InfoRow>
+        <InfoRow label="Quality">
+          <span className="capitalize">{resolvedTier}</span>
+          {qualityTier === "auto" ? (
+            <span className="ml-1.5 text-muted-foreground">chosen for you</span>
+          ) : null}
+        </InfoRow>
+        <InfoRow label="Watching">
+          {/* Host voice names the state, it does not count to zero. The nameplate's
+              spectator chip already follows this rule. */}
+          {spectatorCount > 0
+            ? pluralize(spectatorCount, "person", "people")
+            : "Nobody yet"}
+        </InfoRow>
         <InfoRow label="Started">{formatDateTime(game.createdAt)}</InfoRow>
         <InfoRow label="Moves">
           <span className="tabular font-mono">{totalPlies}</span>
         </InfoRow>
-        <InfoRow label="Watching">{pluralize(Math.max(0, spectatorCount), "person", "people")}</InfoRow>
+        <InfoRow label="Game id">
+          <span className="tabular truncate font-mono text-muted-foreground">{game._id}</span>
+        </InfoRow>
         {view.white || view.black ? (
           <InfoRow label="Profiles">
             <span className="flex flex-wrap justify-end gap-2">
@@ -381,7 +448,7 @@ function InfoTab({
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={() => {
             void actions.copyPgn();
           }}
@@ -389,10 +456,16 @@ function InfoTab({
           <CopyIcon aria-hidden />
           Copy PGN
         </Button>
-        <Button size="sm" variant="outline" onClick={actions.downloadPgn}>
+        <Button size="sm" variant="ghost" onClick={actions.downloadPgn}>
           <DownloadIcon aria-hidden />
-          Download
+          Download PGN
         </Button>
+        {onOpenRoom ? (
+          <Button size="sm" variant="ghost" onClick={onOpenRoom}>
+            <SettingsIcon aria-hidden />
+            Board &amp; room settings
+          </Button>
+        ) : null}
       </div>
 
       {/* MANDATORY (§I-7): the piece models are CC BY 3.0, so this credit is a
@@ -415,10 +488,17 @@ function InfoTab({
 export interface GameSheetPeekProps {
   /** Who spoke the newest line, or null when it is one of the centred system chips. */
   speaker: string | null;
+  /** The persona plate's mono line ("Beginner · 800"), shown when there is room
+   *  — §4.6: "the sheet peek shows the persona header line and the last bubble". */
+  speakerMeta?: string | null;
   /** The newest line in the panel; null until something has been said. */
   text: string | null;
   /** What the strip offers while the panel is quiet, e.g. "Moves and game info". */
   quiet: string;
+  /** The game's live truth beside the name — "your move", "to move", "watching". */
+  status?: string | null;
+  /** True when `status` means "happening now" (Live Green): it gets the baize dot. */
+  statusLive?: boolean;
   /** How many lines have arrived since the reader last had the panel open. */
   unread?: number;
   onExpand(): void;
@@ -435,8 +515,11 @@ export interface GameSheetPeekProps {
  */
 export function GameSheetPeek({
   speaker,
+  speakerMeta,
   text,
   quiet,
+  status = null,
+  statusLive = false,
   unread = 0,
   onExpand,
   className,
@@ -454,28 +537,46 @@ export function GameSheetPeek({
       onClick={onExpand}
       aria-label={unread === 0 ? label : `${label} (${pluralize(unread, "new line", "new lines")})`}
       className={cn(
-        "flex h-11 w-full shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 text-left",
+        "flex min-h-11 w-full shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 text-left",
         "transition-colors hover:bg-accent/40",
         focusRing,
         className,
       )}
     >
-      {text === null ? (
-        <span aria-hidden className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
-          {quiet}
-        </span>
-      ) : (
-        <>
-          {speaker === null ? null : (
-            <span aria-hidden className="shrink-0 text-[13px] font-medium text-foreground">
-              {speaker}
-            </span>
-          )}
-          <span aria-hidden className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
-            {text}
+      {/* §4.6: "the persona header line and the last bubble" — two lines, the same
+          plate the Chat tab opens with, so the peek is a compressed header rather
+          than a bare name in front of a sentence. */}
+      <span className="min-w-0 flex-1">
+        <span aria-hidden className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0 text-[13px] font-medium text-foreground">
+            {speaker ?? "Game panel"}
           </span>
-        </>
-      )}
+          {speakerMeta ? (
+            <span className="tabular shrink-0 truncate font-mono text-[12px] text-muted-foreground">
+              {speakerMeta}
+            </span>
+          ) : null}
+          {status ? (
+            <span
+              className={cn(
+                "ml-auto flex shrink-0 items-center gap-1 text-[12px]",
+                statusLive ? "text-live" : "text-muted-foreground",
+              )}
+            >
+              {statusLive ? (
+                <span className="size-1.5 shrink-0 rounded-full bg-current" />
+              ) : null}
+              {status}
+            </span>
+          ) : null}
+        </span>
+        <span
+          aria-hidden
+          className="mt-0.5 block truncate text-[13px] text-muted-foreground"
+        >
+          {text ?? quiet}
+        </span>
+      </span>
       {unread > 0 ? (
         <span
           aria-hidden
@@ -508,16 +609,51 @@ export function GameSidebar({
   hint,
   spectatorCount,
   onRetryEngine,
+  onOpenRoom,
   tab,
   onTabChange,
   className,
 }: GameSidebarProps) {
   const { game } = view;
-  const persona = game.difficulty ? DIFFICULTIES[game.difficulty].persona.name : "The AI";
+  const difficulty = game.difficulty ? DIFFICULTIES[game.difficulty] : null;
+  const persona = difficulty?.persona.name ?? "The AI";
   const humanColour: Colour | undefined =
     game.aiColor === undefined ? undefined : game.aiColor === "w" ? "b" : "w";
   const moverLabel =
     seat === null ? (humanColour === "w" ? view.whiteName : view.blackName) : "You";
+
+  // §4.4's persona plate. In an online game the "persona" is the other player and
+  // the mono line is their pool and rating; in a local game both seats are here.
+  const opponentColour: Colour | undefined =
+    mode === "ai" ? game.aiColor : seat === "w" ? "b" : seat === "b" ? "w" : undefined;
+  const chatName =
+    mode === "ai"
+      ? persona
+      : mode === "local"
+        ? "This table"
+        : opponentColour === "w"
+          ? view.whiteName
+          : view.blackName;
+  const chatMeta =
+    mode === "ai"
+      ? difficulty
+        ? `${difficulty.label} · ${difficulty.aiRating}`
+        : undefined
+      : mode === "local"
+        ? "Same device"
+        : (() => {
+            const player = opponentColour === "w" ? view.white : view.black;
+            return player ? `Online · ${player.rating}` : "Online";
+          })();
+  const finished = game.status !== "active" && game.status !== "waiting";
+  const chatTurn: "you" | "opponent" | "none" =
+    seat === null || finished
+      ? "none"
+      : seat === "both"
+        ? "you"
+        : game.turn === seat
+          ? "you"
+          : "opponent";
 
   return (
     <Tabs
@@ -551,6 +687,11 @@ export function GameSidebar({
           systemChips={systemChips}
           hint={hint}
           onRetryEngine={onRetryEngine}
+          personaHeaderName={chatName}
+          personaMeta={chatMeta}
+          turn={chatTurn}
+          spectating={seat === null}
+          finished={finished}
         />
       </TabsContent>
 
@@ -581,9 +722,11 @@ export function GameSidebar({
         <InfoTab
           view={view}
           mode={mode}
+          seat={seat}
           totalPlies={totalPlies}
           spectatorCount={spectatorCount}
           actions={actions}
+          onOpenRoom={onOpenRoom}
         />
       </TabsContent>
     </Tabs>

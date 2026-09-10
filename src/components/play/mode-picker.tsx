@@ -1,8 +1,10 @@
 "use client";
-// src/components/play/mode-picker.tsx  [U4]
-// The /play lobby of UI_REDESIGN §6: three mode cards with their setup inline,
-// the queue panel replacing the matchmaking card while searching, and the
-// "Live now" spectate grid underneath.
+// src/components/play/mode-picker.tsx  [U5]
+// The lobby of UI_UPGRADE_2 §3: choose a seat on the left, see your table on the
+// right. Three seats stacked on the espresso ground, all visible on load, nothing
+// behind a tab or a modal; a live preview of the player's own board in the
+// player's own room from 1024px up; the live boards and the player's scoresheet
+// beneath.
 //
 // The FR-24 auto-redirect is unchanged: `games.myActiveGame` is a live
 // subscription, so when `queue.pair` creates the game BOTH clients see the id
@@ -11,22 +13,29 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { BotIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { buttonVariants } from "@/components/ui/button";
-import { ModeCard } from "@/components/ui-kit";
-import { AiSetup } from "@/components/play/ai-setup";
+import { AiSetup, type ColourChoice } from "@/components/play/ai-setup";
 import { FindMatchPanel } from "@/components/play/find-match-panel";
 import { LocalSetup } from "@/components/play/local-setup";
+import { Scoresheet } from "@/components/play/scoresheet";
 import { SpectateList } from "@/components/play/spectate-list";
-import type { Colour, Difficulty, GameId } from "@/lib/types";
+import { TablePreview } from "@/components/play/table-preview";
+import { DEFAULT_ROOM } from "@/lib/rooms";
+import type { Colour, Difficulty, GameId, RoomPresetId } from "@/lib/types";
 import { describeConvexError } from "@/components/providers/convex-errors";
+import { cn } from "@/lib/ui";
+import { DESKTOP_QUERY, useMediaQuery } from "./use-viewport";
+import "./play.css";
 
 const QUEUE_NOTICE =
-  "Starting an AI game takes you out of the matchmaking queue — a player can only have one game going at a time.";
+  "Starting an AI game takes you out of the queue — a player can only have one game going at a time.";
 
-/** The modes the landing page deep-links to with `/play?mode=…` (§3). */
+const IN_GAME_REASON = "You have a game in progress. Finish or resign it first.";
+const CHECKING_REASON = "Checking your games…";
+
+/** The modes the landing page deep-links to with `/play?mode=…` (§3.2). */
 type Mode = "match" | "ai" | "local";
 
 const MODE_ALIASES: Record<string, Mode> = {
@@ -38,6 +47,9 @@ const MODE_ALIASES: Record<string, Mode> = {
   local: "local",
   pass: "local",
 };
+
+/** How long the deep-linked seat keeps its brass ring (§3.2). */
+const FLASH_MS = 1000;
 
 function modeFromParam(raw: string | null): Mode | null {
   if (raw === null) return null;
@@ -53,17 +65,29 @@ export function ModePicker() {
   const leaveQueue = useMutation(api.queue.leave);
   const createAiGame = useMutation(api.games.createAiGame);
   const createLocalGame = useMutation(api.games.createLocalGame);
+  const updateSettings = useMutation(api.players.updateSettings);
 
-  // §6: "honour ?mode= deep links from the landing by expanding that card". The
-  // highlight is the only thing the parameter drives — every card stays usable.
-  const deepLinked = modeFromParam(searchParams.get("mode"));
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
 
   const [aiNotice, setAiNotice] = useState<string | undefined>(undefined);
   const [starting, setStarting] = useState<Mode | null>(null);
+  /** The seat the player last touched. Null until they touch one (§3.2). */
+  const [seatFromUser, setSeatFromUser] = useState<Mode | null>(null);
+  /** The deep link whose one-second ring has already been spent. */
+  const [flashSpent, setFlashSpent] = useState<Mode | null>(null);
+  /** Mirrors the AI seat's colour so the preview turns the board with it. */
+  const [aiColour, setAiColour] = useState<ColourChoice>("w");
+  /** Optimistic room, so the swatch and the canvas move before the write lands. */
+  const [roomOverride, setRoomOverride] = useState<RoomPresetId | null>(null);
+  const [roomBusy, setRoomBusy] = useState(false);
+
+  const seatsRef = useRef<HTMLDivElement | null>(null);
 
   // FR-26: the server refuses a second game (`already-in-game`), so the controls
   // that would start one are disabled rather than left to fail on submit.
   const hasActiveGame = Boolean(activeGameId);
+  const roomPreset: RoomPresetId = roomOverride ?? me?.roomPreset ?? DEFAULT_ROOM;
+  const previewOrientation: Colour = aiColour === "b" ? "b" : "w";
 
   // "unset" until the first subscription value lands. A game that already exists
   // when the page opens is offered as "Resume", never force-navigated — only a
@@ -93,6 +117,24 @@ export function ModePicker() {
       router.push(`/game/${activeGameId}`);
     }
   }, [activeGameId, router]);
+
+  // §3.2: a `?mode=` deep link scrolls the matching seat into view and gives it
+  // the brass ring for one second. The seats stay usable throughout, so this is a
+  // pointer, never a filter — and both derived values are computed during render,
+  // so the deep link never costs a second pass.
+  const deepLinked = modeFromParam(searchParams.get("mode"));
+  const focusedSeat: Mode = seatFromUser ?? deepLinked ?? "match";
+  const flashed: Mode | null =
+    deepLinked !== null && flashSpent !== deepLinked ? deepLinked : null;
+
+  useEffect(() => {
+    if (deepLinked === null) return;
+    seatsRef.current
+      ?.querySelector<HTMLElement>(`[data-seat="${deepLinked}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const id = window.setTimeout(() => setFlashSpent(deepLinked), FLASH_MS);
+    return () => window.clearTimeout(id);
+  }, [deepLinked]);
 
   async function startAi(difficulty: Difficulty, playerColor: Colour) {
     if (starting !== null) return;
@@ -132,85 +174,135 @@ export function ModePicker() {
       return;
     }
     setAiNotice(QUEUE_NOTICE);
+    setSeatFromUser("ai");
   }
 
-  /** The brass ring the deep link puts on one card. */
-  const ring = (mode: Mode) =>
-    deepLinked === mode ? "border-primary ring-2 ring-primary/30" : undefined;
+  /** §3.3: the room row persists the choice, so it is already set in the game. */
+  async function chooseRoom(room: Exclude<RoomPresetId, "custom">) {
+    setRoomOverride(room);
+    if (!isAuthenticated) return;
+    setRoomBusy(true);
+    try {
+      await updateSettings({ roomPreset: room });
+    } catch (error) {
+      setRoomOverride(null);
+      toast.error(describeConvexError(error, "Could not save the room. Try again."));
+    } finally {
+      setRoomBusy(false);
+    }
+  }
+
+  // `myActiveGame` is a live subscription; until its first value lands the lobby
+  // does not know whether this player may start a game, so the seats wait. Without
+  // this, a click in the first second after sign-in raced the subscription: the
+  // mutation failed with `already-in-game`, and the FR-24 redirect then carried the
+  // player into their old game as if the click had worked.
+  // Also true before the Convex handshake finishes: `/play` is behind Clerk, so a
+  // signed-out visitor never gets here, and `isAuthenticated === false` on this
+  // route means "not yet", during which every query is skipped and nothing is known.
+  const checking = !isAuthenticated || activeGameId === undefined;
+  const disabledReason = hasActiveGame ? IN_GAME_REASON : checking ? CHECKING_REASON : undefined;
+  const seatsDisabled = checking || hasActiveGame || starting !== null;
 
   return (
-    <div className="grid gap-10">
+    <div className="lobby grid gap-12">
       {activeGameId ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/8 px-4 py-3">
-          <p className="text-sm text-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[0.75rem] bg-primary/10 px-4 py-3">
+          <p className="lobby-body text-foreground">
             You have a game in progress. Finish or resign it before starting another.
           </p>
           <Link
             prefetch={false}
             href={`/game/${activeGameId}`}
-            className={buttonVariants({ size: "sm" })}
+            className={cn(buttonVariants({ size: "lg" }), "cursor-pointer py-2")}
           >
             Resume game
           </Link>
         </div>
       ) : null}
 
-      {/* The visible label for this band is the page eyebrow ("Choose a mode"),
-          so the heading that keeps the outline intact is screen-reader only —
-          without it the ModeCard <h3>s would follow the page <h1> directly. */}
-      <section aria-labelledby="ways-to-play" className="grid gap-4">
-        <h2 id="ways-to-play" className="sr-only">
-          Ways to play
-        </h2>
-        <div className="grid items-stretch gap-4 lg:grid-cols-3">
-          {/* Renders the mode card, or the queue panel in its place while searching. */}
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,34rem)_minmax(0,1fr)]">
+        <div
+          ref={seatsRef}
+          className="lobby-seats min-w-0"
+          onFocusCapture={(event) => {
+            const seat = (event.target as HTMLElement).closest<HTMLElement>("[data-seat]");
+            const mode = seat?.dataset.seat as Mode | undefined;
+            if (mode) setSeatFromUser(mode);
+          }}
+          onPointerDownCapture={(event) => {
+            const seat = (event.target as HTMLElement).closest<HTMLElement>("[data-seat]");
+            const mode = seat?.dataset.seat as Mode | undefined;
+            if (mode) setSeatFromUser(mode);
+          }}
+        >
           <FindMatchPanel
+            seat="match"
             enabled={isAuthenticated}
             myRating={me?.ratingHuman ?? null}
-            disabled={hasActiveGame || starting !== null}
+            disabled={seatsDisabled}
+            disabledReason={disabledReason}
+            primary={focusedSeat !== "ai"}
+            flash={flashed === "match"}
             onPlayAi={playAiFromQueue}
-            className={ring("match")}
           />
 
-          <ModeCard
-            title="Play the AI"
-            icon={BotIcon}
-            description="Five opponents from Beginner to Grandmaster. Each one explains its moves."
-            className={ring("ai")}
-          >
-            <AiSetup
-              onStart={startAi}
-              starting={starting === "ai"}
-              disabled={hasActiveGame || starting !== null}
-              notice={aiNotice}
-            />
-          </ModeCard>
+          <AiSetup
+            seat="ai"
+            onStart={startAi}
+            starting={starting === "ai"}
+            disabled={seatsDisabled}
+            disabledReason={disabledReason}
+            notice={aiNotice}
+            primary={focusedSeat === "ai"}
+            flash={flashed === "ai"}
+            onColourChange={setAiColour}
+          />
 
-          <ModeCard
-            title="Pass and play"
-            icon={UsersIcon}
-            description="Two people, one device. The board turns to face whoever is to move."
-            className={ring("local")}
-          >
-            <LocalSetup
-              onStart={startLocal}
-              starting={starting === "local"}
-              disabled={hasActiveGame || starting !== null}
-            />
-          </ModeCard>
+          <LocalSetup
+            seat="local"
+            onStart={startLocal}
+            starting={starting === "local"}
+            disabled={seatsDisabled}
+            disabledReason={disabledReason}
+            flash={flashed === "local"}
+          />
         </div>
-      </section>
 
-      <section aria-labelledby="live-now" className="grid gap-4">
+        {/* §3.1/§3.3: the preview exists from 1024px up, and is not mounted below
+            it — a phone must never pay for a WebGL context it cannot see. */}
+        {isDesktop ? (
+          <TablePreview
+            className="lg:sticky lg:top-20"
+            username={me?.username ?? null}
+            avatarUrl={me?.avatarUrl ?? null}
+            rating={me?.rating ?? null}
+            roomPreset={roomPreset}
+            roomColors={me?.roomColors ?? null}
+            orientation={previewOrientation}
+            onSelectRoom={chooseRoom}
+            roomBusy={roomBusy}
+          />
+        ) : null}
+      </div>
+
+      <section aria-labelledby="at-the-boards" className="grid gap-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="live-now" className="eyebrow">
-            Live now
+          <h2 id="at-the-boards" className="lobby-title text-foreground">
+            At the boards
           </h2>
-          <p className="text-[13px] text-muted-foreground">
+          <p className="lobby-micro text-muted-foreground">
             Every online game in progress. Watching is read-only.
           </p>
         </div>
         <SpectateList enabled={isAuthenticated} />
+      </section>
+
+      <section aria-labelledby="your-recent-games" className="grid gap-4">
+        <h2 id="your-recent-games" className="lobby-title text-foreground">
+          Your recent games
+        </h2>
+        <Scoresheet enabled={isAuthenticated} />
       </section>
     </div>
   );

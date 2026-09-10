@@ -1,11 +1,27 @@
 "use client";
-// src/components/game/draw-offer-dialog.tsx  [P3 → restyled U2]
-// FR-31 / UI_REDESIGN §5.4: "a system chip in chat plus an inline bar above the
-// action bar with Accept / Decline". A banner rather than a modal, so the offered
-// player can still look at the position before answering — and the same banner is
-// a persistent HUD layer in the focus layout, where there is no action bar to sit
-// above (§5.2).
+// src/components/game/draw-offer-dialog.tsx  [P3 → restyled U2 → UI_UPGRADE_2 §4.8 item 2]
+// FR-31: a banner rather than a modal, so the offered player can still look at
+// the position before answering — and the same banner is a persistent HUD layer
+// in the focus layout, where there is no action bar to sit above (§5.2).
+//
+// This round: accepting is guarded exactly the way resigning is. Accepting ends
+// the game and moves both ratings; it is the same size of decision, so it gets
+// the same alert dialog. Declining stays the quiet default — nothing is lost by
+// saying no. And the banner names the person ("adrienne offers a draw."), which
+// is what a player actually reads; the colour is only the fallback.
+import { useState } from "react";
 import { HandshakeIcon } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { formatColour } from "@/lib/format";
 import { cn } from "@/lib/ui";
@@ -17,6 +33,8 @@ export interface DrawOfferDialogProps {
   /** The viewer's seat: "both" in local games, null for spectators. */
   seat: Colour | "both" | null;
   pending: boolean;
+  /** Who offered, by name. Falls back to the colour when there is no name. */
+  offerName?: string | null;
   onRespond(accept: boolean): Promise<void>;
   className?: string;
 }
@@ -25,12 +43,18 @@ export function DrawOfferDialog({
   offerFrom,
   seat,
   pending,
+  offerName,
   onRespond,
   className,
 }: DrawOfferDialogProps) {
+  // `AlertDialogAction` is a plain Button in this shadcn port — it does not close
+  // the dialog — so the open state is held here and the action closes it itself.
+  const [confirming, setConfirming] = useState(false);
+
   if (offerFrom === null || seat === null) return null;
 
   const mine = seat !== "both" && seat === offerFrom;
+  const who = offerName?.trim() ? offerName.trim() : formatColour(offerFrom);
 
   return (
     <div
@@ -45,29 +69,47 @@ export function DrawOfferDialog({
       )}
     >
       <HandshakeIcon className="size-4 shrink-0 text-primary" aria-hidden />
-      <span>
-        {mine
-          ? "Draw offered — waiting for a reply."
-          : `${formatColour(offerFrom)} offers a draw.`}
-      </span>
+      <span>{mine ? "Draw offered — waiting for a reply." : `${who} offers a draw.`}</span>
       {mine ? null : (
-        // Accepting ends the game and cannot be undone, so it gets no brass:
-        // DESIGN.md keeps the accent for the action you would want back. Equal
-        // weight, Accept first because that is the order the sentence implies.
+        // Accept first, and outlined, because it is the considered action the
+        // sentence asks for; Decline is the ghost dismissal beside it. Neither gets
+        // brass: DESIGN.md keeps the accent for the action you would want back, and
+        // neither of these can be taken back.
         <div className="ml-auto flex gap-2">
+          <AlertDialog open={confirming} onOpenChange={setConfirming}>
+            <AlertDialogTrigger
+              // `disabled`, not `aria-disabled`: this used to announce as disabled
+              // while still opening the dialog, so a second accept could be fired
+              // over an unresolved first one. Decline on the same row was already
+              // genuinely disabled.
+              render={<Button variant="outline" disabled={pending} />}
+            >
+              Accept
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Accept the draw?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The game ends as a draw and both ratings are updated.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep playing</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (pending) return;
+                    setConfirming(false);
+                    void onRespond(true);
+                  }}
+                >
+                  Accept the draw
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => {
-              void onRespond(true);
-            }}
-          >
-            Accept
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={pending}
             onClick={() => {
               void onRespond(false);

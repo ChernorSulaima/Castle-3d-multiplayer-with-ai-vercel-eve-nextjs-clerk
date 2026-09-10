@@ -357,3 +357,29 @@ latest release and the matching one. `pnpm peers check` is clean again.
    WebGL shader errors. `tsc` and `next build` passing is not sufficient — see §6.1.3.
 
 Only `three` and `@types/three` are pinned by this; nothing else in the r3f stack was held back.
+
+## 7. UI upgrade 2 and the scene round (2026-09-10)
+
+Residues left deliberately after the landing / lobby / game upgrade (`docs/UI_UPGRADE_2.md`) and
+the scene work (exact camera fit, sharp backdrops, table, curated rooms). None blocks play.
+
+1. **NFR-9 waived for the Study's HDRI.** `public/hdri/study.hdr` (`combination_room`, CC0) is
+   1,661,444 bytes, over the 1,572,864-byte per-file budget. No capped panorama read as a club
+   room; the owner's "use the best" stance covers it. Every other room stays under the cap.
+   Details and the rejected list: `docs/research/assets.md` §A2d.
+2. **Backdrop VRAM.** Each 4k tonemapped backdrop becomes a 6×2048² cube target (~100 MB VRAM)
+   plus ~33 MB source. Acceptable on laptops and phones tested; if low-end devices struggle,
+   ship 2k variants for the `low` tier (§A2b has the pipeline).
+3. **Park floor is soft.** The meadow's ground is drei's projection of the 1k HDR, so the floor
+   under the board stays blurred while the sky is sharp. Fixing it means feeding the LDR texture
+   to `groundProjectedEnvImpl`; parked.
+4. **Arcade far-arc cable.** At the far end of the hero's pendulum a faint magenta-on-magenta
+   cable shows at the top of the taller hero canvas. Both alternative sweep centres were worse.
+5. **Hero orbit is a pendulum, not a full circle.** By design since the photographic rooms have a
+   worst side: `RoomPreset.orbit = { centerAzimuth, halfArc }` (default ±0.95 rad, ~40 s period).
+6. **Detector advisories that stay.** Five `design-system-font-size` advisories in
+   `ui-kit/display.tsx` (the documented responsive Display ladder) and two `design-system-color`
+   for `#000` mask stencils in `play/play.css` (alpha stencils, not colours). Zero blocking.
+7. **Mobile bar naming.** The bar shows "Hint" with the count on its face; the accessible name
+   stays "Ask for a hint · N left" everywhere. Flip lives in the More sheet on phones so five
+   buttons fit 390 px without truncating.

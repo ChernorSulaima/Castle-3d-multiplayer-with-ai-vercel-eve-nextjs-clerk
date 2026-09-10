@@ -15,9 +15,7 @@ import {
   MaximizeIcon,
   RotateCcwIcon,
   SofaIcon,
-  SwordsIcon,
   Undo2Icon,
-  UsersIcon,
 } from "lucide-react";
 import {
   ActionBar,
@@ -31,9 +29,7 @@ import {
   FocusHud,
   Kbd,
   MiniBoard,
-  ModeCard,
   MoveList,
-  PersonaCard,
   PlayerChip,
   Podium,
   Reveal,
@@ -46,7 +42,6 @@ import {
 import { ThemeToggle } from "@/components/nav/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { toHistoryRows } from "@/lib/chess";
-import { DIFFICULTIES, DIFFICULTY_ORDER } from "@/lib/difficulty";
 import { ROOMS, ROOM_ORDER } from "@/lib/rooms";
 import type { RoomPresetId } from "@/lib/types";
 
@@ -354,67 +349,6 @@ export function UiKitGallery() {
               />
             </li>
           ))}
-        </ul>
-      </Group>
-
-      <Group title="Persona cards">
-        <ul className="grid list-none gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {DIFFICULTY_ORDER.map((id) => {
-            const config = DIFFICULTIES[id];
-            return (
-              <li key={id} className="flex">
-                <PersonaCard
-                  className="w-full"
-                  name={config.persona.name}
-                  difficulty={config.label}
-                  rating={config.aiRating}
-                  blurb={config.persona.blurb}
-                  sample={SAMPLE_LINES[config.persona.key] ?? config.description}
-                />
-              </li>
-            );
-          })}
-        </ul>
-      </Group>
-
-      <Group title="Mode cards">
-        <ul className="grid list-none gap-3 lg:grid-cols-3">
-          <li className="flex">
-            <ModeCard
-              className="w-full"
-              icon={SwordsIcon}
-              title="Find a match"
-              description="Rated games against people within ±200 of your rating; the window widens every 10 seconds."
-              action={<Button className="w-full">Find a match</Button>}
-            />
-          </li>
-          <li className="flex">
-            <ModeCard
-              className="w-full"
-              icon={BoxIcon}
-              title="Play the AI"
-              description="Five opponents from Beginner to Grandmaster. Each one explains its moves."
-              details={["Hints in Beginner and Casual", "Take backs allowed"]}
-              action={
-                <Button variant="outline" className="w-full">
-                  Choose an opponent
-                </Button>
-              }
-            />
-          </li>
-          <li className="flex">
-            <ModeCard
-              className="w-full"
-              icon={UsersIcon}
-              title="Pass and play"
-              description="Two people, one device. The board turns to face whoever is to move."
-              action={
-                <Button variant="outline" className="w-full">
-                  Start a local game
-                </Button>
-              }
-            />
-          </li>
         </ul>
       </Group>
 

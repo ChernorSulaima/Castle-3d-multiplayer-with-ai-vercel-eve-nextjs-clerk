@@ -27,6 +27,7 @@ import {
   square,
   turnIndicator,
   turnPhraseNow,
+  hideNextDevOverlay,
 } from "./helpers/app";
 
 const PLAYER_TWO = "E2E Rival";
@@ -40,6 +41,7 @@ test.describe("authenticated flows", () => {
   );
 
   test.beforeEach(async ({ page }) => {
+    await hideNextDevOverlay(page);
     await signIn(page);
   });
 

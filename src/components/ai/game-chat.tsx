@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import { LightbulbIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatList, ChatMessage } from "@/components/ui-kit";
+import { PersonaHeader, type PersonaStatus } from "@/components/game/persona-header";
 import { useAiStore } from "@/lib/stores/ai-store";
 import { cn } from "@/lib/ui";
 import type { Colour, GameMode } from "@/lib/types";
@@ -47,6 +48,17 @@ export interface GameChatProps {
   systemChips: ChatSystemChip[];
   hint: ChatHintState;
   onRetryEngine?(): void;
+  /** Who the plate names. Defaults to `personaName`; an online game names the
+   *  other player, a local one names the table. */
+  personaHeaderName?: string;
+  /** "Beginner · 800", "Online · 1311", "Same device" — the plate's mono line. */
+  personaMeta?: string;
+  /** Whose move it is, from the viewer's seat. */
+  turn?: "you" | "opponent" | "none";
+  /** The viewer is watching rather than playing. */
+  spectating?: boolean;
+  /** The game has ended. */
+  finished?: boolean;
   className?: string;
 }
 
@@ -60,6 +72,11 @@ export function GameChat({
   systemChips,
   hint,
   onRetryEngine,
+  personaHeaderName,
+  personaMeta,
+  turn = "none",
+  spectating = false,
+  finished = false,
   className,
 }: GameChatProps) {
   const phase = useAiStore((s) => s.phase);
@@ -137,6 +154,20 @@ export function GameChat({
     (thinking ? 1 : 0) +
     (streaming.length > 0 ? 1 : 0);
 
+  // §4.4: the plate's status line is the game's live truth, in this order —
+  // spectating, over, thinking, whose move.
+  const status: PersonaStatus = spectating
+    ? "watching"
+    : finished
+      ? "over"
+      : thinking
+        ? "thinking"
+        : turn === "opponent"
+          ? "their-move"
+          : turn === "you"
+            ? "your-move"
+            : "watching";
+
   return (
     <>
       {/* Polite, and only ever the opponent. Two spans so each announces on its
@@ -145,6 +176,12 @@ export function GameChat({
         <span>{aiLine}</span>
         <span>{hintLine}</span>
       </p>
+
+      <PersonaHeader
+        name={personaHeaderName ?? personaName}
+        meta={personaMeta}
+        status={status}
+      />
 
       <ChatList
         className={className}
@@ -159,10 +196,17 @@ export function GameChat({
           hint.available ? (
             <div className="flex flex-col gap-1.5">
               <Button
+                // §4.8 item 6: a ghost, not the only brass on the screen — the board
+                // and the action bar own the accent, and a hint is an aside.
+                variant="ghost"
                 // `aria-disabled`, not `disabled`, so the button keeps its tooltip and
                 // stays in the tab order to explain itself — but it has to LOOK
                 // unavailable too, the same 50% the action bar's blocked buttons use.
-                className="w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                // Unavailable is said in colour, not in a 50% veil: the reason
+                // underneath has to stay readable, and so does the label it
+                // belongs to (WCAG 1.4.3 exempts inactive controls; that is not
+                // a reason to make them illegible).
+                className="w-full bg-bg-sunken hover:bg-muted aria-disabled:cursor-not-allowed aria-disabled:bg-transparent aria-disabled:text-muted-foreground"
                 aria-disabled={hint.disabledReason !== null || undefined}
                 aria-label={`Ask for a hint. ${hint.remaining} of ${hint.max} left.`}
                 title={hint.disabledReason ?? undefined}

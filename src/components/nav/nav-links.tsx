@@ -43,7 +43,10 @@ export function NavLinks({ links, className }: { links: NavLink[]; className?: s
             href={link.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-lg px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+              "inline-flex items-center rounded-lg px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+              // The 36px touch floor the shared Button already carries; these
+              // are plain links, so they ask for it themselves.
+              "pointer-coarse:min-h-9",
               focusRing,
               active
                 ? "bg-primary/12 text-primary"

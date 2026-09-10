@@ -178,11 +178,23 @@ export async function setBoardView(page: Page, view: "2D" | "3D"): Promise<void>
 export async function gotoPlay(page: Page): Promise<void> {
   await page.goto("/play");
   await expect(page.getByRole("heading", { level: 1, name: "Play" })).toBeVisible();
-  // `games.myActiveGame` is a live subscription; the resume banner (and the disabled
-  // state of the mode cards' start buttons) only settles once its first value lands.
-  await expect(page.getByRole("button", { name: "Start the game" })).toBeVisible();
+  // `games.myActiveGame` is a live subscription. The lobby keeps every seat disabled
+  // until its first value lands, then either shows the resume banner or re-enables
+  // the seats — wait for one of those two, not for a fixed delay.
+  const start = page.getByRole("button", { name: "Start the game" });
+  const resume = page.getByRole("link", { name: "Resume game" });
+  await expect(start).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        if ((await resume.count()) > 0) return true;
+        const ariaDisabled = await start.getAttribute("aria-disabled");
+        return ariaDisabled !== "true" && !(await start.isDisabled());
+      },
+      { timeout: 30_000, message: "the lobby never settled its active-game check" },
+    )
+    .toBe(true);
   await page.waitForFunction(() => document.readyState === "complete");
-  await page.waitForTimeout(1_500);
 }
 
 /** Ends whatever game the test user is in, so the next `create*Game` is allowed. */
@@ -220,4 +232,22 @@ export async function resign(page: Page): Promise<void> {
   // Close it, so a caller that stays on this page can keep driving the screen.
   await result.getByRole("button", { name: "Review game" }).click();
   await expect(result).toBeHidden();
+}
+
+/**
+ * Next's dev overlay (`<nextjs-portal>`) hosts the dev-tools button, which a fresh
+ * browser profile pins to the bottom-left corner — exactly over the game screen's
+ * action bar at 1280×720, where it swallowed clicks on "3D". It does not exist in a
+ * production build, so hiding its host element changes nothing the suite asserts on;
+ * console errors are still collected by the console-sweep test.
+ */
+export async function hideNextDevOverlay(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // A constructed stylesheet, not a <style> node: React hydrates the <html> root
+    // and removes foreign nodes it finds there, but adopted stylesheets are not in
+    // the DOM tree and survive hydration and client-side navigation alike.
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync("nextjs-portal{display:none!important}");
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
 }

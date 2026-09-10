@@ -27,6 +27,8 @@ export interface ShortcutsDialogProps {
   trigger?: React.ReactNode;
   title?: string;
   description?: string;
+  /** A closing line under the list — how to make a move, where reset lives. */
+  note?: React.ReactNode;
   className?: string;
 }
 
@@ -38,6 +40,7 @@ export function ShortcutsDialog({
   trigger,
   title = "Keyboard shortcuts",
   description = "Shortcuts are ignored while you are typing in a text box.",
+  note,
   className,
 }: ShortcutsDialogProps) {
   const groups = new Map<string, Shortcut[]>();
@@ -51,6 +54,7 @@ export function ShortcutsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger ? <DialogTrigger render={trigger as React.ReactElement} /> : null}
+      {/* §4.5: a floating layer takes the soft shadow and drops the hairline. */}
       <DialogContent className={cn("sm:max-w-md", className)}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -75,6 +79,11 @@ export function ShortcutsDialog({
             </div>
           ))}
         </div>
+        {note ? (
+          <p className="border-t border-border/60 pt-3 text-[12px] leading-relaxed text-muted-foreground">
+            {note}
+          </p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
