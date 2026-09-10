@@ -88,7 +88,20 @@ function Coordinates({ orientation }: CoordinatesProps) {
             rotation-z={spin}
             raycast={() => null}
           >
-            <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} />
+            <meshBasicMaterial
+              map={texture}
+              transparent
+              depthWrite={false}
+              toneMapped={false}
+              // The label lies 3mm above the plinth's top face, which is far below the
+              // depth buffer's resolution out at the seated camera's distance: without a
+              // polygon offset the FAR half of each glyph — the half pointing away from
+              // the viewer — loses its z-fight with the wood, and "d" and "h" quietly
+              // become "a" and "n".
+              polygonOffset
+              polygonOffsetFactor={-8}
+              polygonOffsetUnits={-8}
+            />
           </mesh>
         );
       })}
@@ -105,7 +118,20 @@ function Coordinates({ orientation }: CoordinatesProps) {
             rotation-z={spin}
             raycast={() => null}
           >
-            <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} />
+            <meshBasicMaterial
+              map={texture}
+              transparent
+              depthWrite={false}
+              toneMapped={false}
+              // The label lies 3mm above the plinth's top face, which is far below the
+              // depth buffer's resolution out at the seated camera's distance: without a
+              // polygon offset the FAR half of each glyph — the half pointing away from
+              // the viewer — loses its z-fight with the wood, and "d" and "h" quietly
+              // become "a" and "n".
+              polygonOffset
+              polygonOffsetFactor={-8}
+              polygonOffsetUnits={-8}
+            />
           </mesh>
         );
       })}

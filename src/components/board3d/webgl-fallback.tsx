@@ -4,6 +4,7 @@
 // cover it), so the probe has to run BEFORE the Canvas mounts.
 "use client";
 import { useEffect, useRef } from "react";
+import { MonitorX } from "lucide-react";
 import { toast } from "sonner";
 import { probeWebgl, renderFailureMessage } from "@/lib/webgl";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -48,14 +49,19 @@ export interface WebglFallbackNoticeProps {
   reason: RenderFailureReason;
 }
 
-/** In-place message for the board area when 3D cannot be shown at all. */
+/**
+ * In-place message for the board area when 3D cannot be shown at all.
+ * The copy is `renderFailureMessage` and only that — src/lib/errors.ts is the single
+ * source of error wording (§10.6), so this component adds framing, never sentences.
+ */
 export function WebglFallbackNotice({ reason }: WebglFallbackNoticeProps) {
   return (
     <div
       role="status"
-      className="flex h-full w-full items-center justify-center rounded-xl border border-border bg-muted/40 p-6 text-center text-sm text-muted-foreground"
+      className="flex h-full min-h-[220px] w-full flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card p-6 text-center shadow-soft"
     >
-      {renderFailureMessage(reason)}
+      <MonitorX className="size-6 text-fg-muted" aria-hidden />
+      <p className="max-w-sm text-sm text-fg-muted">{renderFailureMessage(reason)}</p>
     </div>
   );
 }

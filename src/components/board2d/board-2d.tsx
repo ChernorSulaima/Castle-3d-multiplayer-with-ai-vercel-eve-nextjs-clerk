@@ -109,7 +109,13 @@ export function Board2D(props: BoardViewProps) {
   );
 
   return (
-    <div className="relative aspect-square w-full max-w-[min(100%,80vh)] overflow-hidden rounded-xl ring-1 ring-border select-none">
+    // The board fills whatever square box its parent gives it. There used to be a
+    // `max-w-[min(100%,80vh)]` cap here, which pre-dated the §5.1 shell: that shell
+    // now hands both boards an exactly-square, exactly-sized box, so a viewport-based
+    // cap only made the 2D board smaller than the 3D one in the focus layout (where
+    // the box is close to 100dvh). The single caller — src/components/game/board-surface.tsx
+    // — always centres this inside that square box, so `w-full` is the right size.
+    <div className="relative aspect-square w-full max-w-full overflow-hidden rounded-xl ring-1 ring-border select-none">
       <div
         role="grid"
         aria-label={`Chess board, ${orientation === "w" ? "white" : "black"} at the bottom`}

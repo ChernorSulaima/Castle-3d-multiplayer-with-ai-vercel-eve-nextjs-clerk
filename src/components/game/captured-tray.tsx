@@ -4,7 +4,7 @@
 // this one belongs to the 2D layout and the side panel.
 import { PIECE_VALUES } from "@/lib/constants";
 import { formatMaterialAdvantage } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/ui";
 import type { CapturedPieces, Colour, PieceSymbol } from "@/lib/types";
 import { PieceGlyph, pieceName } from "@/components/board2d/pieces-svg";
 
@@ -39,7 +39,7 @@ export function CapturedTray({ captured, colour, className }: CapturedTrayProps)
         />
       ))}
       {advantage ? (
-        <span className="ml-1 text-xs font-medium text-muted-foreground tabular-nums">
+        <span className="tabular ml-1 font-mono text-[12px] font-medium text-muted-foreground">
           {advantage}
         </span>
       ) : null}

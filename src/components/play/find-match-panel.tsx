@@ -1,27 +1,146 @@
 "use client";
-
+// src/components/play/find-match-panel.tsx  [U4]
+// The matchmaking card and the queue panel that replaces it while searching
+// (UI_REDESIGN §6): elapsed timer, the current rating window drawn as a bar that
+// grows every 10 seconds, Cancel, and "Play the AI while you wait".
+//
+// Every piece of queue behaviour below (the pagehide cleanup, the optimistic
+// `queuedRef` claim, the skipped query before Convex has validated the session)
+// is unchanged from the pre-redesign panel — only the presentation is new.
 import { useEffect, useRef, useState } from "react";
+import { LoaderIcon, SwordsIcon } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { queueRangeAt } from "@/lib/constants";
+import { ModeCard } from "@/components/ui-kit";
+import { QUEUE_BASE_RANGE, queueRangeAt } from "@/lib/constants";
 import { formatElapsed, formatRating } from "@/lib/format";
 import { describeConvexError } from "@/components/providers/convex-errors";
+import { cn } from "@/lib/ui";
 
 /** The elapsed readout only needs sub-second accuracy. */
 const TICK_MS = 500;
 
+/**
+ * The widest window the bar draws as "full". `queueRangeAt` keeps widening past
+ * this, so the bar saturates rather than lying about a maximum that does not
+ * exist — the number beside it stays authoritative.
+ */
+const BAR_MAX_RANGE = 1000;
+
+export interface QueuePanelViewProps {
+  className?: string;
+  elapsedMs: number;
+  /** ± rating points currently accepted, or null before the first tick. */
+  range: number | null;
+  myRating: number | null;
+  pending?: boolean;
+  onCancel(): void;
+  onPlayAi(): void;
+}
+
+/** Pure: the harness at /dev/pages renders this with a frozen timer. */
+export function QueuePanelView({
+  className,
+  elapsedMs,
+  range,
+  myRating,
+  pending = false,
+  onCancel,
+  onPlayAi,
+}: QueuePanelViewProps) {
+  const shown = range ?? QUEUE_BASE_RANGE;
+  const progress = Math.min(
+    1,
+    (shown - QUEUE_BASE_RANGE) / (BAR_MAX_RANGE - QUEUE_BASE_RANGE),
+  );
+
+  return (
+    <div
+      className={cn(
+        "flex h-full flex-col gap-4 rounded-xl border border-primary/40 bg-card p-5 shadow-soft",
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <span
+            aria-hidden
+            className="size-2 rounded-full bg-live motion-safe:animate-pulse"
+          />
+          Searching for an opponent
+        </span>
+        <span aria-live="polite" className="tabular font-mono text-sm text-muted-foreground">
+          {formatElapsed(elapsedMs)}
+        </span>
+      </div>
+
+      <div className="grid gap-2">
+        <div className="flex items-baseline justify-between gap-3 text-[13px]">
+          <span className="text-muted-foreground">Rating window</span>
+          <span className="tabular font-mono text-foreground">
+            {myRating === null
+              ? `±${shown}`
+              : `${formatRating(Math.max(0, myRating - shown))}–${formatRating(myRating + shown)}`}
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="Rating window"
+          aria-valuemin={QUEUE_BASE_RANGE}
+          aria-valuemax={BAR_MAX_RANGE}
+          aria-valuenow={Math.min(BAR_MAX_RANGE, shown)}
+          aria-valuetext={`plus or minus ${shown} rating points`}
+          className="h-1.5 w-full overflow-hidden rounded-full bg-bg-sunken"
+        >
+          <span
+            className={cn(
+              "block h-full rounded-full bg-primary",
+              "motion-safe:transition-[width] motion-safe:duration-500 motion-safe:ease-out",
+            )}
+            style={{ width: `${Math.max(6, progress * 100)}%` }}
+          />
+        </div>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          It widens by 100 points every 10 seconds. You will be taken to the board the moment
+          someone is matched — keep this tab open.
+        </p>
+      </div>
+
+      <div className="mt-auto flex flex-wrap gap-2">
+        <Button variant="outline" onClick={onCancel} disabled={pending}>
+          {pending ? "Cancelling…" : "Cancel"}
+        </Button>
+        <Button variant="ghost" onClick={onPlayAi} disabled={pending}>
+          Play the AI while you wait
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The whole "Find a match" card: the mode card while idle, and the queue panel
+ * *in place of it* while searching (§6). Owning both states here is what lets the
+ * swap happen at all — the queue state lives in `queue.myStatus`, not in the page.
+ */
 export function FindMatchPanel({
   enabled,
   myRating,
   onPlayAi,
+  /** True while another game is already in progress (FR-26). */
+  disabled = false,
+  /** Ring class from the `?mode=` deep link. */
+  className,
 }: {
   /** False until Convex has validated the session — the query is skipped then. */
   enabled: boolean;
   myRating: number | null;
   onPlayAi: () => void;
+  disabled?: boolean;
+  className?: string;
 }) {
   const status = useQuery(api.queue.myStatus, enabled ? {} : "skip");
   const join = useMutation(api.queue.join);
@@ -98,63 +217,42 @@ export function FindMatchPanel({
     }
   }
 
-  if (status === undefined) {
+  if (inQueue) {
     return (
-      <div className="grid gap-2">
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-8 w-32" />
-      </div>
-    );
-  }
-
-  if (!inQueue) {
-    return (
-      <div className="grid gap-3">
-        <p className="text-sm text-muted-foreground">
-          {myRating === null
-            ? "You will be paired with someone close to your rating."
-            : `You are rated ${formatRating(myRating)}. Pairing starts within ±200 and widens by 100 every 10 seconds.`}
-        </p>
-        <Button onClick={toggle} disabled={pending} className="w-full sm:w-fit">
-          {pending ? "Joining…" : "Find match"}
-        </Button>
-      </div>
+      <QueuePanelView
+        className={className}
+        elapsedMs={elapsedMs}
+        range={range}
+        myRating={myRating}
+        pending={pending}
+        onCancel={toggle}
+        onPlayAi={onPlayAi}
+      />
     );
   }
 
   return (
-    <div className="grid gap-3">
-      <div
-        aria-live="polite"
-        className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm"
-      >
-        <span className="flex items-center gap-2 font-medium">
-          <span
-            aria-hidden
-            className="size-2 rounded-full bg-emerald-500 motion-safe:animate-pulse"
-          />
-          Searching
-        </span>
-        <span className="tabular-nums text-muted-foreground">{formatElapsed(elapsedMs)}</span>
-        {range !== null && myRating !== null ? (
-          <span className="text-muted-foreground">
-            {formatRating(Math.max(0, myRating - range))}–{formatRating(myRating + range)} rating
-          </span>
-        ) : range !== null ? (
-          <span className="text-muted-foreground">±{range} rating</span>
-        ) : null}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        You will be taken to the board the moment someone is matched — keep this tab open.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={toggle} disabled={pending}>
-          {pending ? "Cancelling…" : "Cancel"}
+    <ModeCard
+      title="Find a match"
+      icon={SwordsIcon}
+      description="Rated games against people within ±200 of your rating; the window widens every 10 seconds."
+      className={className}
+      action={
+        <Button onClick={toggle} disabled={pending || disabled} className="w-full">
+          {pending ? <LoaderIcon aria-hidden className="motion-safe:animate-spin" /> : null}
+          {pending ? "Joining…" : "Find a match"}
         </Button>
-        <Button variant="ghost" onClick={onPlayAi} disabled={pending}>
-          Play the AI while you wait
-        </Button>
-      </div>
-    </div>
+      }
+    >
+      {status === undefined ? (
+        <Skeleton className="h-4 w-44" aria-hidden />
+      ) : (
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          {myRating === null
+            ? "You will be paired with someone close to your rating."
+            : `You are rated ${formatRating(myRating)}. Pairing starts within ±${QUEUE_BASE_RANGE}.`}
+        </p>
+      )}
+    </ModeCard>
   );
 }

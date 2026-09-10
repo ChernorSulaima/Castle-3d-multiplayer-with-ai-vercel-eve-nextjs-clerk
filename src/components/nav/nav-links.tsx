@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, focusRing } from "@/lib/ui";
 
 export interface NavLink {
   href: string;
@@ -43,10 +43,10 @@ export function NavLinks({ links, className }: { links: NavLink[]; className?: s
             href={link.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-md px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
-              "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+              "rounded-lg px-2.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+              focusRing,
               active
-                ? "bg-muted text-foreground"
+                ? "bg-primary/12 text-primary"
                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
           >

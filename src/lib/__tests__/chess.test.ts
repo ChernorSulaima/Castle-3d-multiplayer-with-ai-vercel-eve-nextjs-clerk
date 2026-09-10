@@ -31,7 +31,17 @@ import {
   squareToWorld,
   worldToSquare,
 } from "../constants";
-import { CAMERA_LIMITS, CAMERA_PRESETS, autoQualityTier, dropTier, poseForPreset, seatPresetFor } from "../camera";
+import {
+  CAMERA_LIMITS,
+  CAMERA_PRESETS,
+  autoQualityTier,
+  dropTier,
+  fitPoseToAspect,
+  minFitDistance,
+  nearCornerAdvance,
+  poseForPreset,
+  seatPresetFor,
+} from "../camera";
 import type { LastMove, SquareId } from "../types";
 
 /* --------------------------------------------------------------- fixtures */
@@ -777,6 +787,101 @@ describe("camera presets and quality tiers", () => {
     expect(poseForPreset("cinematic")).toBe(CAMERA_PRESETS.white);
     expect(poseForPreset("black")).toBe(CAMERA_PRESETS.black);
     expect(poseForPreset("top")).toBe(CAMERA_PRESETS.top);
+  });
+
+  it("minFitDistance needs more distance the narrower the canvas gets", () => {
+    const wide = minFitDistance(4.7, 16 / 9);
+    const square = minFitDistance(4.7, 1);
+    const tall = minFitDistance(4.7, 0.75);
+    expect(square).toBeGreaterThan(wide);
+    expect(tall).toBeGreaterThan(square);
+    // The horizontal half-angle is the vertical fov widened by the aspect, so the
+    // distance is exactly inversely proportional to it.
+    expect(square / wide).toBeCloseTo(16 / 9, 5);
+    // FR-22's ceiling is never crossed, however narrow the box.
+    expect(minFitDistance(4.7, 0.01)).toBe(CAMERA_LIMITS.maxDistance);
+  });
+
+  it("minFitDistance survives a canvas that has not been measured yet", () => {
+    // A zero-height canvas (the frame before layout) must not produce Infinity.
+    expect(minFitDistance(4.7, 0)).toBe(minFitDistance(4.7, 1));
+    expect(minFitDistance(4.7, Number.NaN)).toBe(minFitDistance(4.7, 1));
+  });
+
+  it("nearCornerAdvance measures the ground run of the pose, not its length", () => {
+    // The white seat is [0, 7.5, 9] from the target: 9 of its 11.71 units of distance
+    // are horizontal, so a corner half a plinth toward the camera is that fraction
+    // nearer along the view axis.
+    const seat = CAMERA_PRESETS.white;
+    const distance = Math.hypot(...seat.position);
+    expect(nearCornerAdvance(seat, 4.55)).toBeCloseTo((9 / distance) * 4.55, 6);
+    // Straight overhead there is no ground run at all, so nothing is nearer.
+    expect(nearCornerAdvance({ position: [0, 10, 0], target: [0, 0, 0] }, 4.55)).toBeCloseTo(0, 6);
+    // A degenerate pose cannot divide by zero.
+    expect(nearCornerAdvance({ position: [0, 0, 0], target: [0, 0, 0] }, 4.55)).toBe(0);
+  });
+
+  it("minFitDistance adds the near corner's depth advantage on top of the plane fit", () => {
+    const plane = minFitDistance(4.7, 1);
+    expect(minFitDistance(4.7, 1, CAMERA_LIMITS.fov, 3.5)).toBeCloseTo(plane + 3.5, 5);
+    // Negative advances (a corner BEHIND the target) never pull the camera in.
+    expect(minFitDistance(4.7, 1, CAMERA_LIMITS.fov, -3.5)).toBe(plane);
+  });
+
+  it("fitPoseToAspect keeps the near corners of a square board inside a square canvas", () => {
+    const pose = CAMERA_PRESETS.white;
+    const half = 4.7;
+    const flat = fitPoseToAspect(pose, half, 1);
+    const solid = fitPoseToAspect(pose, half, 1, half);
+    // Ignoring the depth of the board is exactly what used to crop it.
+    expect(Math.hypot(...solid.position)).toBeGreaterThan(Math.hypot(...flat.position));
+
+    // The corner nearest the camera is now inside the horizontal frustum. In camera
+    // space: |x| must not exceed depth * tan(fov/2) * aspect.
+    const halfAngle = Math.tan(((CAMERA_LIMITS.fov / 2) * Math.PI) / 180);
+    /** Is the board corner nearest the camera inside this pose's horizontal frustum? */
+    const cornerFits = (candidate: typeof pose) => {
+      const d = Math.hypot(...candidate.position);
+      const forward = candidate.position.map((v) => -v / d);
+      const toCorner = [
+        half - candidate.position[0],
+        -candidate.position[1],
+        half - candidate.position[2],
+      ];
+      const depth = toCorner.reduce((sum, v, i) => sum + v * forward[i]!, 0);
+      // The camera sits on the world YZ plane, so its right vector is world +X and
+      // the corner's horizontal offset from the view axis is simply its x.
+      return Math.abs(toCorner[0]!) <= depth * halfAngle + 1e-9;
+    };
+    expect(cornerFits(flat)).toBe(false);
+    expect(cornerFits(solid)).toBe(true);
+  });
+
+  it("fitPoseToAspect only ever pushes the camera back, never pulls it in", () => {
+    const pose = CAMERA_PRESETS.white;
+    const distance = Math.hypot(...pose.position);
+
+    // A wide canvas already frames the board: the pose is returned untouched, so the
+    // framing the presets were tuned for is bit-for-bit the same.
+    expect(fitPoseToAspect(pose, 4.7, 16 / 9)).toBe(pose);
+
+    // A square one does not.
+    const fitted = fitPoseToAspect(pose, 4.7, 1);
+    expect(fitted).not.toBe(pose);
+    const fittedDistance = Math.hypot(...fitted.position);
+    expect(fittedDistance).toBeGreaterThan(distance);
+    expect(fittedDistance).toBeCloseTo(minFitDistance(4.7, 1), 5);
+    // Same seat: only the distance moves, so the view direction is unchanged.
+    expect(fitted.target).toEqual(pose.target);
+    for (let i = 0; i < 3; i++) {
+      expect(fitted.position[i] / fittedDistance).toBeCloseTo(pose.position[i] / distance, 5);
+    }
+  });
+
+  it("fitPoseToAspect leaves the black seat on its own side of the board", () => {
+    const fitted = fitPoseToAspect(CAMERA_PRESETS.black, 4.7, 1);
+    expect(fitted.position[2]).toBeLessThan(0);
+    expect(fitted.position[1]).toBeGreaterThan(0);
   });
 
   it("autoQualityTier picks Low for weak hardware", () => {

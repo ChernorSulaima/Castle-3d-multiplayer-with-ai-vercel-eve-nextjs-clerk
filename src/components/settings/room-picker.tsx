@@ -7,6 +7,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { RoomCard } from "@/components/ui-kit";
 import { ColourPickers } from "@/components/settings/colour-pickers";
 import { preloadBoard3D } from "@/components/board3d/board-3d-loader";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -16,12 +17,10 @@ import {
   ROOMS,
   ROOM_ORDER,
   resolveRoom,
-  type RoomPreset,
 } from "@/lib/rooms";
 import { MAX_ROOM_IMAGE_BYTES } from "@/lib/constants";
 import type { PlayerSettings, RoomColors, RoomPresetId } from "@/lib/types";
 import { describeConvexError } from "@/components/providers/convex-errors";
-import { cn } from "@/lib/utils";
 
 /**
  * FR-21m — "preset switching is instant (assets preloaded on the settings drawer open)".
@@ -122,44 +121,9 @@ function prefetchHdri(url: string): void {
     });
 }
 
-/** A square-count-agnostic mini board painted with the room's own materials. */
-function RoomSwatch({
-  room,
-  columns = 4,
-  className,
-}: {
-  room: RoomPreset;
-  columns?: number;
-  className?: string;
-}) {
-  const backdrop = room.background === "colour" ? room.backgroundColor : room.board.frameColor;
-  return (
-    <div
-      aria-hidden
-      className={cn("overflow-hidden rounded-md p-1.5", className)}
-      style={{ backgroundColor: backdrop }}
-    >
-      <div
-        className="grid gap-0"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-      >
-        {Array.from({ length: columns * columns }, (_, i) => {
-          const row = Math.floor(i / columns);
-          const col = i % columns;
-          const light = (row + col) % 2 === 0;
-          return (
-            <span
-              key={i}
-              className="aspect-square"
-              style={{
-                backgroundColor: light ? room.board.lightSquare : room.board.darkSquare,
-              }}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
+/** "study.hdr" — the source name RoomCard prints instead of a fabricated photo (§3). */
+function hdriName(path: string): string {
+  return path.split("/").pop() ?? path;
 }
 
 export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) => void }) {
@@ -251,15 +215,8 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
     }
   }
 
-  const preview = resolveRoom(roomPreset, roomColors);
-
   return (
     <div className="grid gap-5">
-      <div className="grid gap-2">
-        <span className="text-sm font-medium">Preview</span>
-        <RoomSwatch room={preview} columns={8} className="mx-auto w-full max-w-64 p-4" />
-      </div>
-
       <div
         role="group"
         aria-label="Room preset"
@@ -267,50 +224,36 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
       >
         {ROOM_ORDER.map((id) => {
           const room = ROOMS[id];
-          const selected = roomPreset === id;
           return (
-            <button
+            <RoomCard
               key={id}
-              type="button"
-              aria-pressed={selected}
+              name={room.label}
+              description={room.description}
+              lightSquare={room.board.lightSquare}
+              darkSquare={room.board.darkSquare}
+              hdriName={hdriName(room.hdri)}
+              active={roomPreset === id}
               onClick={() => choose(id)}
               onPointerEnter={() => warmRoom(room.hdri)}
               onFocus={() => warmRoom(room.hdri)}
-              className={cn(
-                "grid gap-2 rounded-lg border p-2 text-left transition-colors",
-                "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                selected ? "border-primary bg-muted/60" : "border-border hover:bg-muted/40",
-              )}
-            >
-              <RoomSwatch room={room} className="w-full" />
-              <span className="block text-sm font-medium">{room.label}</span>
-              <span className="block text-xs text-muted-foreground">{room.description}</span>
-            </button>
+            />
           );
         })}
 
-        <button
-          type="button"
-          aria-pressed={roomPreset === "custom"}
+        <RoomCard
+          name="Custom"
+          description="Your own colours, and an optional backdrop image."
+          lightSquare={colours.lightSquare}
+          darkSquare={colours.darkSquare}
+          active={roomPreset === "custom"}
           onClick={() => choose("custom")}
           onPointerEnter={() => warmRoom(customRoom.hdri)}
           onFocus={() => warmRoom(customRoom.hdri)}
-          className={cn(
-            "grid gap-2 rounded-lg border p-2 text-left transition-colors",
-            "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-            roomPreset === "custom"
-              ? "border-primary bg-muted/60"
-              : "border-border hover:bg-muted/40",
-          )}
-        >
-          <RoomSwatch room={customRoom} className="w-full" />
-          <span className="block text-sm font-medium">Custom</span>
-          <span className="block text-xs text-muted-foreground">Your own colours.</span>
-        </button>
+        />
       </div>
 
       {roomPreset === "custom" ? (
-        <div className="grid gap-5 rounded-lg border border-border p-3">
+        <div className="grid gap-5 rounded-xl border border-border bg-bg-sunken p-3">
           <ColourPickers
             value={colours}
             onPreview={previewColours}
@@ -343,7 +286,7 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
                 <img
                   src={me.roomImageUrl}
                   alt="Your custom board background"
-                  className="h-16 w-24 rounded-md border border-border object-cover"
+                  className="h-16 w-24 rounded-lg border border-border object-cover"
                 />
                 <Button variant="outline" size="sm" onClick={clearImage} disabled={uploading}>
                   Remove image

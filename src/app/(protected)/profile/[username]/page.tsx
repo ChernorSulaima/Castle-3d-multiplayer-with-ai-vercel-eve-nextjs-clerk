@@ -5,6 +5,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { ProfileHeader } from "@/components/profile/profile-header";
 import { RatingSparkline } from "@/components/profile/rating-sparkline";
 import { RecentGamesTable } from "@/components/profile/recent-games-table";
+import { Section } from "@/components/ui-kit";
 
 export async function generateMetadata(
   props: PageProps<"/profile/[username]">,
@@ -30,10 +31,10 @@ export default async function ProfilePage(props: PageProps<"/profile/[username]"
   if (preloadedQueryResult(preloaded) === null) notFound();
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-8 px-4 py-8 sm:px-6 sm:py-12">
+    <Section width="app" padding="md" className="pt-8 sm:pt-10" innerClassName="grid gap-6">
       <ProfileHeader preloaded={preloaded} />
       <RatingSparkline username={username} />
       <RecentGamesTable username={username} />
-    </div>
+    </Section>
   );
 }

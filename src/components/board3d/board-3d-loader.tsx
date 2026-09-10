@@ -4,23 +4,34 @@
 // drei and postprocessing (~1.2 MB) out of the game-page chunk.
 "use client";
 import dynamic from "next/dynamic";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { BoardViewProps } from "@/lib/types";
+import type { Board3DProps } from "./board-3d";
 
+/**
+ * Placeholder for the ~1.2 MB chunk. Deliberately quiet and un-animated: it stands in
+ * for a game board *and* for a landing hero that fades in on `onFirstFrame`, and a
+ * pulsing block behind either one reads as a broken page.
+ */
 function Board3DSkeleton() {
   return (
-    <div className="flex h-full w-full items-center justify-center">
-      <Skeleton className="aspect-square w-full max-w-[min(100%,720px)] rounded-xl" />
+    <div className="flex h-full w-full items-center justify-center p-2">
+      <div className="h-full w-full max-w-[min(100%,720px)] rounded-xl border border-border/60 bg-card/40" />
       <span className="sr-only">Loading the 3D board…</span>
     </div>
   );
 }
 
-/** Drop-in replacement for Board2D: both are `(props: BoardViewProps) => JSX.Element`. */
-export const Board3DLoader = dynamic<BoardViewProps>(
+/**
+ * Drop-in replacement for Board2D: both accept `BoardViewProps`. Board3D additionally
+ * takes the optional `showcase` / `onFirstFrame` / `onFrameRate` props of §10.4, which
+ * Board2D has no use for.
+ */
+export const Board3DLoader = dynamic<Board3DProps>(
   () => import("./board-3d").then((mod) => mod.default),
   { ssr: false, loading: () => <Board3DSkeleton /> },
 );
+
+export type { Board3DProps } from "./board-3d";
+export type { Board3DShowcase } from "./showcase";
 
 /**
  * Warms the 3D chunk and its assets without rendering it (NFR-2a, FR-21m).

@@ -1,13 +1,13 @@
 "use client";
-
+// src/app/error.tsx  [U4]
+// Root error boundary. Must be a client component and must render its own
+// markup — it replaces layout.tsx's children, not the layout itself.
+// Copy voice (§2): say what happened and what to do. Never "Oops".
 import { useEffect } from "react";
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Display, Eyebrow } from "@/components/ui-kit";
 
-/**
- * Root error boundary. Must be a client component and must render its own
- * markup — it replaces `layout.tsx`'s children, not the layout itself.
- */
 export default function RootError({
   error,
   reset,
@@ -20,24 +20,27 @@ export default function RootError({
   }, [error]);
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 py-24 text-center">
-      <p aria-hidden className="text-4xl">
+    <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center gap-4 px-4 py-24 text-center">
+      <p aria-hidden className="text-4xl text-primary">
         ♜
       </p>
-      <h1 className="text-2xl font-semibold tracking-tight">Something went wrong</h1>
-      <p className="text-sm text-muted-foreground">
-        This page hit an error while rendering. Nothing on the server was lost — your games,
-        ratings and settings are exactly where you left them.
+      <Eyebrow>Something broke</Eyebrow>
+      <Display level={3} as="h1">
+        This page stopped <em>mid-move</em>.
+      </Display>
+      <p className="text-[15px] leading-relaxed text-muted-foreground">
+        Nothing on the server was lost — your games, ratings and settings are exactly where you
+        left them. Try again, and if it keeps happening, go back to the lobby.
       </p>
       {error.digest ? (
-        <code className="rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+        <code className="tabular rounded-lg bg-bg-sunken px-2 py-1 font-mono text-xs text-muted-foreground">
           {error.digest}
         </code>
       ) : null}
       <div className="mt-2 flex flex-wrap justify-center gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Link prefetch={false} href="/" className={buttonVariants({ variant: "outline" })}>
-          Home
+        <Link prefetch={false} href="/play" className={buttonVariants({ variant: "outline" })}>
+          Back to the lobby
         </Link>
       </div>
     </div>

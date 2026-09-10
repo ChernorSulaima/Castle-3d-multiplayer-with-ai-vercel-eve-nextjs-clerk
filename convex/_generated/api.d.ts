@@ -22,6 +22,7 @@ import type * as lib_validators from "../lib/validators.js";
 import type * as players from "../players.js";
 import type * as queue from "../queue.js";
 import type * as ratingHistory from "../ratingHistory.js";
+import type * as stats from "../stats.js";
 
 import type {
   ApiFromModules,
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   players: typeof players;
   queue: typeof queue;
   ratingHistory: typeof ratingHistory;
+  stats: typeof stats;
 }>;
 
 /**

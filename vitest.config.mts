@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // Convex function tests run against `convex-test`, a JS mock of the backend, in the
@@ -17,6 +18,15 @@ export default defineConfig({
     // in a `__tests__/` directory — eve validates every entry under `agent/tools/` as a
     // tool name, so `agent/tools/__tests__/` is a hard discovery error that stops
     // `next dev` booting. See the header of agent/analyse-position.test.ts.
-    include: ["convex/**/*.test.ts", "src/**/*.test.ts", "agent/**/*.test.ts"],
+    // `.tsx` is here for U0's ui-kit component tests, which render through
+    // `react-dom/server` (there is no @testing-library / jsdom in this repo).
+    include: [
+      "convex/**/*.test.ts",
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+      "agent/**/*.test.ts",
+    ],
   },
+  // `@/…` is a tsconfig path; vitest does not read tsconfig, so it needs the alias.
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 });

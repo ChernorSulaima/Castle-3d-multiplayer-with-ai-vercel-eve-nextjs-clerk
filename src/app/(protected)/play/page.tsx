@@ -1,18 +1,23 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { ModePicker } from "@/components/play/mode-picker";
+import { Display, Eyebrow, Section } from "@/components/ui-kit";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = { title: "Play" };
 
 export default function PlayPage() {
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Play</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Four ways in: matchmaking, the computer, a friend beside you, or someone else&rsquo;s game.
-        </p>
+    <Section width="app" padding="md" className="pt-8 sm:pt-10">
+      <header className="mb-8 grid gap-2">
+        <Eyebrow>Choose a mode</Eyebrow>
+        <Display level={3} as="h1">Play</Display>
       </header>
-      <ModePicker />
-    </div>
+
+      {/* `ModePicker` reads `?mode=` with useSearchParams, which needs a boundary. */}
+      <Suspense fallback={<Skeleton className="h-72 w-full rounded-xl" />}>
+        <ModePicker />
+      </Suspense>
+    </Section>
   );
 }

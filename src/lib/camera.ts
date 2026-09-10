@@ -58,6 +58,96 @@ export function poseForPreset(preset: CameraPresetId): CameraPose {
   return preset === "cinematic" ? CAMERA_PRESETS.white : CAMERA_PRESETS[preset];
 }
 
+/* ------------------------------------------------------- aspect-aware framing */
+
+/**
+ * The poses above are fixed distances, and a perspective camera's HORIZONTAL field of
+ * view is its vertical fov widened by the canvas aspect. They were tuned in a wide box
+ * (the /dev/board3d harness is ~16:9) where that is generous; in a square one — which
+ * is exactly what the §5.1 game shell hands the board — the horizontal fov collapses to
+ * the vertical 40 deg and the near corners of the board fall outside the frame. The
+ * cinematic orbit makes it worse still: as the azimuth swings to 45 deg the board
+ * presents its DIAGONAL to the camera, which is another factor of root 2 wider.
+ *
+ * So: the distance a pose needs in order to keep `halfWidth` world units visible either
+ * side of the target, at this aspect. Purely horizontal — the vertical extent is
+ * foreshortened by the camera's elevation and has never been the binding constraint, and
+ * fitting it too would pull the wide-screen framing back for no reason.
+ *
+ * `depthAdvance` is the second half of the same sum and the reason the first version of
+ * this still clipped: a perspective frustum is a WEDGE, so the half-width it shows
+ * shrinks with depth. The corner of the board that has to stay in frame is not on the
+ * target plane — it sits `depthAdvance` world units NEARER the camera along the view
+ * axis, where the frame is `depthAdvance * tan(fov/2) * aspect` narrower. Pushing the
+ * camera back by exactly that much restores it. Zero reproduces the old plane-only fit,
+ * which is correct for anything that really does sit at the target's depth.
+ */
+export function minFitDistance(
+  halfWidth: number,
+  aspect: number,
+  fovDeg = CAMERA_LIMITS.fov,
+  depthAdvance = 0,
+): number {
+  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  const distance = halfWidth / (Math.tan((fovDeg * DEG) / 2) * safeAspect) + Math.max(0, depthAdvance);
+  // FR-22's ceiling still wins: better a hair cropped than floating out of the room.
+  return Math.min(distance, CAMERA_LIMITS.maxDistance);
+}
+
+/**
+ * How far in front of the target the near corner of a flat, board-plane object of
+ * half-depth `halfDepth` sits, measured along the camera's own view axis: the horizontal
+ * run of the pose direction (cos of its elevation) times that half-depth. A camera
+ * directly overhead gets 0 — nothing is nearer than the target — and a camera at eye
+ * level gets the whole `halfDepth`. Feed the result to `minFitDistance`.
+ */
+export function nearCornerAdvance(pose: CameraPose, halfDepth: number): number {
+  const dx = pose.position[0] - pose.target[0];
+  const dy = pose.position[1] - pose.target[1];
+  const dz = pose.position[2] - pose.target[2];
+  const distance = Math.hypot(dx, dy, dz);
+  if (distance === 0) return 0;
+  return (Math.hypot(dx, dz) / distance) * halfDepth;
+}
+
+/**
+ * `pose` pushed straight back along its own view direction until it is at least
+ * `minFitDistance` from its target — never pulled closer, so a wide canvas keeps the
+ * framing the presets were designed for and only a narrow one moves. Returns the pose
+ * unchanged (same object) when no correction is needed.
+ *
+ * `halfDepth` is the half-extent of the same object ALONG the ground, toward the camera
+ * (see `nearCornerAdvance`); pass 0 for a fit that only has to hold on the target plane.
+ */
+export function fitPoseToAspect(
+  pose: CameraPose,
+  halfWidth: number,
+  aspect: number,
+  halfDepth = 0,
+): CameraPose {
+  const [px, py, pz] = pose.position;
+  const [tx, ty, tz] = pose.target;
+  const dx = px - tx;
+  const dy = py - ty;
+  const dz = pz - tz;
+  const distance = Math.hypot(dx, dy, dz);
+  if (distance === 0) return pose;
+
+  const required = minFitDistance(
+    halfWidth,
+    aspect,
+    CAMERA_LIMITS.fov,
+    nearCornerAdvance(pose, halfDepth),
+  );
+  if (required <= distance) return pose;
+
+  const scale = required / distance;
+  return {
+    position: [tx + dx * scale, ty + dy * scale, tz + dz * scale],
+    target: pose.target,
+  };
+}
+
 /* ------------------------------------------------------------ quality tiers */
 
 export interface QualityConfig {

@@ -10,6 +10,13 @@ import { autoQualityTier, dropTier } from "../camera";
 import { DEFAULT_ROOM } from "../rooms";
 import { SETTINGS_STORAGE_KEY, type EngineBuild } from "../constants";
 
+/**
+ * The game screen's two shapes (UI_REDESIGN §5.2). `focus` hides the header and
+ * the sidebar and gives the board the whole viewport; it is chosen per session,
+ * never persisted — a reload starts back in the normal layout.
+ */
+export type LayoutMode = "default" | "focus";
+
 export interface UiState {
   /** True once settings from `players.me` have been merged in — gates the 3D mount
    *  so SSR defaults never cause a hydration mismatch. */
@@ -33,6 +40,8 @@ export interface UiState {
   orientation: Colour;
   historyDrawerOpen: boolean;
   settingsDrawerOpen: boolean;
+  /** UI_REDESIGN §5.2 board-focus layout. Session-only: NOT in `partialize`. */
+  layoutMode: LayoutMode;
   /** FR-21k: signed Convex storage URL for the player's uploaded backdrop, mirrored from
    *  `players.me`. Session-only — the URL expires, so it never goes to localStorage. */
   roomImageUrl: string | null;
@@ -61,6 +70,7 @@ export interface UiState {
   degradeTier(): void;
   setHistoryDrawerOpen(open: boolean): void;
   setSettingsDrawerOpen(open: boolean): void;
+  setLayoutMode(mode: LayoutMode): void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -84,6 +94,7 @@ export const useUiStore = create<UiState>()(
         orientation: "w",
         historyDrawerOpen: false,
         settingsDrawerOpen: false,
+        layoutMode: "default",
         roomImageUrl: null,
         engineBuild: null,
 
@@ -120,6 +131,7 @@ export const useUiStore = create<UiState>()(
         degradeTier: () => set((st) => ({ resolvedTier: dropTier(st.resolvedTier) })),
         setHistoryDrawerOpen: (historyDrawerOpen) => set({ historyDrawerOpen }),
         setSettingsDrawerOpen: (settingsDrawerOpen) => set({ settingsDrawerOpen }),
+        setLayoutMode: (layoutMode) => set({ layoutMode }),
       }),
       {
         name: SETTINGS_STORAGE_KEY,

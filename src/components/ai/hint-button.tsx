@@ -7,26 +7,19 @@
 // component entirely; `remaining` below is the live `game.hintsUsed` and updates
 // through the subscription as soon as the route has charged.
 //
-// Drop it straight into P3's controls: `<HintButton gameId={gameId} />`.
-import { useCallback } from "react";
+// U2 note: the round trip now lives in `use-hint.ts`, which the game screen's chat
+// composer (UI_REDESIGN §5.1) calls directly. This component is the standalone
+// button for anywhere outside that shell.
 import { useQuery } from "convex/react";
 import { LightbulbIcon } from "lucide-react";
-import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { MAX_HINTS_PER_GAME } from "@/lib/constants";
 import { DIFFICULTIES } from "@/lib/difficulty";
-import { postAiHint } from "@/lib/engine/ai-client";
-import { linesToCandidates } from "@/lib/engine/candidates";
-import { useStockfish } from "@/lib/engine/use-stockfish";
 import { useAiStore } from "@/lib/stores/ai-store";
-import type { Candidate, Difficulty, GameId } from "@/lib/types";
+import type { Difficulty, GameId } from "@/lib/types";
 import { cn } from "cn";
-
-/** A hint search is shallower than a real AI turn — it must feel instant. */
-const HINT_DEPTH = 12;
-const HINT_MULTI_PV = 3;
-const HINT_SEARCH_TIMEOUT_MS = 1_500;
+import { useHint } from "./use-hint";
 
 export interface HintButtonProps {
   gameId: GameId;
@@ -42,46 +35,19 @@ export function HintButton({ gameId, className }: HintButtonProps) {
   const isParticipant = view?.viewerRole === "white" || view?.viewerRole === "black";
   const isAiGame = game !== null && game.mode === "ai" && isParticipant;
 
-  const { search } = useStockfish(isAiGame && hintsAllowed);
-  const pending = useAiStore((s) => s.hintPending);
   const hint = useAiStore((s) => s.hint);
+  const { pending, request } = useHint({
+    gameId,
+    fen: game?.fen ?? "",
+    enabled: isAiGame && hintsAllowed,
+  });
 
-  const fen = game?.fen ?? "";
   const remaining = Math.max(0, MAX_HINTS_PER_GAME - (game?.hintsUsed ?? 0));
   const humanToMove =
     game !== null &&
     game.status === "active" &&
     game.aiColor !== undefined &&
     game.turn !== game.aiColor;
-
-  const requestHint = useCallback(async () => {
-    const store = useAiStore.getState();
-    store.setHintPending(true);
-    store.setHint(null);
-    try {
-      let candidates: Candidate[] = [];
-      try {
-        const result = await search({
-          fen,
-          depth: HINT_DEPTH,
-          multiPv: HINT_MULTI_PV,
-          skillLevel: 20,
-          timeoutMs: HINT_SEARCH_TIMEOUT_MS,
-        });
-        candidates = linesToCandidates(fen, result.lines);
-      } catch {
-        // No engine: the route falls back to the legal-move list.
-      }
-
-      const result = await postAiHint({ gameId, candidates });
-      useAiStore.getState().setHint(result);
-    } catch (error) {
-      useAiStore.getState().setHint(null);
-      toast.error(hintErrorMessage(error));
-    } finally {
-      useAiStore.getState().setHintPending(false);
-    }
-  }, [fen, gameId, search]);
 
   if (!isAiGame || !hintsAllowed) return null;
 
@@ -90,9 +56,7 @@ export function HintButton({ gameId, className }: HintButtonProps) {
       <Button
         variant="outline"
         size="sm"
-        onClick={() => {
-          void requestHint();
-        }}
+        onClick={request}
         disabled={pending || remaining === 0 || !humanToMove}
         aria-label={`Get a hint. ${remaining} of ${MAX_HINTS_PER_GAME} remaining.`}
       >
@@ -114,13 +78,4 @@ export function HintButton({ gameId, className }: HintButtonProps) {
       ) : null}
     </div>
   );
-}
-
-function hintErrorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "";
-  if (raw.includes("hint-limit")) return `No hints left — ${MAX_HINTS_PER_GAME} per game.`;
-  if (raw.includes("hints-unavailable")) return "Hints are only available on Beginner and Casual.";
-  if (raw.includes("game-not-active")) return "This game has finished.";
-  if (raw.includes("not-your-turn")) return "Wait for your turn to ask for a hint.";
-  return "Could not fetch a hint. Try again.";
 }

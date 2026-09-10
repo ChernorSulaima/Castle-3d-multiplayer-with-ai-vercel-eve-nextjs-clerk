@@ -2,15 +2,19 @@
 // P4's entry point: a drop-in `(props: BoardViewProps) => JSX.Element`, default-exported
 // for `next/dynamic({ ssr: false })`. It imports nothing from Convex and owns no chess
 // logic — every field it draws is computed by `useGameController` (§D.11).
+//
+// U3 adds the optional `showcase` prop of UI_REDESIGN §10.4 on top of that contract:
+// the same board, driven by values passed in instead of the ui-store, running as
+// scenery (idle orbit, no controls, paused off screen, capped dpr).
 "use client";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useEnvironment, type CameraControlsImpl } from "@react-three/drei";
 import { ACESFilmicToneMapping, type Mesh } from "three";
-import { Button } from "@/components/ui/button";
 import { CAMERA_LIMITS, QUALITY_TIERS, poseForPreset } from "@/lib/camera";
 import { resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { cn, useReducedMotion } from "@/lib/ui";
 import type {
   BoardViewProps,
   CameraPresetId,
@@ -18,9 +22,12 @@ import type {
   ResolvedQualityTier,
 } from "@/lib/types";
 import { useQualityWatchdog } from "@/hooks/use-quality-watchdog";
+import { CameraOverlay } from "./camera-overlay";
+import { FirstFrame, FrameRateSampler, FrameloopGate } from "./frame-signals";
 import { AutoTierProbe, QualityWatchdog } from "./quality";
 import { PostFx } from "./post-fx";
 import { Scene } from "./scene";
+import { clampDpr, resolveShowcase, type Board3DShowcase, type ResolvedShowcase } from "./showcase";
 import { preloadChessPieces } from "./use-chess-pieces";
 import { WebglFallbackNotice, WebglProbe, notifyRenderFailure } from "./webgl-fallback";
 
@@ -30,26 +37,45 @@ export function preloadAssets(hdriFiles?: string[]): void {
   for (const files of hdriFiles ?? []) useEnvironment.preload({ files });
 }
 
-const CAMERA_BUTTONS: { id: CameraPresetId; label: string }[] = [
-  { id: "white", label: "White" },
-  { id: "black", label: "Black" },
-  { id: "top", label: "Top" },
-  { id: "cinematic", label: "Orbit" },
-];
+export type { Board3DShowcase } from "./showcase";
+
+export interface Board3DProps extends BoardViewProps {
+  /** Present => showcase mode (§10.4). Absent => the game board, unchanged. */
+  showcase?: Board3DShowcase;
+  /**
+   * Hide the in-canvas camera overlay without entering showcase mode. The game shell
+   * (§5.1) puts White / Black / Top / Orbit / Reset in its own DOM action bar, and two
+   * copies of the same five buttons — one of them sitting over the bottom rank of the
+   * board — is worse than either alone. Outside showcase mode the wrapper stays a
+   * `role="application"` widget with its keyboard camera control (NFR-7) intact; only
+   * the buttons go. In showcase mode this is `showcase.hideControls` and the board
+   * becomes a picture instead.
+   */
+  hideControls?: boolean;
+  /** Fires once after the first frame is on screen, for a fade-in (§1.3). */
+  onFirstFrame?(): void;
+  /**
+   * Rendered frames per second, sampled about twice a second and silent while the
+   * loop is paused. Instrumentation for /dev/board3d; the game passes nothing.
+   */
+  onFrameRate?(fps: number): void;
+}
 
 /** Keyboard camera control (NFR-7) — the board itself is operated by P3's SAN input. */
 const KEY_ROTATE = 0.14;
 const KEY_POLAR = 0.09;
 const KEY_DOLLY = 0.9;
 
-export default function Board3D(props: BoardViewProps) {
+export default function Board3D(props: Board3DProps) {
   const {
     boardOrientation,
+    showcase,
     roomPreset,
     roomColors,
     tier,
     postFxEnabled,
     cameraPreset,
+    selectCameraPreset,
     cinematic,
     reducedMotion,
     webglAvailable,
@@ -85,8 +111,13 @@ export default function Board3D(props: BoardViewProps) {
   const [regressedTier, setRegressedTier] = useState<ResolvedQualityTier | null>(null);
   const onRegressDpr = useCallback(() => setRegressedTier(tier), [tier]);
   const onRestoreDpr = useCallback(() => setRegressedTier(null), []);
+  // §10.4: showcase caps the resolution on top of the tier — a hero must never cost
+  // more than the game it advertises.
+  const maxDpr = showcase?.maxDpr ?? Infinity;
   const canvasDpr: [number, number] | number =
-    regressedTier === tier ? Math.min(quality.dpr[1], quality.maxPixelRatioOnRegress) : quality.dpr;
+    regressedTier === tier
+      ? Math.min(quality.dpr[1], quality.maxPixelRatioOnRegress, maxDpr)
+      : clampDpr(quality.dpr, maxDpr);
 
   // The selected piece mesh reaches the post-processing Outline through a ref callback,
   // never a setState-in-effect (which `react-hooks/set-state-in-effect` forbids here).
@@ -132,9 +163,12 @@ export default function Board3D(props: BoardViewProps) {
     [reportFailure],
   );
 
+  // FR-24: touching the camera ends the idle orbit — except in showcase mode, where the
+  // orbit IS the point and nothing the visitor does may stop it (§10.4).
   const exitCinematic = useCallback(() => {
+    if (showcase) return;
     if (useUiStore.getState().cinematic) useUiStore.getState().setCinematic(false);
-  }, []);
+  }, [showcase]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const controls = controlsRef.current;
@@ -170,6 +204,34 @@ export default function Board3D(props: BoardViewProps) {
     event.preventDefault();
   }, []);
 
+  const resetCamera = useCallback(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    void controls.normalizeRotations().reset(true);
+  }, []);
+
+  // §10.4: while the wrapper is off screen the Canvas drops to `frameloop="demand"`,
+  // which renders only what invalidates. Only showcase boards do this — the game board
+  // is always the thing being looked at.
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const pauseWhenOffscreen = showcase?.pauseWhenOffscreen ?? false;
+  const [offscreen, setOffscreen] = useState(false);
+  useEffect(() => {
+    if (!pauseWhenOffscreen) return;
+    const node = wrapperRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) setOffscreen(!entry.isIntersecting);
+      },
+      { threshold: 0 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pauseWhenOffscreen]);
+  const paused = pauseWhenOffscreen && offscreen;
+
   // Frozen at mount: re-applying `camera` reactively would yank the camera out of a
   // CameraControls transition every time the preset changes.
   const [initialCamera] = useState(() => ({
@@ -192,22 +254,46 @@ export default function Board3D(props: BoardViewProps) {
     );
   }
 
+  const controlsHidden = props.hideControls ?? Boolean(showcase?.hideControls);
+  // A SHOWCASE board with no controls is a picture, not a widget: it must not offer
+  // keyboard camera control it does not have, and it must not sit in the tab order.
+  // A game board with `hideControls` is the opposite case — the controls moved to the
+  // shell's action bar, so the arrow keys, the tab stop and the orientation live
+  // region all stay exactly where they were.
+  const widget = !(showcase !== null && controlsHidden);
+
   return (
     <div
-      className="relative h-full min-h-[320px] w-full"
-      role="application"
-      aria-label="3D chess board. Arrow keys orbit the camera, plus and minus zoom, R resets it."
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
+      ref={wrapperRef}
+      className={cn("relative w-full", showcase ? "h-full" : "h-full min-h-[320px]")}
+      // Hook for the consumer's CSS (the landing fades this in on `onFirstFrame`).
+      data-showcase={showcase ? "true" : undefined}
+      data-paused={paused ? "true" : undefined}
+      role={widget ? "application" : "img"}
+      aria-label={
+        widget
+          ? "3D chess board. Arrow keys orbit the camera, plus and minus zoom, R resets it."
+          : `A 3D chess board in the ${room.label} room.`
+      }
+      tabIndex={widget ? 0 : undefined}
+      onKeyDown={widget ? handleKeyDown : undefined}
     >
       <WebglProbe onUnavailable={reportFailure} />
-      <AutoTierProbe />
+      {/* The auto tier probe reads the visitor's GPU into the ui-store; a showcase
+          board is told its tier and must not write settings back (§10.4). */}
+      {showcase ? null : <AutoTierProbe />}
 
       {webglAvailable === true && (
         <Canvas
           className="h-full w-full touch-none"
+          // §10.4: a non-interactive showcase ignores the pointer entirely, so the
+          // page behind it scrolls and the orbit is never interrupted. It has to be
+          // an inline style: fiber writes `pointerEvents: "auto"` on this same div
+          // itself, and an inline declaration outranks any class.
+          style={showcase && !props.interactive ? { pointerEvents: "none" } : undefined}
           shadows={canvasShadows}
           dpr={canvasDpr}
+          frameloop={paused ? "demand" : "always"}
           camera={initialCamera}
           gl={{
             antialias: !quality.post.composer,
@@ -232,7 +318,12 @@ export default function Board3D(props: BoardViewProps) {
               controlsRef={controlsRef}
               registerSelected={registerSelected}
               onUserInteract={exitCinematic}
+              // FR-25 restores the player's own seat from sessionStorage. A hero must
+              // not inherit it, and must not overwrite it either.
+              persistSession={!showcase}
+              paused={paused}
             />
+            <FirstFrame onFirstFrame={props.onFirstFrame} />
           </Suspense>
 
           <PostFx
@@ -246,70 +337,81 @@ export default function Board3D(props: BoardViewProps) {
             onRegressDpr={onRegressDpr}
             onRestoreDpr={onRestoreDpr}
           />
+
+          <FrameloopGate paused={paused} />
+          {props.onFrameRate ? <FrameRateSampler onFrameRate={props.onFrameRate} /> : null}
         </Canvas>
       )}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end p-2">
-        <div className="pointer-events-auto flex flex-wrap justify-end gap-1 rounded-lg bg-background/70 p-1 backdrop-blur-sm">
-          {CAMERA_BUTTONS.map((button) => (
-            <Button
-              key={button.id}
-              size="sm"
-              // Comfortable touch targets on a 360 px viewport (NFR-6).
-              className="min-h-9 min-w-11"
-              variant={cameraPreset === button.id ? "secondary" : "ghost"}
-              aria-pressed={cameraPreset === button.id}
-              onClick={() => useUiStore.getState().setCameraPreset(button.id)}
-            >
-              {button.label}
-            </Button>
-          ))}
-          <Button
-            size="sm"
-            className="min-h-9 min-w-11"
-            variant="ghost"
-            aria-label="Reset the camera"
-            onClick={() => {
-              const controls = controlsRef.current;
-              if (!controls) return;
-              void controls.normalizeRotations().reset(true);
-            }}
-          >
-            Reset
-          </Button>
-        </div>
-      </div>
+      {controlsHidden ? null : (
+        <CameraOverlay preset={cameraPreset} onSelect={selectCameraPreset} onReset={resetCamera} />
+      )}
 
-      <span className="sr-only" aria-live="polite">
-        {boardOrientation === "w" ? "Viewing from White's side." : "Viewing from Black's side."}
-      </span>
+      {widget && (
+        <span className="sr-only" aria-live="polite">
+          {boardOrientation === "w" ? "Viewing from White's side." : "Viewing from Black's side."}
+        </span>
+      )}
     </div>
   );
 }
 
-/** All the per-viewer view settings the board reads (never game state — §D.11). */
-function useBoardSettings(props: BoardViewProps) {
-  const roomPreset = useUiStore((state) => state.roomPreset);
-  const roomColors = useUiStore((state) => state.roomColors);
-  const tier = useUiStore((state) => state.resolvedTier);
-  const postFxEnabled = useUiStore((state) => state.postFxEnabled);
-  const cameraPreset = useUiStore((state) => state.cameraPreset);
-  const cinematic = useUiStore((state) => state.cinematic);
-  const reducedMotion = useUiStore((state) => state.reducedMotion);
+/**
+ * All the per-viewer view settings the board reads (never game state — §D.11).
+ *
+ * With a `showcase` prop it reads those values instead of the ui-store and never
+ * writes the store back (§10.4); the WebGL probe result is the one exception, because
+ * "this browser cannot do 3D at all" is a fact about the device, not a preference.
+ */
+function useBoardSettings(props: Board3DProps) {
+  const showcase: ResolvedShowcase | null = useMemo(
+    () => (props.showcase ? resolveShowcase(props.showcase) : null),
+    [props.showcase],
+  );
+  const inShowcase = showcase !== null;
+
+  const storeRoomPreset = useUiStore((state) => state.roomPreset);
+  const storeRoomColors = useUiStore((state) => state.roomColors);
+  const storeTier = useUiStore((state) => state.resolvedTier);
+  const storePostFx = useUiStore((state) => state.postFxEnabled);
+  const storeCameraPreset = useUiStore((state) => state.cameraPreset);
+  const storeCinematic = useUiStore((state) => state.cinematic);
+  const storeReducedMotion = useUiStore((state) => state.reducedMotion);
   const webglAvailable = useUiStore((state) => state.webglAvailable);
   // FR-21k: mirrored from `players.me` by use-settings-sync; null for signed-out players.
-  const roomImageUrl = useUiStore((state) => state.roomImageUrl);
+  const storeRoomImageUrl = useUiStore((state) => state.roomImageUrl);
+
+  // The game keeps this in the store (board-surface.tsx mirrors the media query into
+  // it); a showcase board can be mounted anywhere, so read the query as well.
+  const prefersReducedMotion = useReducedMotion();
+
+  // A showcase board still gets camera buttons when `hideControls` is false, and they
+  // have to land somewhere that is not the player's saved settings.
+  const [showcaseCamera, setShowcaseCamera] = useState<CameraPresetId | null>(null);
+  const selectCameraPreset = useCallback(
+    (preset: CameraPresetId) => {
+      if (inShowcase) setShowcaseCamera(preset);
+      else useUiStore.getState().setCameraPreset(preset);
+    },
+    [inShowcase],
+  );
+
+  const cameraPreset = showcase
+    ? (showcaseCamera ?? showcase.cameraPreset)
+    : storeCameraPreset;
 
   return {
     boardOrientation: props.orientation,
-    roomPreset,
-    roomColors,
-    tier,
-    postFxEnabled,
+    showcase,
+    roomPreset: showcase ? showcase.roomPreset : storeRoomPreset,
+    roomColors: showcase ? showcase.roomColors : storeRoomColors,
+    tier: showcase ? showcase.tier : storeTier,
+    postFxEnabled: showcase ? showcase.postFx : storePostFx,
     cameraPreset,
-    cinematic,
-    reducedMotion,
+    selectCameraPreset,
+    cinematic: showcase ? cameraPreset === "cinematic" : storeCinematic,
+    reducedMotion: storeReducedMotion || prefersReducedMotion,
     webglAvailable,
-    roomImageUrl: roomImageUrl ?? undefined,
+    roomImageUrl: showcase ? undefined : (storeRoomImageUrl ?? undefined),
   };
 }

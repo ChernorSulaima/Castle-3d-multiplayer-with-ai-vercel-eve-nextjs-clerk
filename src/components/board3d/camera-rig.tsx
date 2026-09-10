@@ -9,13 +9,49 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { CameraControls, CameraControlsImpl } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { Box3, Vector3 } from "three";
 import { CAMERA_FLIP_SMOOTH_TIME, CAMERA_SESSION_KEY } from "@/lib/constants";
-import { CAMERA_LIMITS, poseForPreset } from "@/lib/camera";
+import {
+  CAMERA_LIMITS,
+  fitPoseToAspect,
+  minFitDistance,
+  nearCornerAdvance,
+  poseForPreset,
+} from "@/lib/camera";
 import type { CameraPresetId } from "@/lib/types";
+import { BOARD_SIZE, PLINTH_SIZE } from "./layout";
 
 const { ACTION } = CameraControlsImpl;
+
+/** Largest frame delta the idle orbit will act on, in seconds (see useFrame below). */
+const MAX_ORBIT_DELTA = 1 / 6;
+
+/** A little air around whatever a fit is asked to keep in frame. */
+const FRAMING_MARGIN = 1.04;
+
+/**
+ * What a SEATED camera has to keep inside the frame, as a half-extent in world units
+ * (see `fitPoseToAspect`), on BOTH axes: the 8x8 playing area and the pieces standing on
+ * it. Its near corners are a half-board away in x and in z at the same time, and until
+ * this counted the z half as well the corner squares — a1 and h1, pieces and all — were
+ * sliced in half by the edge of a square canvas, which is exactly the box the §5.1 game
+ * shell hands the board.
+ *
+ * Deliberately the PLAYING AREA and not the plinth: the plinth's outer rim is furniture,
+ * it may bleed off the edge, and insisting on its far bottom corner costs a fifth of the
+ * board's size for wood nobody is looking at.
+ */
+const SEAT_HALF = (BOARD_SIZE / 2) * FRAMING_MARGIN;
+
+/**
+ * The cinematic orbit sweeps the azimuth through 45 deg, where the board presents its
+ * DIAGONAL to the camera — root 2 wider than a seat sees, measured on the plinth because
+ * an idle showcase board should sit in its room whole. That root 2 already IS the near
+ * corner's bound, reached from the other side, so this branch passes no depth term: doing
+ * both would charge for the same corner twice and shrink the landing hero for nothing.
+ */
+const ORBIT_HALF_WIDTH = (PLINTH_SIZE / 2) * FRAMING_MARGIN * Math.SQRT2;
 
 const TARGET_BOUNDS = new Box3(
   new Vector3(...CAMERA_LIMITS.boundaryMin),
@@ -66,6 +102,18 @@ export interface CameraRigProps {
   /** Shared handle so the DOM overlay's Reset button can drive the controls. */
   controlsRef: React.RefObject<CameraControlsImpl | null>;
   onUserInteract?(): void;
+  /**
+   * FR-25 session restore. Showcase boards pass `false` (§10.4): a landing hero must
+   * neither inherit the player's saved seat nor overwrite it with its own orbit.
+   */
+  persistSession?: boolean;
+  /**
+   * True while the showcase board's frameloop is "demand" because it is off screen.
+   * The orbit MUST stop: camera-controls fires `update` on every rotate and drei's
+   * <CameraControls> answers each one with `invalidate()`, so an orbit that keeps
+   * running keeps requesting frames and the pause never actually happens.
+   */
+  paused?: boolean;
 }
 
 export function CameraRig({
@@ -74,6 +122,8 @@ export function CameraRig({
   reducedMotion,
   controlsRef,
   onUserInteract,
+  persistSession = true,
+  paused = false,
 }: CameraRigProps) {
   const interacting = useRef(false);
   const skipNextPreset = useRef(false);
@@ -84,19 +134,59 @@ export function CameraRig({
   // Frozen at mount so the setup effect below stays a genuine one-shot.
   const [initialPreset] = useState(preset);
 
+  // Aspect-aware framing. The canvas is square in the §5.1 game shell, 16:9 in the
+  // /dev/board3d harness and something in between in the landing hero, and a fixed
+  // camera distance cannot serve all three: see `fitPoseToAspect`. This only ever
+  // pushes the camera BACK, so the wide framing the presets were tuned for is
+  // untouched and only a narrow canvas moves.
+  const { width, height } = useThree((state) => state.size);
+  const aspect = height > 0 ? width / height : 1;
+  const cinematicPreset = preset === "cinematic";
+  const halfWidth = cinematicPreset ? ORBIT_HALF_WIDTH : SEAT_HALF;
+  const halfDepth = cinematicPreset ? 0 : SEAT_HALF;
+  const fitDistance = minFitDistance(
+    halfWidth,
+    aspect,
+    CAMERA_LIMITS.fov,
+    nearCornerAdvance(poseForPreset(preset), halfDepth),
+  );
+
+  // Read by the effects below, which must not re-run on every resize (a preset effect
+  // that did would replay its animated transition, and cancel the player's own orbit,
+  // every time the sidebar or the mobile sheet changed the canvas size). Declared
+  // FIRST so the refs are current before any of them runs, on mount and after.
+  const aspectRef = useRef(aspect);
+  const halfWidthRef = useRef(halfWidth);
+  const halfDepthRef = useRef(halfDepth);
+  useEffect(() => {
+    aspectRef.current = aspect;
+    halfWidthRef.current = halfWidth;
+    halfDepthRef.current = halfDepth;
+  }, [aspect, halfWidth, halfDepth]);
+
+  // True once the player has taken the camera over (orbit, dolly, truck). The
+  // resize re-fit below leaves them alone from then on: someone who deliberately
+  // zoomed in to a few squares (FR-22) must not be yanked back out by a resize.
+  const userMoved = useRef(false);
+
   // One-time setup: pan boundary, the "reset" seat, and the FR-25 session restore.
   useEffect(() => {
     const controls = controlsRef.current;
     if (!controls) return;
 
     applyRigLimits(controls);
-    const pose = poseForPreset(initialPreset);
+    const pose = fitPoseToAspect(
+      poseForPreset(initialPreset),
+      SEAT_HALF,
+      aspectRef.current,
+      SEAT_HALF,
+    );
     void controls.setLookAt(...pose.position, ...pose.target, false);
     // FR-23: "Reset" returns to the player's seat, so the saved state is the preset
     // pose — never the restored session pose.
     controls.saveState();
 
-    const saved = readSession();
+    const saved = persistSession ? readSession() : null;
     if (saved) {
       try {
         void controls.fromJSON(saved, false);
@@ -112,13 +202,13 @@ export function CameraRig({
       if (locked.current) return;
       writeSession(controls.toJSON());
     };
-    controls.addEventListener("rest", persist);
+    if (persistSession) controls.addEventListener("rest", persist);
     return () => {
       controls.removeEventListener("rest", persist);
       locked.current = false;
       controls.enabled = true;
     };
-  }, [controlsRef, initialPreset]);
+  }, [controlsRef, initialPreset, persistSession]);
 
   // Animated preset / seat-flip transition (FR-23, FR-24, FR-21c).
   useEffect(() => {
@@ -131,7 +221,16 @@ export function CameraRig({
 
     let cancelled = false;
     const previousSmoothTime = controls.smoothTime;
-    const pose = poseForPreset(preset);
+    // Framed for the canvas as it is right now; read through the refs so a resize
+    // does not replay this transition.
+    const pose = fitPoseToAspect(
+      poseForPreset(preset),
+      halfWidthRef.current,
+      aspectRef.current,
+      halfDepthRef.current,
+    );
+    // A preset is a request for the canonical view, so it also hands the camera back.
+    userMoved.current = false;
 
     const release = () => {
       controls.smoothTime = previousSmoothTime;
@@ -153,7 +252,7 @@ export function CameraRig({
         controls.saveState();
         // The `rest` that ended this transition was swallowed by `locked`, so persist
         // the settled pose here or FR-25 would restore the pre-flip seat.
-        writeSession(controls.toJSON());
+        if (persistSession) writeSession(controls.toJSON());
       })
       .catch(() => {
         if (cancelled) return;
@@ -164,15 +263,32 @@ export function CameraRig({
       cancelled = true;
       release();
     };
-  }, [controlsRef, preset, reducedMotion]);
+  }, [controlsRef, persistSession, preset, reducedMotion]);
+
+  // The canvas changed shape (window resize, the sidebar appearing at 1024, the
+  // mobile sheet opening, entering the focus layout) and the pose no longer fits.
+  // Distance only: azimuth, polar and target are left exactly where they are, so this
+  // re-frames without ever re-seating the camera. Skipped once the player has taken
+  // the camera over, and while a preset transition owns it.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (userMoved.current || locked.current) return;
+    if (controls.distance >= fitDistance - 0.001) return;
+    void controls.dollyTo(fitDistance, false);
+  }, [controlsRef, fitDistance]);
 
   // Cinematic idle orbit. `cinematic` arrives as a prop (never a store hook in the
   // render loop — §D.12 rule 7) and interaction is tracked on a ref.
   useFrame((_, delta) => {
     const controls = controlsRef.current;
-    if (!controls || !cinematic || reducedMotion) return;
+    if (!controls || !cinematic || reducedMotion || paused) return;
     if (interacting.current || !controls.enabled) return;
-    controls.rotate(CAMERA_LIMITS.cinematicSpeed * delta, 0, false);
+    // A showcase board pauses its frameloop off screen, and r3f's clock keeps running
+    // while it is paused: the first delta after a resume covers the whole pause and
+    // would swing the camera through a quarter-turn in one frame. Cap it at one slow
+    // frame's worth (~6 fps) — the orbit picks up where the eye left it.
+    controls.rotate(CAMERA_LIMITS.cinematicSpeed * Math.min(delta, MAX_ORBIT_DELTA), 0, false);
   });
 
   return (
@@ -202,6 +318,7 @@ export function CameraRig({
       }}
       onControlStart={() => {
         interacting.current = true;
+        userMoved.current = true;
         onUserInteract?.();
       }}
       onControlEnd={() => {
@@ -209,7 +326,10 @@ export function CameraRig({
       }}
       // The wheel emits no controlstart/controlend but does emit 'control', so the
       // auto-orbit is cancelled by zooming as well as by dragging.
-      onControl={() => onUserInteract?.()}
+      onControl={() => {
+        userMoved.current = true;
+        onUserInteract?.();
+      }}
     />
   );
 }

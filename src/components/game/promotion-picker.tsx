@@ -1,7 +1,8 @@
 "use client";
-// src/components/game/promotion-picker.tsx  [P3]
-// FR-11. A DOM overlay shared by both boards: chess.js has no implicit auto-queen,
-// so nothing is sent to Convex until a piece is chosen.
+// src/components/game/promotion-picker.tsx  [P3 → restyled U2]
+// FR-11 / UI_REDESIGN §5.4: "a row of four piece glyphs in a small dialog".
+// A DOM overlay shared by both boards: chess.js has no implicit auto-queen, so
+// nothing is sent to Convex until a piece is chosen.
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { PieceGlyph, PIECE_NAMES } from "@/components/board2d/pieces-svg";
 import { Button } from "@/components/ui/button";
+import { Display } from "@/components/ui-kit";
 import type { PromotionPiece, PromotionPrompt } from "@/lib/types";
 
 const CHOICES: PromotionPiece[] = ["q", "r", "b", "n"];
@@ -30,9 +32,17 @@ export function PromotionPicker({ prompt, onChoose }: PromotionPickerProps) {
     >
       <DialogContent showCloseButton={false} className="sm:max-w-xs">
         <DialogHeader>
-          <DialogTitle>Promote your pawn</DialogTitle>
+          <DialogTitle>
+            <Display level={3} as="span" className="block text-[1.5rem] sm:text-[1.75rem]">
+              Promote your pawn
+            </Display>
+          </DialogTitle>
           <DialogDescription>
-            {prompt ? `${prompt.from} to ${prompt.to}. Pick a piece.` : null}
+            {prompt ? (
+              <span className="tabular font-mono">
+                {prompt.from} → {prompt.to}
+              </span>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-4 gap-2">
@@ -44,12 +54,8 @@ export function PromotionPicker({ prompt, onChoose }: PromotionPickerProps) {
               autoFocus={piece === "q"}
               onClick={() => onChoose(piece)}
             >
-              <PieceGlyph
-                type={piece}
-                colour={prompt?.colour ?? "w"}
-                className="h-10 w-10"
-              />
-              <span className="text-xs capitalize">{PIECE_NAMES[piece]}</span>
+              <PieceGlyph type={piece} colour={prompt?.colour ?? "w"} className="h-10 w-10" />
+              <span className="text-[12px] capitalize">{PIECE_NAMES[piece]}</span>
             </Button>
           ))}
         </div>

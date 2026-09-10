@@ -29,12 +29,31 @@ product; light theme exists and is tokenised, but nothing is designed light-firs
 | `--fg` | `#f1e7d3` ivory | `#1a130d` | primary text |
 | `--fg-muted` | `#b3a48c` | `#5c503f` | secondary text, labels |
 | `--line` | `#2d241b` | `#d9cdb7` | hairlines, borders |
-| `--accent` | `#c9a24a` brass | `#8a6a1f` | primary buttons, focus ring, selected state, headline italics |
+| `--accent` | `#c9a24a` brass | `#806018` | primary buttons, focus ring, selected state, headline italics |
 | `--accent-fg` | `#1a130d` | `#fbf7ee` | text on accent |
 | `--live` | `#3f9b73` baize | `#1f6b4d` | live indicators, success, "your turn" |
-| `--danger` | `#c4533a` ember | `#a63d27` | resign, check, destructive |
+| `--danger` | `#d4644a` ember | `#a63d27` | resign, check, destructive |
 | `--board-light` | `#d9b98a` | same | mini boards, illustrations |
 | `--board-dark` | `#7a4a22` | same | mini boards, illustrations |
+
+_Measured (U0, WCAG 2.1; `src/lib/ui/__tests__/contrast.test.ts` re-checks these against
+globals.css on every run). Two values moved off the first draft to clear 4.5:1 — light `--accent`
+`#8a6a1f` → `#806018` (was 4.29:1 on `--bg`) and dark `--danger` `#c4533a` → `#d4644a` (was
+4.25:1 on `--bg`). Everything else is as drafted._
+
+| Pair | Dark | Light |
+|---|---|---|
+| `--fg` on `--bg` | 15.66 | 15.62 |
+| `--fg-muted` on `--bg` | 7.87 | 6.68 |
+| `--fg-muted` on `--bg-elevated` | 7.35 | 7.34 |
+| `--fg-muted` on `--bg-sunken` | 8.14 | 5.99 |
+| `--accent-fg` on `--accent` | 7.66 | 5.45 |
+| `--accent` on `--bg` | 8.01 | 4.95 |
+| `--live` on `--bg` | 5.62 | 5.46 |
+| `--danger` on `--bg` | 5.23 | 5.38 |
+
+Board squares are the same in both themes: `--board-select` `#e0bb63`, `--board-last` `#c9a24a`
+(brass), `--board-legal` `#3f9b73` (baize), `--board-capture` `#dd7256`, `--board-check` `#c4402a`.
 
 Rules: exactly one accent (brass) for actions and emphasis; baize only for "live/turn/success";
 ember only for danger/check. No gradients except the hero's radial vignette behind the canvas.

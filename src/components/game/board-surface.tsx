@@ -64,7 +64,7 @@ export function BoardSurface(props: BoardViewProps) {
     // Same markup on the server and on the first client render (§D.12.6).
     return (
       <div
-        className="aspect-square w-full max-w-[min(100%,80vh)] animate-pulse rounded-xl bg-muted"
+        className="size-full animate-pulse rounded-xl bg-muted"
         role="status"
         aria-label="Loading the board"
       />
@@ -72,13 +72,23 @@ export function BoardSurface(props: BoardViewProps) {
   }
 
   if (boardView === "3d" && webglAvailable !== false) {
-    // Board3D fills its parent (`h-full`), so the box that defines the shared
-    // board footprint lives here — both views occupy exactly the same space.
+    // Board3D fills its parent (`h-full`); U2's shell owns the square box around
+    // this component, so both views occupy exactly the same space.
     return (
-      <div className="aspect-square w-full max-w-[min(100%,80vh)] overflow-hidden rounded-xl ring-1 ring-border">
-        <Board3DLoader {...props} onRenderFailure={onRenderFailure} />
+      <div className="size-full overflow-hidden rounded-xl ring-1 ring-border">
+        {/* §5.1 puts White / Black / Top / Orbit / Reset in the shell's own action
+            bar (and in the mobile "More" sheet and the focus HUD), so the in-canvas
+            copy of the same five buttons is redundant here and sits over the bottom
+            rank of the board. Hiding it is presentation only: the wrapper stays a
+            `role="application"` widget and the arrow / +- / R camera keys (NFR-7)
+            still work when the board has focus. */}
+        <Board3DLoader {...props} hideControls onRenderFailure={onRenderFailure} />
       </div>
     );
   }
-  return <Board2D {...props} />;
+  return (
+    <div className="grid size-full place-items-center">
+      <Board2D {...props} />
+    </div>
+  );
 }

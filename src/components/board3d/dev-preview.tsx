@@ -3,8 +3,13 @@
 // local chess.js position and a local PieceTracker so the whole 3D package can be driven
 // in a browser with no Clerk session, no Convex deployment and no game controller.
 // Nothing here ships to production — the route calls notFound() outside development.
+//
+// It also exercises the §10.4 showcase contract: the toggle swaps the board into
+// showcase mode, the second section below the board proves the off-screen frameloop
+// pause (the fps read-out in the header stops), and the header reports the
+// `onFirstFrame` callback the landing hero fades itself in with.
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Button } from "@/components/ui/button";
 import { CAMERA_FLIP_MS } from "@/lib/constants";
@@ -12,6 +17,7 @@ import { capturedFromMoves, checkSquareOf, fenAtPly, lastMoveAtPly, legalTargets
 import { PieceTracker } from "@/lib/piece-tracker";
 import { ROOM_ORDER } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { cn } from "@/lib/ui";
 import type {
   BoardPiece,
   CapturedPieces,
@@ -24,6 +30,7 @@ import type {
   SquareId,
 } from "@/lib/types";
 import { Board3DLoader } from "./board-3d-loader";
+import type { Board3DShowcase } from "./showcase";
 
 const SCRIPTS: Record<string, string[]> = {
   // Ruy Lopez with a queen trade — exercises slides, captures and the tray.
@@ -39,6 +46,10 @@ const SCRIPTS: Record<string, string[]> = {
 const SCRIPT_NAMES = Object.keys(SCRIPTS);
 const ROOM_CHOICES: RoomPresetId[] = [...ROOM_ORDER, "custom"];
 const TIER_CHOICES: QualityTier[] = ["auto", "low", "medium", "high"];
+/** No "custom" here: a showcase room without colours is just Minimal twice. */
+const SHOWCASE_ROOMS: RoomPresetId[] = [...ROOM_ORDER];
+/** No report for this long means the render loop is not running. */
+const FPS_STALE_MS = 900;
 
 interface DevBoardState {
   moves: string[];
@@ -75,12 +86,73 @@ export function Board3DDevPreview() {
   const [flipping, setFlipping] = useState(false);
   const [interactive, setInteractive] = useState(true);
 
+  /* ------------------------------------------------- §10.4 showcase mode */
+  const [showcaseOn, setShowcaseOn] = useState(false);
+  const [showcaseRoom, setShowcaseRoom] = useState<RoomPresetId>("study");
+  const [showControls, setShowControls] = useState(false);
+  const [pauseOffscreen, setPauseOffscreen] = useState(true);
+  const [fps, setFps] = useState<number | null>(null);
+  const [fpsStale, setFpsStale] = useState(true);
+  const [firstFrameMs, setFirstFrameMs] = useState<number | null>(null);
+  const lastFrameReport = useRef(0);
+  const mountedAt = useRef(0);
+  useEffect(() => {
+    mountedAt.current = performance.now();
+  }, []);
+
+  const onFrameRate = useCallback((value: number) => {
+    lastFrameReport.current = performance.now();
+    setFps(value);
+    setFpsStale(false);
+  }, []);
+
+  const onFirstFrame = useCallback(() => {
+    setFirstFrameMs(Math.round(performance.now() - mountedAt.current));
+  }, []);
+
+  // The sampler is silent while the loop is paused, so staleness is what proves the
+  // pause. Returning the previous value keeps React from re-rendering four times a
+  // second while nothing has changed.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setFpsStale((previous) => {
+        const stale = performance.now() - lastFrameReport.current > FPS_STALE_MS;
+        return stale === previous ? previous : stale;
+      });
+    }, 250);
+    return () => window.clearInterval(id);
+  }, []);
+
   const roomPreset = useUiStore((s) => s.roomPreset);
   const qualityTier = useUiStore((s) => s.qualityTier);
   const resolvedTier = useUiStore((s) => s.resolvedTier);
   const postFxEnabled = useUiStore((s) => s.postFxEnabled);
   const reducedMotion = useUiStore((s) => s.reducedMotion);
   const cameraPreset = useUiStore((s) => s.cameraPreset);
+  // FR-24 lives on this flag, not on the preset: any interaction with the GAME board
+  // clears it while `cameraPreset` stays "cinematic". Showing it makes the difference
+  // between the game board and a showcase board visible in the harness.
+  const cinematic = useUiStore((s) => s.cinematic);
+
+  /**
+   * The §10.4 prop. Tier and post FX are read from the store and PASSED IN — in
+   * showcase mode the board never reads the store itself, so this is what keeps the
+   * Quality / Post FX buttons above meaningful.
+   */
+  const showcase: Board3DShowcase | undefined = useMemo(
+    () =>
+      showcaseOn
+        ? {
+            roomPreset: showcaseRoom,
+            cameraPreset: "cinematic",
+            tier: resolvedTier,
+            postFx: postFxEnabled,
+            hideControls: !showControls,
+            pauseWhenOffscreen: pauseOffscreen,
+          }
+        : undefined,
+    [pauseOffscreen, postFxEnabled, resolvedTier, showControls, showcaseOn, showcaseRoom],
+  );
 
   const applyMove = useCallback(
     (from: SquareId, to: SquareId, promotionPiece?: PromotionPiece) => {
@@ -156,7 +228,7 @@ export function Board3DDevPreview() {
 
   return (
     <div className="flex min-h-dvh flex-col gap-2 p-2 sm:p-4">
-      <header className="flex flex-wrap items-center gap-1.5 text-xs">
+      <header className="sticky top-14 z-20 -mx-2 flex flex-wrap items-center gap-1.5 border-b border-border bg-background/90 px-2 py-2 text-xs backdrop-blur-sm sm:-mx-4 sm:px-4">
         <Button size="sm" onClick={playNext}>
           Play next move ({state.moves.length}/{SCRIPTS[scriptName].length})
         </Button>
@@ -221,11 +293,60 @@ export function Board3DDevPreview() {
         >
           Interactive: {interactive ? "on" : "off"}
         </Button>
+
+        <Button
+          size="sm"
+          variant={showcaseOn ? "default" : "outline"}
+          aria-pressed={showcaseOn}
+          onClick={() => setShowcaseOn((value) => !value)}
+        >
+          Showcase: {showcaseOn ? "on" : "off"}
+        </Button>
+        {showcaseOn && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const index = SHOWCASE_ROOMS.indexOf(showcaseRoom);
+                setShowcaseRoom(SHOWCASE_ROOMS[(index + 1) % SHOWCASE_ROOMS.length]);
+              }}
+            >
+              Showcase room: {showcaseRoom}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              aria-pressed={showControls}
+              onClick={() => setShowControls((value) => !value)}
+            >
+              Overlay: {showControls ? "shown" : "hidden"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              aria-pressed={pauseOffscreen}
+              onClick={() => setPauseOffscreen((value) => !value)}
+            >
+              Pause offscreen: {pauseOffscreen ? "on" : "off"}
+            </Button>
+          </>
+        )}
+
         <span className="text-muted-foreground">
-          camera: {cameraPreset} · turn: {state.turn === "w" ? "white" : "black"} · selected:{" "}
+          camera: {cameraPreset} (orbit {cinematic ? "on" : "off"}) · turn:{" "}
+          {state.turn === "w" ? "white" : "black"} · selected:{" "}
           {selected ?? "none"} · targets: {legalTargets.length}
           {state.checkSquare ? ` · check on ${state.checkSquare}` : ""}
           {flipping ? " · flipping" : ""}
+        </span>
+        <span className="tabular text-muted-foreground" aria-live="off">
+          {/* Ember is reserved for danger (§1.1) — a paused loop is expected, not wrong. */}
+          fps: <strong className={cn("font-mono", fpsStale ? "text-fg-muted" : "text-live")}>
+            {fpsStale ? "0 (paused)" : (fps ?? "—")}
+          </strong>
+          {" · first frame: "}
+          {firstFrameMs === null ? "waiting" : `${firstFrameMs} ms`}
         </span>
       </header>
 
@@ -250,7 +371,15 @@ export function Board3DDevPreview() {
       {/* `absolute inset-0` inside a sized flex child gives the Canvas a definite
           height — r3f measures its wrapper and a percentage chain that bottoms out in
           `height: auto` collapses to the 300x150 canvas default. */}
-      <main className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border">
+      {/* In showcase mode the board gets a fixed height and a second section below it,
+          so scrolling can push the canvas off screen and the fps read-out above proves
+          the frameloop actually stopped (§10.4). */}
+      <main
+        className={cn(
+          "relative overflow-hidden rounded-xl border border-border",
+          showcaseOn ? "h-[70vh] shrink-0" : "min-h-0 flex-1",
+        )}
+      >
         <div className="absolute inset-0">
         <Board3DLoader
           fen={state.fen}
@@ -273,9 +402,26 @@ export function Board3DDevPreview() {
           }
           onDeselect={() => setSelected(null)}
           onRenderFailure={(reason) => console.warn("[dev/board3d] render failure:", reason)}
+          showcase={showcase}
+          onFirstFrame={onFirstFrame}
+          onFrameRate={onFrameRate}
         />
         </div>
       </main>
+
+      {showcaseOn && (
+        <section className="flex h-[110vh] shrink-0 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-6 text-center">
+          <h2 className="font-display text-2xl">Scroll test</h2>
+          <p className="max-w-md text-sm text-fg-muted">
+            With the board above off screen the canvas switches to{" "}
+            <code className="rounded-sm bg-bg-sunken px-1 py-0.5 font-mono text-xs">
+              frameloop=&quot;demand&quot;
+            </code>{" "}
+            and stops rendering: the fps read-out in the header falls to 0 (paused).
+            Scroll back up and it picks the orbit up again.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

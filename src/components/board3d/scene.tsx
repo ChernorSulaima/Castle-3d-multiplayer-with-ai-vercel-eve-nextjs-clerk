@@ -32,6 +32,10 @@ export interface SceneProps {
   registerSelected(mesh: Mesh | null): void;
   onUserInteract(): void;
   roomImageUrl?: string;
+  /** False in showcase mode: never read or write the FR-25 camera snapshot (§10.4). */
+  persistSession?: boolean;
+  /** True while the frameloop is paused off screen — freeze the idle orbit (§10.4). */
+  paused?: boolean;
 }
 
 export function Scene({
@@ -46,6 +50,8 @@ export function Scene({
   registerSelected,
   onUserInteract,
   roomImageUrl,
+  persistSession = true,
+  paused = false,
 }: SceneProps) {
   const materials = useMemo(
     () => createPieceMaterials(room.pieces, quality.allowTransmission),
@@ -163,6 +169,8 @@ export function Scene({
         reducedMotion={reducedMotion}
         controlsRef={controlsRef}
         onUserInteract={onUserInteract}
+        persistSession={persistSession}
+        paused={paused}
       />
 
       <Preload all />

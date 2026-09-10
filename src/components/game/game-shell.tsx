@@ -1,44 +1,31 @@
 "use client";
-// src/components/game/game-shell.tsx  [P3]
-// The client root of /game/[id]. It mounts `useGameController` ABOVE the 2D/3D
-// swap (§D.11.8) so switching views never unmounts the game state, and it owns
-// the responsive layout: side panel on desktop, drawer on mobile (NFR-6).
-import { useCallback, useEffect, useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
-import { ListIcon, SettingsIcon } from "lucide-react";
+// src/components/game/game-shell.tsx  [P3 → split by U2]
+//
+// The container half of the game screen (UI_REDESIGN §10.3 "split rule"). It
+// mounts `useGameController` ABOVE the 2D/3D swap (§D.11.8) so switching views
+// never unmounts the game state, runs every Convex subscription the screen
+// needs, and hands `GameShellView` plain data. All layout lives in the view.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
-import { Button } from "@/components/ui/button";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CommentaryPanel } from "@/components/ai/commentary-panel";
-import { HintButton } from "@/components/ai/hint-button";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { preloadRoomAssets } from "@/components/settings/room-picker";
+import { useHint } from "@/components/ai/use-hint";
+import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { useAiTurn } from "@/hooks/use-ai-turn";
 import { useGameController } from "@/hooks/use-game-controller";
 import { useHeartbeat } from "@/hooks/use-heartbeat";
 import { useSettingsWriter } from "@/hooks/use-settings-sync";
-import { ABANDON_TIMEOUT_MS } from "@/lib/constants";
+import { ABANDON_TIMEOUT_MS, MAX_HINTS_PER_GAME } from "@/lib/constants";
+import { DIFFICULTIES } from "@/lib/difficulty";
+import { errorCopyFor } from "@/lib/errors";
+import { useAiStore } from "@/lib/stores/ai-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import type { BoardView, Colour, GameId, GameView } from "@/lib/types";
-import { MoveAnnouncer } from "./accessibility/move-announcer";
-import { BoardSurface } from "./board-surface";
-import { DrawOfferDialog } from "./draw-offer-dialog";
-import { GameControls } from "./game-controls";
-import { GameHeader } from "./game-header";
-import { GameResultDialog } from "./game-result-dialog";
-import { MoveHistoryPanel } from "./move-history-panel";
-import { PromotionPicker } from "./promotion-picker";
-import { ReviewBar } from "./review-bar";
-import { SpectatorBanner } from "./spectator-banner";
-import { TurnOverlay } from "./turn-overlay";
+import { GameShellView, type GameShellMeta } from "./game-shell-view";
 
 export interface GameShellProps {
   gameId: GameId;
@@ -47,92 +34,220 @@ export interface GameShellProps {
 }
 
 const PRESENCE_TICK_MS = 20_000;
-
-function seatOf(view: GameView | null): Colour | "both" | null {
-  switch (view?.viewerRole) {
-    case "white":
-      return "w";
-    case "black":
-      return "b";
-    case "local":
-      return "both";
-    default:
-      return null;
-  }
-}
+const NO_COMMENTARY: ChatCommentaryRow[] = [];
 
 export function GameShell({ gameId, initialView }: GameShellProps) {
+  const router = useRouter();
   const controller = useGameController(gameId, initialView);
-  const { view, board, actions } = controller;
+  const view = controller.view;
   const game = view?.game ?? null;
   const active = game?.status === "active";
+  const finished = game !== null && game.status !== "active" && game.status !== "waiting";
+  const mode = game?.mode ?? "online";
+  const viewerRole = view?.viewerRole ?? "spectator";
+  const isSpectator = viewerRole === "spectator";
+  const isParticipant = viewerRole === "white" || viewerRole === "black";
 
-  const boardView = useUiStore((s) => s.boardView);
-  const webglAvailable = useUiStore((s) => s.webglAvailable);
-  const historyDrawerOpen = useUiStore((s) => s.historyDrawerOpen);
-  const setHistoryDrawerOpen = useUiStore((s) => s.setHistoryDrawerOpen);
-  const settingsDrawerOpen = useUiStore((s) => s.settingsDrawerOpen);
-  const setSettingsDrawerOpen = useUiStore((s) => s.setSettingsDrawerOpen);
+  const { isAuthenticated } = useConvexAuth();
 
-  // FR-15: the in-game 2D/3D toggle is a PLAYER SETTING, so it has to survive a reload.
-  // The controller may only touch `api.games.*`, so the write-back is wired here.
-  // This is the ONE writer for the whole shell — the settings drawer's <SettingsForm/>
-  // shares it, so a change never queues two debounced `players.updateSettings` calls.
+  // FR-15: the in-game 2D/3D toggle is a PLAYER SETTING, so it has to survive a
+  // reload. The controller may only touch `api.games.*`, so the write-back is
+  // wired here — one writer for the whole shell, shared with <SettingsForm/>, so
+  // a change never queues two debounced `players.updateSettings` calls.
   const saveSettings = useSettingsWriter();
+  const setBoardViewPersisted = useCallback(
+    (next: BoardView) => {
+      useUiStore.getState().setBoardView(next);
+      saveSettings({ boardView: next });
+    },
+    [saveSettings],
+  );
+  const shellController = useMemo(
+    () => ({
+      ...controller,
+      actions: { ...controller.actions, setBoardView: setBoardViewPersisted },
+    }),
+    [controller, setBoardViewPersisted],
+  );
 
-  // FR-21m: opening the drawer is the earliest reliable signal that a preset switch is
-  // coming, so that is where the whole room asset set gets warmed (drei preload APIs,
-  // once per session, skipped on Save-Data / slow links — see room-picker.tsx).
-  const onSettingsDrawerOpenChange = useCallback(
+  // FR-21m: opening the drawer is the earliest reliable signal that a preset
+  // switch is coming, so that is where the room asset set gets warmed.
+  const setSettingsDrawerOpen = useUiStore((s) => s.setSettingsDrawerOpen);
+  const onRoomOpenChange = useCallback(
     (open: boolean) => {
       setSettingsDrawerOpen(open);
       if (open) preloadRoomAssets();
     },
     [setSettingsDrawerOpen],
   );
-  const setControllerBoardView = actions.setBoardView;
-  const setBoardViewPersisted = useCallback(
-    (next: BoardView) => {
-      setControllerBoardView(next);
-      saveSettings({ boardView: next });
-    },
-    [setControllerBoardView, saveSettings],
-  );
 
   useHeartbeat(gameId, active === true);
 
-  // P5 owns the pipeline; the game page is where it has to be mounted. Spectators
-  // must never drive it — `games.makeAiMove` requires a participant.
-  const isSpectator = view?.viewerRole === "spectator";
-  const aiTurn = useAiTurn(game?.mode === "ai" && !isSpectator ? gameId : null);
+  // P5 owns the pipeline; the game page is where it has to be mounted.
+  // Spectators must never drive it — `games.makeAiMove` requires a participant.
+  const aiTurn = useAiTurn(mode === "ai" && !isSpectator ? gameId : null);
+
+  const commentaryRows = useQuery(
+    api.commentary.forGame,
+    isAuthenticated && mode === "ai" ? { gameId } : "skip",
+  );
+  const commentary: ChatCommentaryRow[] = useMemo(
+    () =>
+      commentaryRows === undefined
+        ? NO_COMMENTARY
+        : commentaryRows.map((row) => ({
+            id: row._id,
+            ply: row.ply,
+            text: row.text,
+            source: row.source,
+            persona: row.persona,
+          })),
+    [commentaryRows],
+  );
 
   // FR-32: the exact source for "your opponent may have disconnected" is the
   // opponent's last heartbeat. `games.presenceFor` carries no wall clock, so the
-  // comparison happens here, on the same interval that drives the hint.
-  const { isAuthenticated } = useConvexAuth();
+  // comparison happens here, on its own interval.
   const presence = useQuery(
     api.games.presenceFor,
-    isAuthenticated && active && game?.mode === "online" ? { gameId } : "skip",
+    isAuthenticated && active && mode === "online" ? { gameId } : "skip",
   );
-
-  // A clock for the "opponent may have disconnected" hint. Never read during
-  // render from `Date.now()` directly — that is a purity error under the compiler.
   const [now, setNow] = useState(0);
   useEffect(() => {
-    if (!active || game?.mode !== "online") return;
+    if (!active || mode !== "online") return;
     const tick = () => setNow(Date.now());
     tick();
     const id = setInterval(tick, PRESENCE_TICK_MS);
     return () => clearInterval(id);
-  }, [active, game?.mode]);
+  }, [active, mode]);
+
+  /* ------------------------------------------------------------- hints */
+
+  const difficulty = game?.difficulty;
+  const hintsAllowed = difficulty !== undefined && DIFFICULTIES[difficulty].hintsAllowed;
+  const hintAvailable = mode === "ai" && isParticipant && hintsAllowed;
+  const hintApi = useHint({ gameId, fen: game?.fen ?? "", enabled: hintAvailable });
+  const hintRemaining = Math.max(0, MAX_HINTS_PER_GAME - (game?.hintsUsed ?? 0));
+  const humanToMove =
+    game !== null &&
+    game.status === "active" &&
+    game.aiColor !== undefined &&
+    game.turn !== game.aiColor;
+  const hintDisabledReason = hintApi.pending
+    ? "Fetching a hint…"
+    : hintRemaining === 0
+      ? errorCopyFor("hint-limit", "game")
+      : !humanToMove
+        ? "Wait for your turn to ask for a hint."
+        : null;
+
+  // A new game (or a take-back that rewinds past it) must not leave a stale hint
+  // bubble in the chat.
+  const movesPlayed = game?.moves.length ?? 0;
+  useEffect(() => {
+    useAiStore.getState().setHint(null);
+  }, [gameId, movesPlayed]);
+
+  /* -------------------------------------------------------- end of game */
+
+  const seat: Colour | "both" | null =
+    viewerRole === "white"
+      ? "w"
+      : viewerRole === "black"
+        ? "b"
+        : viewerRole === "local"
+          ? "both"
+          : null;
+  const viewerUsername =
+    seat === "w" || seat === "both"
+      ? (view?.white?.username ?? null)
+      : seat === "b"
+        ? (view?.black?.username ?? null)
+        : null;
+
+  // FR-49: the delta was written in the same transaction that finished the game.
+  const ratingRows = useQuery(
+    api.ratingHistory.forPlayer,
+    finished && game !== null && game.rated && viewerUsername !== null
+      ? { username: viewerUsername, pool: mode === "ai" ? "ai" : "human", limit: 10 }
+      : "skip",
+  );
+  const ratingRow = ratingRows?.find((row) => row.gameId === gameId) ?? null;
+
+  const createAiGame = useMutation(api.games.createAiGame);
+  const createLocalGame = useMutation(api.games.createLocalGame);
+  const [playAgainPending, setPlayAgainPending] = useState(false);
+  const playAgain = useCallback(() => {
+    if (game === null) return;
+    setPlayAgainPending(true);
+    void (async () => {
+      try {
+        if (game.mode === "ai" && game.difficulty && game.aiColor) {
+          const id = await createAiGame({
+            difficulty: game.difficulty,
+            // Keep the same seat the player had.
+            playerColor: game.aiColor === "w" ? "b" : "w",
+          });
+          router.push(`/game/${id}`);
+          return;
+        }
+        if (game.mode === "local") {
+          const id = await createLocalGame({ playerTwoName: game.localPlayerTwoName });
+          router.push(`/game/${id}`);
+          return;
+        }
+        router.push("/play");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not start a rematch.");
+      } finally {
+        setPlayAgainPending(false);
+      }
+    })();
+  }, [game, createAiGame, createLocalGame, router]);
+
+  /* --------------------------------------------------------------- meta */
+
+  const opponentSeat: Colour | null = seat === "w" ? "b" : seat === "b" ? "w" : null;
+  const opponentSeen =
+    presence === undefined || opponentSeat === null ? null : presence[opponentSeat];
+  const opponentStale =
+    now > 0 &&
+    mode === "online" &&
+    game !== null &&
+    (opponentSeen === null
+      ? now - game.lastMoveAt > ABANDON_TIMEOUT_MS
+      : now - opponentSeen > ABANDON_TIMEOUT_MS);
+  const opponentOnline =
+    mode === "online" && active && presence !== undefined && now > 0 ? !opponentStale : null;
+
+  const meta: GameShellMeta = {
+    commentary,
+    opponentStale,
+    opponentOnline,
+    spectatorCount: game?.spectatorCount ?? 0,
+    hint: {
+      available: hintAvailable,
+      remaining: hintRemaining,
+      max: MAX_HINTS_PER_GAME,
+      pending: hintApi.pending,
+      disabledReason: hintDisabledReason,
+      request: hintApi.request,
+    },
+    rating: ratingRow === null ? null : { delta: ratingRow.delta, after: ratingRow.after },
+    playAgainPending,
+    onPlayAgain: playAgain,
+    onRetryEngine: aiTurn.retryEngine,
+    roomSettings: <SettingsForm save={saveSettings} />,
+    onRoomOpenChange,
+  };
 
   if (!controller.ready || game === null || view === null) {
     return (
       <div className="mx-auto w-full max-w-6xl space-y-3 p-4">
         {controller.error === null ? (
           <>
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="aspect-square w-full max-w-[min(100%,80vh)] rounded-xl" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="aspect-square w-full max-w-[min(100%,70vh)] rounded-xl" />
             <p className="sr-only" role="status">
               Loading the game
             </p>
@@ -146,175 +261,5 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
     );
   }
 
-  const seat = seatOf(view);
-  const totalPlies = game.moves.length;
-  const viewerUsername =
-    seat === "w" || seat === "both"
-      ? (view.white?.username ?? null)
-      : seat === "b"
-        ? (view.black?.username ?? null)
-        : null;
-  // The opponent's heartbeat when we have one; `lastMoveAt` stays the fallback for
-  // spectators and for the moment before the presence subscription lands.
-  const opponentSeen =
-    presence === undefined || seat === null || seat === "both"
-      ? null
-      : presence[seat === "w" ? "b" : "w"];
-  const opponentStale =
-    now > 0 &&
-    game.mode === "online" &&
-    (opponentSeen === null
-      ? now - game.lastMoveAt > ABANDON_TIMEOUT_MS
-      : now - opponentSeen > ABANDON_TIMEOUT_MS);
-
-  const historyPanel = (idPrefix: string, className?: string) => (
-    <MoveHistoryPanel
-      idPrefix={idPrefix}
-      className={className}
-      history={controller.history}
-      reviewPly={controller.reviewPly}
-      totalPlies={totalPlies}
-      goToPly={actions.goToPly}
-      copyPgn={actions.copyPgn}
-      downloadPgn={actions.downloadPgn}
-    />
-  );
-
-  return (
-    <div className="mx-auto grid w-full max-w-6xl gap-4 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="min-w-0 space-y-3">
-        <GameHeader
-          view={view}
-          captured={board.captured}
-          // NOT `board.turn`: that follows the reviewed ply, while `turnLabel` is
-          // derived from the live game, and the two would contradict each other
-          // while a past position is on the board.
-          turn={game.turn}
-          turnLabel={controller.turnLabel}
-          orientation={board.orientation}
-          boardView={boardView}
-          webglAvailable={webglAvailable}
-          opponentStale={opponentStale}
-          onBoardViewChange={setBoardViewPersisted}
-        />
-
-        {view.viewerRole === "spectator" ? (
-          <SpectatorBanner spectatorCount={game.spectatorCount ?? 0} />
-        ) : null}
-
-        <DrawOfferDialog
-          offerFrom={controller.drawOfferFrom}
-          seat={seat}
-          pending={controller.pending}
-          onRespond={actions.respondDraw}
-        />
-
-        <div className="relative">
-          <BoardSurface {...board} />
-          {game.mode === "local" ? (
-            <TurnOverlay
-              visible={controller.flipping}
-              turn={game.turn}
-              name={game.turn === "w" ? view.whiteName : view.blackName}
-            />
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <ReviewBar
-            reviewPly={controller.reviewPly}
-            totalPlies={totalPlies}
-            autoplay={controller.autoplay}
-            goToPly={actions.goToPly}
-            stepReview={actions.stepReview}
-            setAutoplay={actions.setAutoplay}
-          />
-          <div className="flex items-center gap-2">
-            <Drawer open={historyDrawerOpen} onOpenChange={setHistoryDrawerOpen}>
-              <DrawerTrigger
-                render={<Button size="sm" variant="outline" className="lg:hidden" />}
-              >
-                <ListIcon aria-hidden />
-                Moves
-              </DrawerTrigger>
-              <DrawerContent className="max-h-[80dvh]">
-                <DrawerHeader>
-                  <DrawerTitle>Move history</DrawerTitle>
-                  <DrawerDescription>
-                    Tap a move to review that position.
-                  </DrawerDescription>
-                </DrawerHeader>
-                {historyPanel("drawer", "max-h-[55dvh]")}
-              </DrawerContent>
-            </Drawer>
-
-            {/* FR-21h: "players choose the room from a picker in the game settings
-                drawer". <SettingsForm /> writes through to the ui-store synchronously,
-                so a room change is visible behind the drawer while it is still open,
-                and it never touches the game document (FR-21m). */}
-            <Drawer open={settingsDrawerOpen} onOpenChange={onSettingsDrawerOpenChange}>
-              <DrawerTrigger render={<Button size="sm" variant="outline" />}>
-                <SettingsIcon aria-hidden />
-                Room
-              </DrawerTrigger>
-              <DrawerContent className="max-h-[85dvh]">
-                <DrawerHeader>
-                  <DrawerTitle>Board &amp; room settings</DrawerTitle>
-                  <DrawerDescription>
-                    Changes apply immediately and never interrupt the game.
-                  </DrawerDescription>
-                </DrawerHeader>
-                <div className="overflow-y-auto px-4 pb-6">
-                  <SettingsForm save={saveSettings} />
-                </div>
-              </DrawerContent>
-            </Drawer>
-          </div>
-        </div>
-
-        <GameControls
-          mode={game.mode}
-          seat={seat}
-          orientation={board.orientation}
-          reviewPly={controller.reviewPly}
-          pending={controller.pending}
-          canMove={controller.canMove}
-          canUndo={controller.canUndo}
-          canResign={controller.canResign}
-          canOfferDraw={controller.canOfferDraw}
-          actions={actions}
-          hintSlot={
-            game.mode === "ai" && !isSpectator ? <HintButton gameId={gameId} /> : null
-          }
-        />
-
-        {game.mode === "ai" ? (
-          <CommentaryPanel
-            gameId={gameId}
-            onRetryEngine={aiTurn.retryEngine}
-            className="rounded-lg border border-border"
-          />
-        ) : null}
-      </div>
-
-      <aside className="hidden min-h-0 rounded-lg border border-border lg:flex lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
-        {historyPanel("panel")}
-      </aside>
-
-      <PromotionPicker prompt={board.promotion} onChoose={actions.choosePromotion} />
-
-      <GameResultDialog view={view} seat={seat} viewerUsername={viewerUsername} />
-
-      <MoveAnnouncer
-        lastMove={board.lastMove}
-        turn={board.turn}
-        checkSquare={board.checkSquare}
-        status={game.status}
-        winner={game.winner}
-        whiteName={view.whiteName}
-        blackName={view.blackName}
-        reviewPly={controller.reviewPly}
-      />
-    </div>
-  );
+  return <GameShellView controller={shellController} viewerRole={viewerRole} meta={meta} />;
 }

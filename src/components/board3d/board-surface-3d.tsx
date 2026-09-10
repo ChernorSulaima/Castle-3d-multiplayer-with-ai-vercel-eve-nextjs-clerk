@@ -101,6 +101,13 @@ export function BoardSurface3D({ room, quality }: BoardSurface3DProps) {
         <planeGeometry args={[BOARD_EXTENT, BOARD_EXTENT]} />
         {quality.reflector.enabled ? (
           <MeshReflectorMaterial
+            // 0.6 mm above the plinth's top face is below what the depth buffer can
+            // resolve out at the seated camera's distance, and the playing area lost the
+            // z-fight in stripes — worst on a small canvas, where the fitted camera sits
+            // furthest back. A polygon offset settles it at every distance.
+            polygonOffset
+            polygonOffsetFactor={-2}
+            polygonOffsetUnits={-2}
             map={checker}
             resolution={quality.reflector.resolution}
             blur={reflector.blur}
@@ -116,6 +123,10 @@ export function BoardSurface3D({ room, quality }: BoardSurface3DProps) {
           />
         ) : (
           <meshStandardMaterial
+            // Same z-fight, same fix — see the reflective branch above.
+            polygonOffset
+            polygonOffsetFactor={-2}
+            polygonOffsetUnits={-2}
             map={checker}
             metalness={reflector.metalness}
             roughness={Math.min(1, reflector.roughness + 0.2)}

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { SignUp } from "@clerk/nextjs";
+import { AuthCard } from "@/app/sign-in/auth-card";
 
 export const metadata: Metadata = { title: "Sign up" };
 
@@ -10,9 +10,5 @@ export const metadata: Metadata = { title: "Sign up" };
  * `/sign-up/continue`, which must resolve to this same page (FR-2).
  */
 export default function SignUpPage() {
-  return (
-    <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-4 py-10">
-      <SignUp />
-    </div>
-  );
+  return <AuthCard kind="sign-up" />;
 }

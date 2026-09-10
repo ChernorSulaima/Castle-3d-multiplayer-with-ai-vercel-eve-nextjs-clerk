@@ -19,6 +19,11 @@ const eslintConfig = defineConfig([
     "convex/_generated/**", // written by `convex dev`, never hand-edited (§A.1)
     "public/stockfish/**", // vendored stockfish@11.0.0 emscripten glue (GPL-3.0)
     "public/models/**",
+    // Agent tooling that happens to live in the repo: bundled browser scripts we
+    // neither wrote nor ship. They were the only source of `pnpm lint` warnings.
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
   ]),
 ]);
 
