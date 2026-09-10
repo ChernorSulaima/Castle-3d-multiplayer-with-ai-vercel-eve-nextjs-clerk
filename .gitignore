@@ -51,3 +51,6 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 /playwright/.cache/
+
+# impeccable per-machine config
+.impeccable/config.local.json
