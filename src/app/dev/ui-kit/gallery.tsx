@@ -168,7 +168,7 @@ export function UiKitGallery() {
           <StatPill tone="live" dot value="14" label="playing now" />
           <StatPill value="1,204" label="games today" />
           <StatPill tone="brass" value="+18" label="rating" />
-          <StatPill tone="danger" value="Check!" />
+          <StatPill tone="danger" value="Check" />
         </div>
       </Group>
 

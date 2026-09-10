@@ -62,7 +62,7 @@ export function LandingFooter() {
               <span aria-hidden className="text-lg leading-none text-primary">
                 ♞
               </span>
-              3D Chess
+              Castle
             </p>
             <p className="mt-2 max-w-[42ch] text-[13px] text-muted-foreground">
               An online chess club with rooms you can sit in. Free, and it runs in your browser.

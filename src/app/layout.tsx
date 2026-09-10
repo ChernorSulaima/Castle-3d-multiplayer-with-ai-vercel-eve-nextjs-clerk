@@ -25,7 +25,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: { default: "3D Chess", template: "%s · 3D Chess" },
+  title: { default: "Castle", template: "%s · Castle" },
   description: "Online 3D chess with real-time matchmaking, an AI opponent and custom rooms.",
 };
 

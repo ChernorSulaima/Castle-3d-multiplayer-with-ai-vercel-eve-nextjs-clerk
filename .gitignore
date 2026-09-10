@@ -54,3 +54,6 @@ next-env.d.ts
 
 # impeccable per-machine config
 .impeccable/config.local.json
+
+# codex cli local state
+.codex/

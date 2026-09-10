@@ -1,7 +1,7 @@
 "use client";
 // src/components/game/game-status-pill.tsx  [U2]
 // UI_REDESIGN §5.1: 'Status pill (centre top): "Move 12 · White to move" /
-// "Check!" (ember) / "Reviewing move 8 · Back to live" (brass, clickable) /
+// "Check" (ember) / "Reviewing move 8 · Back to live" (brass, clickable) /
 // result text when over. Difficulty badge for AI games.'
 import { RadioIcon, RotateCcwIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,7 @@ export function GameStatusPill({
         value={
           <span className="inline-flex items-center gap-1.5">
             <TriangleAlertIcon className="size-3.5" aria-hidden />
-            Check!
+            Check
           </span>
         }
         label={<span className="hidden sm:inline">{turnLabel} to move</span>}

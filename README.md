@@ -1,4 +1,4 @@
-# 3D Chess
+# Castle
 
 Online chess with a real 3D board, live matchmaking, an AI opponent that explains itself,
 pass-and-play on one device, spectating, replay and a rated leaderboard.

@@ -70,7 +70,7 @@ export function SiteHeader() {
         <Link
           prefetch={false}
           href="/"
-          aria-label="3D Chess — home"
+          aria-label="Castle — home"
           className={cn(
             "flex shrink-0 items-center gap-2 rounded-lg px-1 py-1 text-foreground",
             focusRing,
@@ -83,7 +83,7 @@ export function SiteHeader() {
               otherwise clip "Leaderboard" mid-word at 375-390. The link keeps its
               accessible name either way. */}
           <span className="hidden text-sm font-semibold tracking-tight sm:inline sm:text-[0.9375rem]">
-            3D Chess
+            Castle
           </span>
         </Link>
 

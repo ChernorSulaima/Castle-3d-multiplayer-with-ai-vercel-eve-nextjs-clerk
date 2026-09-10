@@ -330,8 +330,8 @@ describe("buildPgn", () => {
   });
 
   it("writes the seven-tag roster with a zero-padded UTC date", () => {
-    expect(pgn).toContain('[Event "3D Chess"]');
-    expect(pgn).toContain('[Site "3D Chess"]');
+    expect(pgn).toContain('[Event "Castle"]');
+    expect(pgn).toContain('[Site "Castle"]');
     expect(pgn).toContain('[Date "2026.09.09"]');
     expect(pgn).toContain('[White "Marco"]');
     expect(pgn).toContain('[Black "Ada"]');

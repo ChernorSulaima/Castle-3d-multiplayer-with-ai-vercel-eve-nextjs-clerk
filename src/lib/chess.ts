@@ -135,8 +135,8 @@ export function buildPgn(
   const chess = replay(moves);
   const d = headers.date ?? new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  chess.setHeader("Event", headers.event ?? "3D Chess");
-  chess.setHeader("Site", "3D Chess");
+  chess.setHeader("Event", headers.event ?? "Castle");
+  chess.setHeader("Site", "Castle");
   chess.setHeader("Date", `${d.getUTCFullYear()}.${pad(d.getUTCMonth() + 1)}.${pad(d.getUTCDate())}`);
   chess.setHeader("White", headers.white);
   chess.setHeader("Black", headers.black);
