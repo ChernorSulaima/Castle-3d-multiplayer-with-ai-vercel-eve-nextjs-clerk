@@ -86,9 +86,12 @@ a production domain, a privacy policy, terms.
 
 ## Brand Commitments
 
-- **Name and voice are open.** "3D Chess" and the knight glyph are placeholders; future work
-  may propose a real name, wordmark and voice, subject to the owner's approval. Do not treat
-  the placeholder as a commitment.
+- **Name: Castle** (owner's decision, 2026-09-10; see docs/BRAND_BRIEF.md). The knight glyph
+  stays as the mark. "3D Chess" was the working title and may still appear in old commits and
+  screenshots; new work uses Castle everywhere.
+- **Voice: the club host** — warm, confident, brief; says what happens; never apologises; dry
+  wit at most once per screen; never explains the stack. The full guide, lexicon and sample
+  lines are in docs/BRAND_BRIEF.md section 4. The five AI personas keep their own voices.
 - Mandatory credits that must stay visible somewhere a player can find them: "Chess pieces by
   Jarlan Perez via Poly Pizza — CC BY 3.0"; HDRIs from Poly Haven (CC0); Stockfish (GPL v3).
 - Copy is written in sentence case with plain verbs; buttons say what happens. No filler, no
