@@ -10,6 +10,16 @@ import { expect, test } from "@playwright/test";
 import { hideNextDevOverlay } from "./helpers/app";
 import { watchConsole } from "./helpers/console";
 
+/**
+ * The `/dev/*` harnesses answer `notFound()` outside development, so against a
+ * deployed base URL (E2E_BASE_URL=https://…) the harness tests are skipped rather
+ * than failed; the public routes still run everywhere.
+ */
+const IS_LOCAL = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/.test(
+  process.env.E2E_BASE_URL || "http://localhost:3000",
+);
+const DEV_ONLY = "the /dev harnesses are notFound() outside development";
+
 test.describe("public routes", () => {
   test.beforeEach(async ({ page }) => {
     await hideNextDevOverlay(page);
@@ -120,6 +130,7 @@ test.describe("public routes", () => {
   });
 
   test("the dev 3D harness mounts a canvas with the camera overlay", async ({ page }) => {
+    test.skip(!IS_LOCAL, DEV_ONLY);
     await page.goto("/dev/board3d");
 
     // Board3D's wrapper. It is only rendered while the WebGL2 probe has not said
@@ -145,6 +156,7 @@ test.describe("public routes", () => {
   test("the dev game harness renders the shell, its action bar and the chat", async ({
     page,
   }) => {
+    test.skip(!IS_LOCAL, DEV_ONLY);
     await page.goto("/dev/game?scenario=ai-midgame");
 
     // §8: the harness renders the real GameShellView against a mocked controller, so
@@ -206,6 +218,7 @@ test.describe("public routes", () => {
   });
 
   test("the focus layout hides the header and keeps the essentials", async ({ page }) => {
+    test.skip(!IS_LOCAL, DEV_ONLY);
     await page.goto("/dev/game?scenario=fullscreen");
 
     // §5.2: the shell sets `data-layout="focus"` on <html> and the header hides
@@ -239,6 +252,7 @@ test.describe("public routes", () => {
   });
 
   test("a draw offer reaches the focus layout", async ({ page }) => {
+    test.skip(!IS_LOCAL, DEV_ONLY);
     await page.goto("/dev/game?scenario=online-draw-offer");
 
     // FR-31 in the default layout: the banner sits above the action bar, and the
@@ -262,6 +276,7 @@ test.describe("public routes", () => {
   });
 
   test("the ui-kit gallery renders every primitive", async ({ page }) => {
+    test.skip(!IS_LOCAL, DEV_ONLY);
     await page.goto("/dev/ui-kit");
 
     // The shared kit, each primitive in its own anchored section. If one of them
@@ -292,15 +307,12 @@ test.describe("public routes", () => {
   test("the public routes log no console errors", async ({ page }) => {
     const consoleWatcher = watchConsole(page);
 
-    for (const route of [
-      "/",
-      "/leaderboard",
-      "/sign-in",
-      "/dev/board3d",
-      "/dev/game?scenario=ai-midgame",
-      "/dev/ui-kit",
-      "/dev/pages",
-    ]) {
+    // Outside development the sweep ends on "/", whose hero is the showcase board the
+    // assertion below looks for; locally it ends on /dev/pages as described there.
+    const routes = IS_LOCAL
+      ? ["/", "/leaderboard", "/sign-in", "/dev/board3d", "/dev/game?scenario=ai-midgame", "/dev/ui-kit", "/dev/pages"]
+      : ["/leaderboard", "/sign-in", "/"];
+    for (const route of routes) {
       await page.goto(route);
       // Let hydration, Convex's websocket and Clerk's script settle before moving on.
       await page.waitForLoadState("networkidle");
