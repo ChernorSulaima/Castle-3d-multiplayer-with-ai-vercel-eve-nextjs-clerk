@@ -112,6 +112,35 @@ describe.each([
   });
 });
 
+describe("chat bubble, `you` variant", () => {
+  // src/components/ui-kit/chat-message.tsx sets the player's own bubble as
+  // `bg-line` + `text-foreground dark:text-primary`, i.e. --fg on --line in light
+  // and --accent on --line in dark. The pairing is per-theme, so it cannot ride in
+  // TEXT_PAIRS (which asserts the same two tokens against both palettes) — brass on
+  // light seam is 3.71:1 and is exactly what this bubble must never go back to.
+  it("light sets the label in ink on seam", () => {
+    const ratio = contrastRatio(LIGHT["--fg"]!, LIGHT["--line"]!);
+    expect(
+      Number(ratio.toFixed(2)),
+      `--fg (${LIGHT["--fg"]}) on --line (${LIGHT["--line"]}) is ${ratio.toFixed(2)}:1`,
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("dark keeps the brass it earns on seam", () => {
+    const ratio = contrastRatio(DARK["--accent"]!, DARK["--line"]!);
+    expect(
+      Number(ratio.toFixed(2)),
+      `--accent (${DARK["--accent"]}) on --line (${DARK["--line"]}) is ${ratio.toFixed(2)}:1`,
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("records why light mode cannot use brass here", () => {
+    // Not an aspiration: if a future palette ever lifts light brass over 4.5:1 on
+    // seam this fails, and `dark:text-primary` can go back to being unconditional.
+    expect(contrastRatio(LIGHT["--accent"]!, LIGHT["--line"]!)).toBeLessThan(4.5);
+  });
+});
+
 describe("board tokens", () => {
   it("keeps the two square colours apart", () => {
     expect(contrastRatio(LIGHT["--board-light"]!, LIGHT["--board-dark"]!)).toBeGreaterThanOrEqual(3);

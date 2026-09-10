@@ -15,24 +15,28 @@ export interface Board3DSkeletonProps {
 }
 
 /**
- * Deliberately tonal rather than decorative: a walnut panel the shape of the board, a
- * slow pulse (killed globally under `prefers-reduced-motion` by globals.css) and one
- * plain line of copy. `role="status"` announces it once; there is no second sr-only
- * string to double it up.
+ * Deliberately tonal rather than decorative: a slow breath of light on the espresso
+ * ground (the pulse is killed globally under `prefers-reduced-motion` by globals.css)
+ * and one plain line of copy. `role="status"` announces it once; there is no second
+ * sr-only string to double it up.
+ *
+ * FRAMELESS on purpose. DESIGN.md, Don'ts: "Don't frame the 3D board with a border,
+ * card or box; its light is its edge." This skeleton covers the two consecutive waits
+ * before the first frame, so a rounded hairline box here put the removed frame back on
+ * screen for exactly as long as anyone was watching for it — and then snapped it away.
+ * A soft radial wash carries the wait instead: no ring, no radius, no rectangle.
  */
 export function Board3DSkeleton({ className }: Board3DSkeletonProps) {
   return (
     <div
       role="status"
-      className={cn("grid h-full w-full place-items-center p-2", className)}
+      className={cn("grid h-full w-full place-items-center bg-background", className)}
     >
       <div
         aria-hidden
-        className="col-start-1 row-start-1 h-full w-full max-w-[min(100%,720px)] animate-pulse rounded-xl border border-border/60 bg-card/40"
+        className="col-start-1 row-start-1 h-full w-full animate-pulse bg-[radial-gradient(ellipse_at_center,var(--color-bg-elevated)_0%,transparent_70%)]"
       />
-      <span className="col-start-1 row-start-1 text-sm text-fg-muted">
-        Setting the board…
-      </span>
+      <span className="col-start-1 row-start-1 text-sm text-fg-muted">Setting the board…</span>
     </div>
   );
 }

@@ -229,7 +229,6 @@ chess-3d-ai-clerk-game/
     │   │   ├── board-view-toggle.tsx       [P3]  2D/3D switch in the board header (FR-14)
     │   │   ├── game-header.tsx             [P3]  players, ratings, difficulty badge, turn indicator, status
     │   │   ├── move-history-panel.tsx      [P3]  SAN pairs, click-to-review, PGN copy/download
-    │   │   ├── game-controls.tsx           [P3]  resign, draw offer/respond, take-back, rewind-to-here, hint slot
     │   │   ├── review-bar.tsx              [P3]  first/prev/next/last + autoplay + "Reviewing move N" banner
     │   │   ├── promotion-picker.tsx        [P3]  4-piece dialog shared by both boards (DOM overlay)
     │   │   ├── captured-tray.tsx           [P3]  2D tray + material count (3D has its own in P4)

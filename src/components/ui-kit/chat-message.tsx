@@ -87,9 +87,14 @@ export function ChatMessage({
     return (
       <li className={cn("flex justify-end", className)} {...props}>
         {/* DESIGN.md `chat-bubble-you` and The One Metal Rule: the player's own
-            bubbles are SEAM with brass text. A brass wash here read as a pressable
-            surface, and brass is reserved for things you can press. */}
-        <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-line px-3 py-2 text-[13px] text-primary motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150">
+            bubbles are SEAM, never a brass wash — a brass fill read as a pressable
+            surface, and brass is reserved for things you can press.
+            The TEXT, though, can only be brass where brass is readable: light brass
+            (--accent #806018) on light seam (--line #d9cdb7) is 3.71:1, under the
+            4.5:1 floor, so light mode sets the label in ink (--fg on --line, 11.70:1)
+            and dark keeps the brass it earns (#c9a24a on #2d241b, 6.34:1). Both
+            pairs are asserted against globals.css in src/lib/ui/__tests__/contrast.test.ts. */}
+        <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-line px-3 py-2 text-[13px] text-foreground motion-safe:animate-in motion-safe:zoom-in-98 motion-safe:duration-150 dark:text-primary">
           {children}
         </div>
       </li>

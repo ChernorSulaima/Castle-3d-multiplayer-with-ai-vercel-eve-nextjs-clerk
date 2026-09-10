@@ -115,7 +115,15 @@ export function Board2D(props: BoardViewProps) {
     // cap only made the 2D board smaller than the 3D one in the focus layout (where
     // the box is close to 100dvh). The single caller — src/components/game/board-surface.tsx
     // — always centres this inside that square box, so `w-full` is the right size.
-    <div className="relative aspect-square w-full max-w-full overflow-hidden rounded-xl ring-1 ring-border select-none">
+    //
+    // The frame is deliberately HARD-EDGED. DESIGN.md, Shapes: "The board's frame
+    // and squares are the only hard-edged rectangles in the system." The 12px
+    // `rounded-xl` that used to be here was also eating coordinates: the rank "8"
+    // sits 2px/4px into the a8 square and the file "h" the same distance into h1,
+    // and with `overflow-hidden` a 12px corner clips everything outside its
+    // quarter-circle — (12-4)² + (12-2)² = 164 > 12². Square corners clip nothing
+    // and are what the spec asked for; the hairline ring stays.
+    <div className="relative aspect-square w-full max-w-full overflow-hidden rounded-none ring-1 ring-border select-none">
       <div
         role="grid"
         aria-label={`Chess board, ${orientation === "w" ? "white" : "black"} at the bottom`}

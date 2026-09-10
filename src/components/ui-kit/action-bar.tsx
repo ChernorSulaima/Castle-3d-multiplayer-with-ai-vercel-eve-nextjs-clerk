@@ -23,7 +23,21 @@ export function ActionBar({ label, variant = "default", className, ...props }: A
       role="toolbar"
       aria-label={label}
       className={cn(
-        "no-scrollbar flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-border",
+        // WRAPS, never scrolls. Ten labelled actions are ~974px wide and the board
+        // column is 861px at 1280 and 1023px at 1440, so the old `overflow-x-auto`
+        // meant the last actions were simply off the end of a bar nobody thinks to
+        // scroll. §5.1's rule is that every game action is visible and labelled, so
+        // the bar takes a second line instead — the board box above it is `flex-1`
+        // inside the column, so the square recomputes off the height that is left.
+        "flex w-full flex-wrap items-center gap-x-1 gap-y-1 rounded-xl border border-border",
+        // Buttons run tighter inside a bar than they do standing alone (8px flanks,
+        // 4px icon-to-label, against the base 10px/6px): that is ~110px across ten
+        // actions, and it is the difference between one line and two at 1440.
+        // Reached by element, not by `[data-slot=button]`: every action here is a
+        // Button rendered THROUGH `TooltipTrigger`, and Base UI's `render` merge
+        // lets the outer part win the attribute, so each one is
+        // `data-slot="tooltip-trigger"` in the DOM.
+        "[&_button]:gap-1 [&_button]:px-2",
         "bg-card p-1.5",
         // DESIGN.md, The Only-Floating-Things-Cast-Shadows Rule: the bar beneath
         // the board is part of the page and gets tone and a hairline; only the
@@ -43,8 +57,8 @@ export function ActionGroup({ className, ...props }: React.ComponentProps<"div">
     // sets `shrink-0`), so a group that CAN shrink gets squeezed by the flex line
     // and its children spill over the group beside it — at 1440px "Resign" sat
     // underneath "PGN" and could not be clicked at its own centre. Holding the
-    // group's width instead lets the bar do what it already says it does and
-    // scroll (`overflow-x-auto`).
+    // group's width instead is what lets the bar wrap a whole group onto the next
+    // line rather than tearing one in half.
     <div className={cn("flex shrink-0 items-center gap-1", className)} {...props} />
   );
 }
