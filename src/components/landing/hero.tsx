@@ -45,7 +45,7 @@ export function Hero() {
   return (
     <>
       {/* `isolate` keeps the vignette behind the board and off the header. */}
-      <section aria-labelledby="hero-heading" className="relative isolate overflow-hidden">
+      <section aria-labelledby="hero-heading" className="relative isolate overflow-hidden lg:-mt-14 lg:pt-14">
         <div className="mx-auto w-full max-w-[80rem] px-4 sm:px-6">
           <div className="grid items-center gap-8 pt-8 pb-10 sm:pt-10 lg:grid-cols-12 lg:gap-8 lg:pt-10 lg:pb-12">
             <div className="lg:col-span-5">
@@ -75,17 +75,25 @@ export function Hero() {
             </div>
 
             <div className="min-w-0 lg:col-span-7">
+              {/* Reserves the board's height on desktop; the canvas itself is the
+                  absolutely positioned layer below, so it can touch the top and the
+                  right edge of the viewport instead of stopping at the grid. */}
+              <div aria-hidden className="hidden lg:block lg:h-[min(72vh,720px)]" />
               <div
                 ref={boardRef}
-                // §3: the canvas is allowed to bleed off the right of the grid; the
-                // section clips it, so the page never scrolls sideways.
-                className="relative h-[max(56vw,20rem)] w-full lg:h-[min(72vh,720px)] lg:w-[calc(100%+6vw)]"
+                // Mobile: in flow, full width. Desktop: pinned to the section's top
+                // and right edges (the section sits under the transparent header),
+                // starting left of the column so the mask can dissolve it toward the
+                // headline. Non-interactive, so it never intercepts pointer events.
+                className="relative h-[max(56vw,20rem)] w-full lg:pointer-events-none lg:absolute lg:inset-y-0 lg:right-0 lg:left-[44%] lg:h-auto lg:w-auto xl:left-[46%]"
               >
                 <HeroBoard game={game} room={room} tier={tier} />
               </div>
 
-              <NotationStrip moves={game.moves} ply={game.ply} className="mt-3 -ml-4" />
-              <p className="mt-1 text-[13px] text-muted-foreground">{SHOWCASE_CAPTION}</p>
+              <div className="relative z-10">
+                <NotationStrip moves={game.moves} ply={game.ply} className="mt-3 -ml-4" />
+                <p className="mt-1 text-[13px] text-muted-foreground">{SHOWCASE_CAPTION}</p>
+              </div>
             </div>
           </div>
         </div>
