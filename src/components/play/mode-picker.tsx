@@ -1,10 +1,6 @@
 "use client";
 // src/components/play/mode-picker.tsx  [U5]
-// The lobby of UI_UPGRADE_2 §3: choose a seat on the left, see your table on the
-// right. Three seats stacked on the espresso ground, all visible on load, nothing
-// behind a tab or a modal; a live preview of the player's own board in the
-// player's own room from 1024px up; the live boards and the player's scoresheet
-// beneath.
+// Settings-style game setup, with compact room controls beside the play options.
 //
 // The FR-24 auto-redirect is unchanged: `games.myActiveGame` is a live
 // subscription, so when `queue.pair` creates the game BOTH clients see the id
@@ -16,17 +12,16 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { buttonVariants } from "@/components/ui/button";
-import { AiSetup, type ColourChoice } from "@/components/play/ai-setup";
+import { AiSetup } from "@/components/play/ai-setup";
 import { FindMatchPanel } from "@/components/play/find-match-panel";
 import { LocalSetup } from "@/components/play/local-setup";
 import { Scoresheet } from "@/components/play/scoresheet";
 import { SpectateList } from "@/components/play/spectate-list";
-import { TablePreview } from "@/components/play/table-preview";
+import { RoomRow } from "@/components/play/room-row";
 import { DEFAULT_ROOM } from "@/lib/rooms";
 import type { Colour, Difficulty, GameId, RoomPresetId } from "@/lib/types";
 import { describeConvexError } from "@/components/providers/convex-errors";
 import { cn } from "@/lib/ui";
-import { DESKTOP_QUERY, useMediaQuery } from "./use-viewport";
 import "./play.css";
 
 const QUEUE_NOTICE =
@@ -67,17 +62,13 @@ export function ModePicker() {
   const createLocalGame = useMutation(api.games.createLocalGame);
   const updateSettings = useMutation(api.players.updateSettings);
 
-  const isDesktop = useMediaQuery(DESKTOP_QUERY);
-
   const [aiNotice, setAiNotice] = useState<string | undefined>(undefined);
   const [starting, setStarting] = useState<Mode | null>(null);
   /** The seat the player last touched. Null until they touch one (§3.2). */
   const [seatFromUser, setSeatFromUser] = useState<Mode | null>(null);
   /** The deep link whose one-second ring has already been spent. */
   const [flashSpent, setFlashSpent] = useState<Mode | null>(null);
-  /** Mirrors the AI seat's colour so the preview turns the board with it. */
-  const [aiColour, setAiColour] = useState<ColourChoice>("w");
-  /** Optimistic room, so the swatch and the canvas move before the write lands. */
+  /** Optimistic room, so the swatch updates before the write lands. */
   const [roomOverride, setRoomOverride] = useState<RoomPresetId | null>(null);
   const [roomBusy, setRoomBusy] = useState(false);
 
@@ -87,7 +78,6 @@ export function ModePicker() {
   // that would start one are disabled rather than left to fail on submit.
   const hasActiveGame = Boolean(activeGameId);
   const roomPreset: RoomPresetId = roomOverride ?? me?.roomPreset ?? DEFAULT_ROOM;
-  const previewOrientation: Colour = aiColour === "b" ? "b" : "w";
 
   // "unset" until the first subscription value lands. A game that already exists
   // when the page opens is offered as "Resume", never force-navigated — only a
@@ -205,7 +195,7 @@ export function ModePicker() {
   const seatsDisabled = checking || hasActiveGame || starting !== null;
 
   return (
-    <div className="lobby grid gap-12">
+    <div className="lobby grid gap-8">
       {activeGameId ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[0.75rem] bg-primary/10 px-4 py-3">
           <p className="lobby-body text-foreground">
@@ -221,10 +211,10 @@ export function ModePicker() {
         </div>
       ) : null}
 
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,34rem)_minmax(0,1fr)]">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div
           ref={seatsRef}
-          className="lobby-seats min-w-0"
+          className="lobby-seats grid min-w-0 gap-4"
           onFocusCapture={(event) => {
             const seat = (event.target as HTMLElement).closest<HTMLElement>("[data-seat]");
             const mode = seat?.dataset.seat as Mode | undefined;
@@ -256,7 +246,6 @@ export function ModePicker() {
             notice={aiNotice}
             primary={focusedSeat === "ai"}
             flash={flashed === "ai"}
-            onColourChange={setAiColour}
           />
 
           <LocalSetup
@@ -269,21 +258,33 @@ export function ModePicker() {
           />
         </div>
 
-        {/* §3.1/§3.3: the preview exists from 1024px up, and is not mounted below
-            it — a phone must never pay for a WebGL context it cannot see. */}
-        {isDesktop ? (
-          <TablePreview
-            className="lg:sticky lg:top-20"
-            username={me?.username ?? null}
-            avatarUrl={me?.avatarUrl ?? null}
-            rating={me?.rating ?? null}
-            roomPreset={roomPreset}
-            roomColors={me?.roomColors ?? null}
-            orientation={previewOrientation}
-            onSelectRoom={chooseRoom}
-            roomBusy={roomBusy}
-          />
-        ) : null}
+        <aside
+          aria-labelledby="play-setup-heading"
+          className="grid min-w-0 gap-5 rounded-xl border border-border bg-card p-5 lg:sticky lg:top-20"
+        >
+          <div className="grid gap-1">
+            <h2 id="play-setup-heading" className="eyebrow">Your setup</h2>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              Choose the room for your next game.
+            </p>
+          </div>
+          {me?.username ? (
+            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm font-medium">
+              <span className="min-w-0 break-words">{me.username}</span>
+              {me.rating != null ? (
+                <span className="lobby-data text-muted-foreground">{me.rating} rating</span>
+              ) : null}
+            </p>
+          ) : null}
+          <RoomRow active={roomPreset} onSelect={chooseRoom} disabled={roomBusy} />
+          <Link
+            prefetch={false}
+            href="/settings"
+            className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+          >
+            Board &amp; room settings
+          </Link>
+        </aside>
       </div>
 
       <section aria-labelledby="at-the-boards" className="grid gap-4">

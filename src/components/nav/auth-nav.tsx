@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { UserButton, useAuth } from "@clerk/nextjs";
+import { Show, UserButton, useAuth } from "@clerk/nextjs";
 import { NavLinks, NAV_LINKS, PUBLIC_NAV_LINKS } from "@/components/nav/nav-links";
 import { buttonVariants } from "@/components/ui/button";
-import { useTutorAccess } from "@/components/tutor/access";
+import { useConvexAuth, useQuery } from "convex/react";
+import { Star, UserRound } from "lucide-react";
+import { api } from "../../../convex/_generated/api";
 import { cn, focusRing } from "@/lib/ui";
 
 /**
@@ -25,13 +27,24 @@ import { cn, focusRing } from "@/lib/ui";
  * until it gives up (measured: 280+ requests in 12 s on one page view). The routes are
  * dynamic anyway, so there is nothing useful to prefetch.
  */
+function useProfileHref() {
+  const { isAuthenticated } = useConvexAuth();
+  const me = useQuery(api.players.me, isAuthenticated ? {} : "skip");
+  return isAuthenticated && me ? `/profile/${encodeURIComponent(me.username)}` : null;
+}
+
 export function AuthNavLinks() {
   const { isLoaded, isSignedIn } = useAuth();
-  return <NavLinks links={isLoaded && isSignedIn ? NAV_LINKS : PUBLIC_NAV_LINKS} />;
+  const profileHref = useProfileHref();
+  const links = isLoaded && isSignedIn
+    ? [...NAV_LINKS, ...(profileHref ? [{ href: profileHref, label: "Profile" }] : [])]
+    : PUBLIC_NAV_LINKS;
+  return <NavLinks links={links} />;
 }
 
 export function AuthActions() {
   const { isLoaded, isSignedIn } = useAuth();
+  const profileHref = useProfileHref();
 
   if (!isLoaded) {
     // Same footprint as the two buttons so the header does not shift on hydration.
@@ -42,7 +55,13 @@ export function AuthActions() {
     return (
       <>
         <ProLink />
-        <UserButton />
+        <UserButton>
+          {profileHref ? (
+            <UserButton.MenuItems>
+              <UserButton.Link label="My profile" labelIcon={<UserRound size={16} />} href={profileHref} />
+            </UserButton.MenuItems>
+          ) : null}
+        </UserButton>
       </>
     );
   }
@@ -63,30 +82,31 @@ export function AuthActions() {
   );
 }
 
-/**
- * The quiet "Pro" link of PRO_TUTOR.md §7: parchment, brass on hover, before the
- * avatar. Members who already have the tutor see nothing extra — the header is not
- * the place to sell something the reader has already bought — and neither does anyone
- * whose entitlement has not resolved yet, so the header never flashes an upsell at a
- * member on a cold load.
- */
+/** Clerk owns membership; both states lead to the plan overview and pricing. */
 function ProLink() {
-  const { hasTutor } = useTutorAccess();
-  if (hasTutor !== false) return null;
-
   return (
-    <Link
-      prefetch={false}
-      href="/pro"
-      className={cn(
-        "inline-flex items-center rounded-lg px-2.5 text-sm font-medium whitespace-nowrap",
-        "h-8 pointer-coarse:min-h-9 text-muted-foreground",
-        "transition-colors duration-(--dur-micro) hover:bg-muted/60 hover:text-primary",
-        focusRing,
-      )}
+    <Show
+      when={{ plan: "pro" }}
+      fallback={
+        <Link href="/pro" prefetch={false} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          Upgrade to Pro
+        </Link>
+      }
     >
-      Pro
-    </Link>
+      <Link
+        prefetch={false}
+        href="/pro"
+        aria-label="Pro membership"
+        className={cn(
+          "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium whitespace-nowrap text-primary",
+          "pointer-coarse:min-h-9 transition-colors duration-(--dur-micro) hover:bg-muted/60",
+          focusRing,
+        )}
+      >
+        <Star aria-hidden className="size-3.5 fill-current" />
+        Pro
+      </Link>
+    </Show>
   );
 }
 

@@ -69,10 +69,10 @@ test.describe("the tutor panel", () => {
     // §3.3: the composer's own visible label and its four suggestions.
     await expect(tutor.getByLabel("Ask the tutor")).toBeVisible();
     for (const suggestion of [
-      "Why was that a mistake?",
-      "What's the plan here?",
-      "Show me the threats",
-      "Best move and why",
+      "Why does Nxe4 work?",
+      "What if my opponent avoids that line?",
+      "What changed after Nc3?",
+      "What's the plan for Black here?",
     ]) {
       await expect(tutor.getByRole("button", { name: suggestion, exact: true })).toBeVisible();
     }
@@ -96,6 +96,95 @@ test.describe("the tutor panel", () => {
     // shapes with `data-annotation` so a test can see them.
     await expect(annotations2d(page).first()).toBeAttached();
     expect(await annotations2d(page).count()).toBeGreaterThan(0);
+  });
+
+  test("suggestions submit immediately and change after asking and reviewing", async ({ page }) => {
+    await page.goto("/dev/game?scenario=tutor-pro");
+    const tutor = panel(page);
+    const question = "Why does Nxe4 work?";
+    await tutor.getByLabel("Ask the tutor").fill("An unfinished draft");
+    await tutor.getByRole("button", { name: question, exact: true }).click();
+    await expect(tutor.getByRole("log").getByText(question, { exact: true })).toHaveCount(1);
+    await expect(tutor.getByLabel("Ask the tutor")).toHaveValue("");
+    await expect(tutor.getByRole("button", { name: question, exact: true })).toHaveCount(0);
+    await expect(tutor.getByRole("log").getByText("An unfinished draft", { exact: true })).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "Moves", exact: true }).click();
+    await page.getByRole("button", { name: "First move", exact: true }).click();
+    await expect(tutor.getByRole("button", { name: "How should I start this game?", exact: true })).toBeVisible();
+    await expect(tutor.getByRole("button", { name: "Clear board notes" })).toBeVisible();
+  });
+
+  test("an invalidated drawing stays cleared through fullscreen remounts", async ({ page }) => {
+    await page.goto("/dev/game?scenario=tutor-pro");
+    await expect(panel(page).getByRole("button", { name: "Clear board notes" })).toBeVisible();
+    await page.getByRole("button", { name: "Take back", exact: true }).click();
+    await expect(panel(page).getByRole("button", { name: "Clear board notes" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Fullscreen", exact: true }).click();
+    await page.getByRole("button", { name: "Exit fullscreen", exact: true }).click();
+    await page.getByRole("button", { name: "Tutor", exact: true }).click();
+    await expect(panel(page).getByRole("button", { name: "Clear board notes" })).toHaveCount(0);
+  });
+
+  test("fullscreen canvas follows the viewport on entry, resize and exit", async ({ page }) => {
+    await page.goto("/dev/game?scenario=tutor-pro");
+    const threeD = page.getByRole("toolbar", { name: "Game actions" }).getByRole("button", { name: "3D", exact: true });
+    if (await threeD.isVisible()) await threeD.click();
+    await expect(page.locator("canvas")).toBeVisible();
+    // Cover browsers that provide only the app's focus layout, too.
+    await page.evaluate(() => { document.documentElement.requestFullscreen = async () => { throw new Error("unsupported"); }; });
+    await page.getByRole("button", { name: "Fullscreen", exact: true }).click();
+    for (const viewport of [{ width: 800, height: 600 }, { width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => {
+        const box = await page.locator("canvas").boundingBox();
+        return box && Math.abs(box.width - viewport.width) <= 1 && Math.abs(box.height - viewport.height) <= 1;
+      }).toBe(true);
+    }
+    await page.getByRole("button", { name: "Exit fullscreen", exact: true }).click();
+    await expect(page.locator('[data-slot="game-frame"]')).toHaveAttribute("data-layout", "default");
+    await expect.poll(async () => {
+      const box = await page.locator("canvas").boundingBox();
+      return box && box.width > 0 && box.x + box.width <= 1440 && box.y + box.height <= 900;
+    }).toBe(true);
+  });
+
+  test("fullscreen floats both chats on opposite sides without trapping the tutor", async ({ page }) => {
+    await page.goto("/dev/game?scenario=tutor-pro");
+    await page.evaluate(() => { document.documentElement.requestFullscreen = async () => {}; });
+    await page.getByRole("button", { name: "Fullscreen", exact: true }).click();
+    await page.getByRole("button", { name: "Tutor", exact: true }).click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    const tutor = page.getByRole("dialog", { name: "Tutor", exact: true });
+    const chat = page.getByRole("dialog", { name: "Game panel", exact: true });
+    await expect(tutor).toBeVisible();
+    await expect(chat).toBeVisible();
+    await expect(tutor).toHaveAttribute("aria-modal", "false");
+    const left = (await tutor.boundingBox())!;
+    const right = (await chat.boundingBox())!;
+    expect(left.x).toBe(12);
+    expect(right.x + right.width).toBe(1428);
+    expect(left.y).toBe(right.y);
+    expect(left.height).toBe(right.height);
+    expect(left.x + left.width).toBeLessThan(right.x);
+    await tutor.getByLabel("Ask the tutor").focus();
+    await page.keyboard.press("Tab");
+    expect(await tutor.evaluate((element) => element.contains(document.activeElement))).toBe(false);
+    await tutor.getByLabel("Ask the tutor").fill("Keep this draft");
+    await tutor.getByRole("button", { name: "Hide tutor" }).click();
+    await expect(chat).toBeVisible();
+    await page.getByRole("button", { name: "Tutor", exact: true }).click();
+    await expect(tutor.getByLabel("Ask the tutor")).toHaveValue("Keep this draft");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    if (!(await chat.isVisible())) await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(chat).toBeVisible();
+    await expect(tutor).toBeHidden();
+    await page.getByRole("button", { name: "Tutor", exact: true }).click();
+    await expect(tutor).toBeVisible();
+    await expect(chat).toHaveCount(0);
+    expect((await tutor.boundingBox())!.width).toBe(366);
   });
 
   test("Pro: a chip is a toggle, and the header clears the board", async ({ page }) => {

@@ -10,10 +10,10 @@ import { PIECE_MODEL_CREDIT } from "@/lib/constants";
  * credited anyway because it costs nothing.
  */
 const HDRI_CREDITS: ReadonlyArray<{ room: string; asset: string; author: string }> = [
-  { room: "Classic Study", asset: "fireplace", author: "Greg Zaal" },
+  { room: "Classic Study", asset: "combination_room", author: "Sergej Majboroda" },
   { room: "Space", asset: "qwantani_night_puresky", author: "Greg Zaal, Jarod Guest" },
   { room: "Park", asset: "meadow_2", author: "Sergej Majboroda" },
-  { room: "Neon Arcade", asset: "wooden_studio_10", author: "Alexander Scholten" },
+  { room: "Neon Arcade", asset: "white_studio_06", author: "Grzegorz Wronkowski" },
   { room: "Minimal White", asset: "white_studio_06", author: "Grzegorz Wronkowski" },
 ];
 
@@ -62,12 +62,16 @@ export function Attributions() {
         </p>
         <ul className="mt-2 grid gap-1 text-xs text-muted-foreground">
           {HDRI_CREDITS.map((credit) => (
-            <li key={credit.asset}>
+            <li key={credit.room}>
               <span className="text-foreground">{credit.room}</span> — {credit.asset} by{" "}
               {credit.author}
             </li>
           ))}
         </ul>
+        <p className="mt-2 text-xs text-muted-foreground">
+          The study panorama was created with image generation. The space nebula and neon
+          pavilion are rendered procedurally.
+        </p>
       </div>
 
       <div>

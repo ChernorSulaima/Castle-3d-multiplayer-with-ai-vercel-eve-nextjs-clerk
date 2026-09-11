@@ -12,6 +12,7 @@
    any field the visitor lands in, the selection they drag over the copy, and
    the bars on the two horizontal scrollers below. */
 .landing-page {
+  background-color: var(--bg-elevated);
   caret-color: var(--accent);
   scrollbar-color: color-mix(in oklab, var(--accent) 30%, var(--line)) transparent;
 }
@@ -119,4 +120,17 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* The full-width hero keeps its serif character and a single, quiet emphasis. */
+.hero-editorial-title {
+  font-size: clamp(3rem, 5vw, 5.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+}
+
+/* Keep the cinematic hero on its own ground, separate from the reading surface. */
+.landing-hero {
+  background-color: var(--bg);
+  border-bottom: 1px solid var(--line);
 }

@@ -2,10 +2,7 @@
 // The chrome the three seats of UI_UPGRADE_2 §3.2 share: an icon, a title, one
 // line of host copy, the controls, and an action row at the foot.
 //
-// Deliberately NOT a card. §3.2: "Three stacked panels separated by seam
-// hairlines on the espresso ground (walnut only for the inner controls, never a
-// card inside a card)" — the persona bubble and the Player 2 well are already
-// surfaces, so a card around them would nest two.
+// Uses the same surface, border and padding as the Settings sections.
 import { useId } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/ui";
@@ -47,7 +44,7 @@ export function SeatPanel({
       data-flash={flash ? "true" : undefined}
       // `scroll-mt` clears the 56px sticky header when a deep link scrolls a
       // seat into view, so the title is never parked underneath it.
-      className={cn("lobby-seat scroll-mt-24 py-7 first:pt-0 last:pb-0", className)}
+      className={cn("lobby-seat scroll-mt-24 rounded-xl border border-border bg-card p-5", className)}
       {...props}
     >
       <div className="flex items-start gap-3">
@@ -57,19 +54,18 @@ export function SeatPanel({
           className="mt-[3px] size-[18px] shrink-0 text-muted-foreground"
         />
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="lobby-title text-foreground">
+          <h2 id={headingId} className="text-base font-semibold text-foreground">
             {title}
           </h2>
           {line ? (
-            <p className="lobby-body mt-1.5 max-w-[54ch] text-muted-foreground">{line}</p>
+            <p className="mt-1 max-w-[54ch] text-[13px] leading-relaxed text-muted-foreground">{line}</p>
           ) : null}
         </div>
       </div>
 
-      {/* The controls hang off the same optical margin as the copy from `sm` up. */}
-      {children ? <div className="mt-5 sm:pl-[30px]">{children}</div> : null}
+      {children ? <div className="mt-4">{children}</div> : null}
       {action ? (
-        <div className="mt-5 flex flex-wrap items-center gap-2 sm:pl-[30px]">{action}</div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">{action}</div>
       ) : null}
     </section>
   );

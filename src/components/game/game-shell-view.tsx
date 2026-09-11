@@ -51,12 +51,14 @@ import { cn } from "@/lib/ui";
 import type { Colour, GameController, ViewerRole } from "@/lib/types";
 import { MoveAnnouncer } from "./accessibility/move-announcer";
 import { BoardSurface } from "./board-surface";
+import { RoomAtmosphere } from "@/components/board2d/room-atmosphere";
 import { DrawOfferDialog } from "./draw-offer-dialog";
 import { GameActionBar } from "./game-action-bar";
 import { GameMobileBar } from "./game-mobile-bar";
 import { GameNameplate, type NameplateLamp } from "./game-nameplate";
 import { GameResultDialog } from "./game-result-dialog";
 import { GameSheetPeek, GameSidebar, type SidebarTab } from "./game-sidebar";
+import type { PlayerChatState } from "./player-chat";
 import { GameStatusPill } from "./game-status-pill";
 import { GAME_SHORTCUTS, GAME_SHORTCUTS_NOTE } from "./game-shortcuts";
 import { PromotionPicker } from "./promotion-picker";
@@ -69,6 +71,7 @@ import "./game.css";
 
 /** Everything the screen needs that `GameController` does not carry. */
 export interface GameShellMeta {
+  playerChat?: PlayerChatState;
   /** Persisted `commentary` rows, oldest first. */
   commentary: ChatCommentaryRow[];
   /** FR-32: the online opponent has not been seen inside the abandon window. */
@@ -171,6 +174,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const game = view?.game ?? null;
 
   // Observe committed moves even while the tutor is hidden or in another layout.
+  const tutorMoves = game?.moves;
+  useEffect(() => {
+    if (tutorMoves) useTutorStore.getState().reconcileMoves(tutorMoves);
+  }, [tutorMoves]);
 
   const boardView = useUiStore((s) => s.boardView);
   const webglAvailable = useUiStore((s) => s.webglAvailable);
@@ -192,7 +199,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   // §5.1: Chat leads in an AI game, Moves otherwise — unless the shell opens straight
   // into a reviewed position (a shared link, the dev harness), where the move list is
   // the whole point.
-  const [tab, setTab] = useState<SidebarTab>(isAi && controller.isLive ? "chat" : "moves");
+  const [tab, setTab] = useState<SidebarTab>((isAi || meta.playerChat) && controller.isLive ? "chat" : "moves");
 
   // Stepping back into the game (§5.1 "click to review") is a request to look at the
   // move list, so the sidebar goes there the moment review starts — the reviewing
@@ -242,7 +249,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const tutorInColumn = tutorNode !== null && tutorSurface === "column" && !focus;
   const tutorAsOverlay = tutorNode !== null && (focus || tutorSurface === "overlay");
   const tutorOverlayOpen = tutorAsOverlay && tutorOpen;
-  const tutorTrap = useFocusTrap<HTMLDivElement>(tutorOverlayOpen);
+  const tutorTrap = useFocusTrap<HTMLDivElement>(tutorOverlayOpen, !focus);
   /** The mobile bar's "Tutor" button, so closing the sheet can hand focus back. */
   const tutorOpener = useRef<HTMLButtonElement | null>(null);
 
@@ -274,6 +281,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   // the panel is back (leaving focus, or opening the sheet).
   const messageCount =
     meta.commentary.length +
+    ((meta.playerChat?.messages.at(-1)?.sequence ?? -1) + 1) +
     presenceChips.length +
     drawChips.length +
     (controller.drawOfferFrom === null ? 0 : 1);
@@ -414,8 +422,12 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   // strip and the list never disagree about what was said most recently.
   const lastChip = systemChips.at(-1) ?? null;
   const lastComment = meta.commentary.at(-1) ?? null;
-  const peekText = lastChip?.text ?? lastComment?.text ?? null;
-  const peekSpeaker = lastChip !== null ? null : (persona?.persona.name ?? null);
+  const lastPlayerMessage = meta.playerChat?.messages.at(-1) ?? null;
+  const opponentName = seat === "w" ? view.blackName : view.whiteName;
+  const peekText = lastPlayerMessage?.text ?? lastChip?.text ?? lastComment?.text ?? null;
+  const peekSpeaker = lastPlayerMessage
+    ? (lastPlayerMessage.mine ? "You" : opponentName)
+    : lastChip !== null ? null : (persona?.persona.name ?? null);
   // §4.6's persona header line, compressed: the same vocabulary the Chat tab's plate
   // uses, from the truth the shell already holds.
   const peekStatus =
@@ -474,6 +486,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       pending={controller.pending}
       actions={actions}
       commentary={meta.commentary}
+      playerChat={meta.playerChat}
       systemChips={systemChips}
       hint={meta.hint}
       spectatorCount={meta.spectatorCount}
@@ -695,6 +708,7 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               focus || boardIs3d ? null : "max-lg:max-h-[100vw]",
             )}
           >
+            {!boardIs3d ? <RoomAtmosphere /> : null}
             <div
               className={cn(
                 "relative",
@@ -758,7 +772,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                       className="bg-card shadow-soft"
                       aria-label="Tutor"
                       aria-expanded={tutorOverlayOpen}
-                      onClick={() => setTutorOpen(!tutorOverlayOpen)}
+                      onClick={() => {
+                        if (!tutorOverlayOpen && compact) setFocusChatOpen(false);
+                        setTutorOpen(!tutorOverlayOpen);
+                      }}
                     >
                       <GraduationCapIcon aria-hidden />
                       <span aria-hidden>Tutor</span>
@@ -780,7 +797,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                           : `Chat, ${unread} new ${unread === 1 ? "message" : "messages"}`
                       }
                       aria-expanded={focusChatOpen}
-                      onClick={() => setFocusChatOpen((open) => !open)}
+                      onClick={() => {
+                        if (!focusChatOpen && compact) setTutorOpen(false);
+                        setFocusChatOpen((open) => !open);
+                      }}
                     >
                       <MessagesSquareIcon aria-hidden />
                       <span aria-hidden>Chat</span>
@@ -829,14 +849,9 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                 ref={tutorTrap}
                 tabIndex={-1}
                 role="dialog"
-                // The layer is focus-trapped (§3), so it has to be a dialog to
-                // assistive tech as well: without `aria-modal` a virtual cursor
-                // walked the board and the action bar behind a layer a Tab could
-                // not leave — one boundary for the keyboard and none for a screen
-                // reader. The board's UNCOVERED half stays pointer-reachable on
-                // purpose: §3 puts the panel over the left half precisely so the
-                // drawing it just made is still there to look at.
-                aria-modal="true"
+                // In fullscreen this is a floating companion to the right-hand
+                // chat: the board and both conversations remain reachable.
+                aria-modal={focus ? false : true}
                 aria-label="Tutor"
                 onKeyDown={(event) => {
                   // §3: "Escape closes". The global shortcut handler cannot do it
@@ -852,14 +867,15 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                   // on 64% of a 600px board and hid the whole numbered line the
                   // answer beside it was describing. §3 says "the board's left
                   // half", and a reading column is what the panel is.
-                  "absolute top-0 left-0 z-40 w-[min(24rem,50%)] flex-col",
-                  "rounded-r-xl bg-card shadow-soft outline-none",
+                  "absolute z-40 min-h-0 flex-col bg-card shadow-soft outline-none",
                   // Hidden rather than unmounted, so closing the layer to look at
                   // the board does not throw away the conversation behind it.
                   tutorOpen ? "flex" : "hidden",
                   // In focus the action bar floats at the bottom of this very box,
                   // so the layer stops short of it rather than covering the way out.
-                  focus ? "bottom-20" : "bottom-0",
+                  focus
+                    ? "top-16 bottom-20 left-3 w-[calc(100%-1.5rem)] overflow-hidden rounded-2xl sm:w-[min(22rem,calc(50%-1.5rem))]"
+                    : "top-0 bottom-0 left-0 w-[min(24rem,50%)] rounded-r-xl",
                 )}
               >
                 {tutorNode}
@@ -947,11 +963,12 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       {focus && focusChatOpen ? (
         <div
           role="dialog"
+          aria-modal="false"
           aria-label="Game panel"
           // Starts below the persistent cluster so the way OUT of fullscreen is
           // never covered by the panel (WCAG 2.2 "focus not obscured", and
           // DESIGN.md's rule that the exit is never a guess).
-          className="absolute top-14 right-0 bottom-0 z-40 flex w-full flex-col rounded-tl-xl bg-card shadow-soft sm:max-w-sm"
+          className="absolute top-16 right-3 bottom-20 z-40 flex min-h-0 w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-2xl bg-card shadow-soft sm:w-[min(22rem,calc(50%-1.5rem))]"
         >
           <div className="flex shrink-0 items-center justify-end p-1.5">
             <Button
@@ -1051,16 +1068,35 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
       {meta.roomSettings ? (
         <Drawer
           open={settingsDrawerOpen}
+          swipeDirection={compact ? "down" : "right"}
+          modal={compact}
           onOpenChange={meta.onRoomOpenChange ?? setSettingsDrawerOpen}
         >
-          <DrawerContent className="max-h-[85dvh] transition-[transform,opacity,filter]">
-            <DrawerHeader>
+          <DrawerContent
+            data-testid="room-settings-panel"
+            className="max-h-[85dvh] transition-[transform,opacity,filter] lg:max-h-none lg:rounded-xl"
+            style={{
+              "--drawer-height": compact ? "85dvh" : "calc(100dvh - 24px)",
+              "--drawer-content-width": compact ? "auto" : "28rem",
+              "--drawer-inset": compact ? "0px" : "12px",
+            } as React.CSSProperties}
+          >
+            <DrawerHeader className="relative border-b border-border p-5 pr-14 pb-4 text-left">
               <DrawerTitle>Board &amp; room settings</DrawerTitle>
               <DrawerDescription>
                 Changes apply immediately and never interrupt the game.
               </DrawerDescription>
+              <DrawerClose
+                render={<Button variant="ghost" size="icon-sm" />}
+                aria-label="Close board and room settings"
+                className="absolute top-4 right-4"
+              >
+                <XIcon className="size-4" />
+              </DrawerClose>
             </DrawerHeader>
-            <div className="overflow-y-auto px-4 pb-6">{meta.roomSettings}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 [&_section]:p-4">
+              {meta.roomSettings}
+            </div>
           </DrawerContent>
         </Drawer>
       ) : null}

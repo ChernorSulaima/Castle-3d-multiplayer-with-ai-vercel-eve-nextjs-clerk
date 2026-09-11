@@ -28,7 +28,7 @@ function tabbable(item: HTMLElement): boolean {
  * @param active   whether the layer is on screen
  * @returns the ref to put on the layer's root element
  */
-export function useFocusTrap<T extends HTMLElement>(active: boolean): React.RefObject<T | null> {
+export function useFocusTrap<T extends HTMLElement>(active: boolean, containFocus = true): React.RefObject<T | null> {
   const root = useRef<T | null>(null);
   const opener = useRef<HTMLElement | null>(null);
 
@@ -66,7 +66,9 @@ export function useFocusTrap<T extends HTMLElement>(active: boolean): React.RefO
       }
     };
 
-    node.addEventListener("keydown", onKeyDown);
+    // Floating fullscreen panels share the screen with the board and opponent
+    // chat. Move/restore focus normally, but let Tab leave those panels.
+    if (containFocus) node.addEventListener("keydown", onKeyDown);
     return () => {
       node.removeEventListener("keydown", onKeyDown);
       // Focus goes back to whatever opened the layer. Unconditional on purpose:
@@ -74,9 +76,12 @@ export function useFocusTrap<T extends HTMLElement>(active: boolean): React.RefO
       // of which leave focus inside a subtree React is about to remove — after
       // which `document.activeElement` is the body and nothing is left to test.
       const back = opener.current;
-      if (back !== null && back.isConnected) back.focus();
+      if (back !== null && back.isConnected &&
+        (containFocus || node.contains(document.activeElement) || document.activeElement === document.body)) {
+        back.focus();
+      }
     };
-  }, [active]);
+  }, [active, containFocus]);
 
   return root;
 }

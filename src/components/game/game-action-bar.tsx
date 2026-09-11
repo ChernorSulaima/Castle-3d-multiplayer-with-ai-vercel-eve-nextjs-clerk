@@ -153,16 +153,16 @@ function PgnMenu({ actions }: { actions: GameActions }) {
           render={
             <DropdownMenuTrigger
               render={
-                <Button size="default" variant="ghost" className="shrink-0" aria-label="PGN export" />
+                <Button size="default" variant="ghost" className="shrink-0" aria-label="Export game" />
               }
             >
               <FileTextIcon aria-hidden />
-              <span className="sr-only xl:not-sr-only">PGN</span>
+              <span className="sr-only xl:not-sr-only">Export game</span>
               <ChevronDownIcon aria-hidden className="opacity-60" />
             </DropdownMenuTrigger>
           }
         />
-        <TooltipContent side="bottom">PGN — the game as text (copy or download)</TooltipContent>
+        <TooltipContent side="bottom">Copy or download the moves for another chess app</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" side="top">
         <DropdownMenuItem
@@ -171,11 +171,11 @@ function PgnMenu({ actions }: { actions: GameActions }) {
           }}
         >
           <CopyIcon aria-hidden />
-          Copy PGN
+          Copy game moves
         </DropdownMenuItem>
         <DropdownMenuItem onClick={actions.downloadPgn}>
           <DownloadIcon aria-hidden />
-          Download PGN
+          Download game (.pgn)
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

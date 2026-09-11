@@ -8,6 +8,7 @@ import Link from "next/link";
 import { GameShellView, type GameShellMeta } from "@/components/game/game-shell-view";
 import { TutorAccessProvider } from "@/components/tutor/access";
 import { TutorPanelView } from "@/components/tutor/tutor-panel";
+import type { PlayerChatMessage } from "@/components/game/player-chat";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { MAX_HINTS_PER_GAME } from "@/lib/constants";
 import { errorCopyFor } from "@/lib/errors";
@@ -20,6 +21,7 @@ import {
 import type { TutorUIMessage } from "@/lib/tutor/tools";
 import { useAiStore } from "@/lib/stores/ai-store";
 import { useUiStore } from "@/lib/stores/ui-store";
+import { ROOM_ORDER } from "@/lib/rooms";
 import { cn, focusRing } from "@/lib/ui";
 
 const DEFAULT_SCENARIO = "ai-midgame";
@@ -97,6 +99,8 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
   // sending appends the member's own bubble so the composer, the "you" bubble and
   // the auto-scroll are the real ones.
   const tutor = scenario.tutor ?? null;
+  const [playerDraft, setPlayerDraft] = useState("");
+  const [playerMessages, setPlayerMessages] = useState<PlayerChatMessage[]>([]);
   // Adjusted during render rather than in an effect (the same rule the shell's own
   // `usePresenceChips` follows): switching scenario is a new conversation.
   const [conversation, setConversation] = useState<{ id: string; messages: TutorUIMessage[] }>({
@@ -129,6 +133,15 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
     useUiStore.getState().setLayoutMode(scenario.layoutMode);
   }, [scenario]);
 
+  // Development-only room/view links for visual checks of the real game shell.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const room = ROOM_ORDER.find((id) => id === params.get("room"));
+    if (room) useUiStore.getState().setRoomPreset(room);
+    const view = params.get("view");
+    if (view === "2d" || view === "3d") useUiStore.getState().setBoardView(view);
+  }, []);
+
   const requestHint = useCallback(() => {
     useAiStore.getState().setHintPending(true);
     window.setTimeout(() => {
@@ -158,6 +171,22 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
 
   const meta: GameShellMeta = {
     commentary,
+    playerChat: scenario.mode === "online" && scenario.viewerRole !== "spectator" ? {
+      messages: playerMessages,
+      draft: playerDraft,
+      loading: false,
+      sending: false,
+      error: null,
+      onDraftChange: setPlayerDraft,
+      send: () => {
+        const text = playerDraft.trim();
+        if (!text || text.length > 1000) return;
+        setPlayerMessages((messages) => [...messages, {
+          id: `player-${messages.length}`, text, mine: true, createdAt: Date.now(), sequence: messages.length,
+        }]);
+        setPlayerDraft("");
+      },
+    } : undefined,
     opponentStale: false,
     opponentOnline: scenario.mode === "online" ? true : null,
     spectatorCount: scenario.spectatorCount,
@@ -183,9 +212,9 @@ export function GameHarness({ scenario: requested }: { scenario: string | null }
           // §8: the scenario decides which of §3's states the panel is standing in.
           status={tutor.status ?? "ready"}
           error={tutor.error ?? null}
-          moves={scenario.moves}
-          ply={scenario.reviewPly ?? scenario.moves.length}
-          reviewing={scenario.reviewPly !== null}
+          moves={controller.view?.game.moves ?? scenario.moves}
+          ply={controller.reviewPly ?? controller.view?.game.moves.length ?? scenario.moves.length}
+          reviewing={controller.reviewPly !== null}
           gameId={`mock-${scenario.id}`}
           onSend={askTutor}
           onRetry={() => undefined}

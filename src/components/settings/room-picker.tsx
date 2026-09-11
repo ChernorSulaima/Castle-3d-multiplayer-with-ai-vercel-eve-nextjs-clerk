@@ -121,11 +121,6 @@ function prefetchHdri(url: string): void {
     });
 }
 
-/** "study.hdr" — the source name RoomCard prints instead of a fabricated photo (§3). */
-function hdriName(path: string): string {
-  return path.split("/").pop() ?? path;
-}
-
 export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) => void }) {
   const { isAuthenticated } = useConvexAuth();
   const me = useQuery(api.players.me, isAuthenticated ? {} : "skip");
@@ -216,11 +211,11 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="@container grid gap-5">
       <div
         role="group"
         aria-label="Room preset"
-        className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+        className="grid grid-cols-2 gap-2 @xl:grid-cols-3"
       >
         {ROOM_ORDER.map((id) => {
           const room = ROOMS[id];
@@ -231,7 +226,6 @@ export function RoomPicker({ save }: { save: (patch: Partial<PlayerSettings>) =>
               description={room.description}
               lightSquare={room.board.lightSquare}
               darkSquare={room.board.darkSquare}
-              hdriName={hdriName(room.hdri)}
               active={roomPreset === id}
               onClick={() => choose(id)}
               onPointerEnter={() => warmRoom(room.hdri)}

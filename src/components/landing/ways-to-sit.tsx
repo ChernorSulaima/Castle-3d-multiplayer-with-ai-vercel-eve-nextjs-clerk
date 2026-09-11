@@ -76,8 +76,8 @@ function LedgerRow({ way, index }: { way: Way; index: number }) {
       onBlurCapture={() => setActive(false)}
     >
       <Reveal delayIndex={index}>
-        <div className="grid grid-cols-1 gap-6 py-10 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4 lg:py-14">
-          <h3 className="order-2 lg:order-1 lg:col-span-6 lg:col-start-1 lg:row-start-1">
+        <div className="grid grid-cols-1 gap-6 py-8 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4 lg:py-10">
+          <h3 className="order-1 lg:order-1 lg:col-span-6 lg:col-start-1 lg:row-start-1">
             <Link
               prefetch={false}
               href={way.href}
@@ -97,14 +97,14 @@ function LedgerRow({ way, index }: { way: Way; index: number }) {
             </Link>
           </h3>
 
-          <p className="order-3 max-w-[58ch] text-[15px] leading-relaxed text-pretty text-muted-foreground lg:order-2 lg:col-span-6 lg:col-start-1 lg:row-start-2">
+          <p className="order-2 max-w-[58ch] text-[15px] leading-relaxed text-pretty text-muted-foreground lg:order-2 lg:col-span-6 lg:col-start-1 lg:row-start-2">
             {way.copy}
           </p>
 
           {/* All three artefacts end at the same right edge as the seam hairlines
               above and below the row — the section's right margin used to staircase
               inward because rows 2 and 3 floated centred in their column. */}
-          <div className="order-1 flex justify-center lg:order-3 lg:justify-end lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1 lg:self-center">
+          <div className="order-3 flex justify-center lg:order-3 lg:justify-end lg:col-span-5 lg:col-start-8 lg:row-span-2 lg:row-start-1 lg:self-center">
             {way.artefact(active)}
           </div>
         </div>

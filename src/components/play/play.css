@@ -39,15 +39,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------------------------------------------------------------- the seats
-   Three panels stacked on the espresso ground and separated by seam hairlines
-   (§3.2). Not cards: a card here would put a card inside a card the moment the
-   persona bubble or the Player 2 well appears. */
-
-.lobby-seats > .lobby-seat + .lobby-seat {
-  border-top: 1px solid var(--line);
-}
-
 /**
  * The `?mode=` deep link's brass ring, for one second (§3.2). The ring is a
  * plain box-shadow driven by the data attribute, so under reduced motion it

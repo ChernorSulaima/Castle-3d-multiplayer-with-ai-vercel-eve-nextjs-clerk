@@ -190,7 +190,7 @@ export function GameChat({
         empty={
           isAi
             ? `${personaName} will say something once the game is under way.`
-            : "Commentary is available in games against the AI."
+            : mode === "online" ? "Player chat is private to the two players." : "Commentary is available in games against the AI."
         }
         footer={
           hint.available ? (
@@ -226,7 +226,7 @@ export function GameChat({
             </div>
           ) : isAi ? null : (
             <p className="text-center text-[12px] text-muted-foreground">
-              Commentary is available in games against the AI.
+              {mode === "online" ? "Player chat is private to the two players." : "Commentary is available in games against the AI."}
             </p>
           )
         }

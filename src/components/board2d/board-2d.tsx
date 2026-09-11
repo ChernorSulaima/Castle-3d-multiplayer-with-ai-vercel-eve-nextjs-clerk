@@ -3,7 +3,7 @@
 // The 2D board: one of the two implementations of `BoardViewProps` (the other is
 // P4's Board3D). It owns no chess logic, calls no Convex function and reads no
 // game state from a store — everything comes in as props from useGameController.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type CSSProperties } from "react";
 import { FILES, RANKS, gridPosition, isLightSquare, squareIndices } from "@/lib/constants";
 import { resolveRoom } from "@/lib/rooms";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -44,10 +44,17 @@ export function Board2D(props: BoardViewProps) {
   // them here does not violate the "boards never read a store for game state" rule.
   const roomPreset = useUiStore((s) => s.roomPreset);
   const roomColors = useUiStore((s) => s.roomColors);
-  const customBoard = useMemo(() => {
-    if (roomPreset !== "custom") return null;
-    return resolveRoom("custom", roomColors).board;
-  }, [roomPreset, roomColors]);
+  const room = useMemo(() => resolveRoom(roomPreset, roomColors), [roomPreset, roomColors]);
+  const roomStyle = {
+    "--board-select": room.highlight.select,
+    "--board-legal": room.highlight.legal,
+    "--board-capture": room.highlight.capture,
+    "--board-last": room.highlight.last,
+    "--board-check": room.highlight.check,
+    "--piece-white": room.pieces.white.color,
+    "--piece-black": room.pieces.black.color,
+    boxShadow: `0 0 0 3px ${room.board.frameColor}, 0 18px 60px #00000038`,
+  } as CSSProperties;
 
   const [cursor, setCursor] = useState<SquareId>("e1");
 
@@ -126,7 +133,7 @@ export function Board2D(props: BoardViewProps) {
     // and with `overflow-hidden` a 12px corner clips everything outside its
     // quarter-circle — (12-4)² + (12-2)² = 164 > 12². Square corners clip nothing
     // and are what the spec asked for; the hairline ring stays.
-    <div className="relative aspect-square w-full max-w-full overflow-hidden rounded-none ring-1 ring-border select-none">
+    <div data-board-room={roomPreset} style={roomStyle} className="relative aspect-square w-full max-w-full overflow-hidden rounded-none select-none">
       <div
         role="grid"
         aria-label={`Chess board, ${orientation === "w" ? "white" : "black"} at the bottom`}
@@ -149,11 +156,7 @@ export function Board2D(props: BoardViewProps) {
                   square={square}
                   light={light}
                   colour={
-                    customBoard === null
-                      ? null
-                      : light
-                        ? customBoard.lightSquare
-                        : customBoard.darkSquare
+                    light ? room.board.lightSquare : room.board.darkSquare
                   }
                   selected={selectedSquare === square}
                   legal={isTarget}

@@ -18,6 +18,7 @@ import { TutorPanel } from "@/components/tutor/tutor-panel";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { useAiTurn } from "@/hooks/use-ai-turn";
 import { useGameController } from "@/hooks/use-game-controller";
+import { usePlayerChat } from "@/hooks/use-player-chat";
 import { useHeartbeat } from "@/hooks/use-heartbeat";
 import { useSettingsWriter } from "@/hooks/use-settings-sync";
 import { ABANDON_TIMEOUT_MS, MAX_HINTS_PER_GAME } from "@/lib/constants";
@@ -49,6 +50,7 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
   const viewerRole = view?.viewerRole ?? "spectator";
   const isSpectator = viewerRole === "spectator";
   const isParticipant = viewerRole === "white" || viewerRole === "black";
+  const playerChat = usePlayerChat(gameId, mode === "online" && isParticipant);
 
   const { isAuthenticated } = useConvexAuth();
 
@@ -232,6 +234,7 @@ export function GameShell({ gameId, initialView }: GameShellProps) {
 
   const meta: GameShellMeta = {
     commentary,
+    playerChat,
     opponentStale,
     opponentOnline,
     spectatorCount: game?.spectatorCount ?? 0,

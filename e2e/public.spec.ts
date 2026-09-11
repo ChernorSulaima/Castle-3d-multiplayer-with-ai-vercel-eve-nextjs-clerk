@@ -183,7 +183,7 @@ test.describe("public routes", () => {
     // "Ask for a hint", with the count as "2 left".
     await expect(actions.getByRole("button", { name: /^Ask for a hint/ })).toBeVisible();
     await expect(actions.getByRole("button", { name: "Resign the game" })).toBeVisible();
-    await expect(actions.getByRole("button", { name: "PGN export" })).toBeVisible();
+    await expect(actions.getByRole("button", { name: "Export game" })).toBeVisible();
     // 3D only, and it is why the in-canvas camera overlay is hidden in the shell:
     // the presets live here instead of on top of the board.
     await expect(actions.getByRole("button", { name: "Camera angle" })).toBeVisible();

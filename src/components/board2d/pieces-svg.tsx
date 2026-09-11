@@ -90,8 +90,8 @@ export function PieceGlyph({ type, colour, className, title }: PieceGlyphProps) 
     >
       {title ? <title>{title}</title> : null}
       <g
-        fill={palette.fill}
-        stroke={palette.stroke}
+        fill={`var(--piece-${colour === "w" ? "white" : "black"}, ${palette.fill})`}
+        stroke={colour === "b" ? "var(--piece-white, #08080a)" : palette.stroke}
         strokeWidth={1.6}
         strokeLinecap="round"
         strokeLinejoin="round"

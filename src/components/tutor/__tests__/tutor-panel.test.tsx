@@ -105,10 +105,10 @@ describe("the unlocked state", () => {
   it("carries the four suggestions and the composer's visible label", () => {
     const markup = render(true);
     for (const suggestion of [
-      "Why was that a mistake?",
-      "What&#x27;s the plan here?",
-      "Show me the threats",
-      "Best move and why",
+      "What changed after e5?",
+      "What&#x27;s the plan for White here?",
+      "What threats should White watch for?",
+      "What&#x27;s White&#x27;s best move and why?",
     ]) {
       expect(markup).toContain(suggestion);
     }

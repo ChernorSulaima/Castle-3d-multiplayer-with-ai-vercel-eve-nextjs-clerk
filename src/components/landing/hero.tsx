@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { Display } from "@/components/ui-kit";
 import { DEFAULT_ROOM } from "@/lib/rooms";
-import { STAGGER_MS, useReducedMotion } from "@/lib/ui";
+import { useReducedMotion } from "@/lib/ui";
 import type { ResolvedQualityTier, RoomPresetId } from "@/lib/types";
 import "./landing.css";
 import { HeroBoard } from "./hero-board";
@@ -25,15 +25,6 @@ import { setReplayPaused, useReplayPaused } from "./use-replay-pause";
 import { SHOWCASE_CAPTION, useShowcaseGame } from "./use-showcase-game";
 
 type RoomId = Exclude<RoomPresetId, "custom">;
-
-/** §1.2: one italic word per headline, maximum. */
-const HEADLINE: { text: string; italic?: boolean }[] = [
-  { text: "Chess" },
-  { text: "you" },
-  { text: "can" },
-  { text: "walk", italic: true },
-  { text: "around." },
-];
 
 export function Hero() {
   const [room, setRoom] = useState<RoomId>(DEFAULT_ROOM as RoomId);
@@ -56,28 +47,18 @@ export function Hero() {
     // `isolate` keeps the vignette behind the board and off the header.
     <section
       aria-labelledby="hero-heading"
-      className="relative isolate overflow-hidden lg:-mt-14 lg:pt-14"
+      className="landing-hero relative isolate overflow-hidden lg:-mt-14 lg:pt-14"
     >
-      <div className="mx-auto w-full max-w-[80rem] px-4 sm:px-6">
+      <div className="mx-auto w-full max-w-[100rem] px-5 sm:px-8 lg:px-12">
         <div className="grid items-center gap-8 pt-8 pb-10 sm:pt-10 lg:grid-cols-12 lg:gap-8 lg:pt-10 lg:pb-12">
-          <div className="lg:col-span-5">
-            <Display level={1} id="hero-heading">
-              {HEADLINE.map((word, index) => (
-                <span key={word.text}>
-                  {index > 0 ? " " : null}
-                  <span
-                    className="inline-block motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:fill-mode-backwards motion-safe:animation-duration-500"
-                    style={{ animationDelay: `${index * STAGGER_MS}ms` }}
-                  >
-                    {word.italic ? <em>{word.text}</em> : word.text}
-                  </span>
-                </span>
-              ))}
+          <div className="max-w-[38rem] lg:col-span-5">
+            <Display level={1} id="hero-heading" className="hero-editorial-title">
+              Chess you can <em>walk</em> around.
             </Display>
 
             {/* The title step (1.25rem) of the ramp, at body weight: the one line
                 that has to carry from the headline to the buttons. */}
-            <p className="mt-4 max-w-[46ch] text-[1.25rem] leading-relaxed text-pretty text-muted-foreground">
+            <p className="mt-6 max-w-[42ch] text-[1.125rem] leading-relaxed text-pretty text-muted-foreground">
               Sit at a board in a room you chose. Play people near your rating, or an opponent
               that tells you what it thinks.
             </p>

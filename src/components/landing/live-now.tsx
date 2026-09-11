@@ -9,10 +9,12 @@ import Link from "next/link";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { BoardTile, Display, PlayerChip, Podium, Section } from "@/components/ui-kit";
+import { BoardTile, Display, Section } from "@/components/ui-kit";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ArrowUpRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buttonVariants } from "@/components/ui/button";
-import { cn, focusRing } from "@/lib/ui";
+import { cn, focusRing, initials } from "@/lib/ui";
 import type { LiveGameSummary, SquareId } from "@/lib/types";
 
 const LIVE_LIMIT = 6;
@@ -57,7 +59,6 @@ export function LiveNow() {
   const { isAuthenticated } = useConvexAuth();
   const games = useQuery(api.games.listLive, { limit: LIVE_LIMIT });
   const top = useQuery(api.leaderboard.top, { filter: "all", limit: TOP_LIMIT });
-  const empty = games !== undefined && games.length === 0;
 
   return (
     <Section
@@ -70,16 +71,7 @@ export function LiveNow() {
         Games in progress.
       </Display>
 
-      {/* On a quiet day the left column is one line of text; beside a 530px "Top
-          rated" aside that left ~400px of empty column with a full-height hairline
-          down the middle of nothing. When there is nothing to show, the section is
-          one column and the note sits above the aside as a full-width line. */}
-      <div
-        className={cn(
-          "mt-10 grid gap-10 lg:gap-10",
-          empty ? null : "lg:grid-cols-[minmax(0,1fr)_20rem]",
-        )}
-      >
+      <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-12">
         <div>
           {games === undefined ? (
             <ul className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3" aria-busy>
@@ -92,7 +84,7 @@ export function LiveNow() {
               ))}
             </ul>
           ) : games.length === 0 ? (
-            <p className="text-[15px] text-muted-foreground">
+            <p className="flex min-h-48 items-center border-y border-border py-8 text-sm leading-relaxed text-muted-foreground">
               No live games right now. Start one and it will show up here.
             </p>
           ) : (
@@ -122,92 +114,53 @@ export function LiveNow() {
           ) : null}
         </div>
 
-        <aside
-          aria-labelledby="top-players"
-          className={cn(empty ? "lg:max-w-80" : "lg:border-l lg:border-border lg:pl-10")}
-        >
-          <h3 id="top-players" className="text-[1.25rem] leading-tight font-semibold text-foreground">
-            Top rated
-          </h3>
-
+        <aside aria-labelledby="top-players" className="min-w-0 rounded-xl border border-border bg-card px-5">
+          <div className="flex items-baseline justify-between gap-4 py-5">
+            <h3 id="top-players" className="font-display text-2xl">Top rated</h3>
+            <span className="text-xs text-muted-foreground">Overall rating</span>
+          </div>
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_4.5rem] gap-3 border-y border-border py-2 font-mono text-xs text-muted-foreground" aria-hidden>
+            <span>#</span><span>Player</span><span className="text-right">Rating</span>
+          </div>
           {top === undefined ? (
-            <ul className="mt-5 flex flex-col gap-2.5" aria-busy>
+            <ul className="divide-y divide-border" aria-label="Loading top rated players" aria-busy>
               {[0, 1, 2, 3, 4].map((i) => (
-                <li key={i}>
-                  <Skeleton className="h-12 w-full rounded-xl" />
+                <li key={i} className="flex h-16 items-center gap-3">
+                  <Skeleton className="size-8 rounded-sm" />
+                  <Skeleton className="h-4 flex-1 rounded-sm" />
+                  <Skeleton className="h-4 w-12 rounded-sm" />
                 </li>
               ))}
             </ul>
           ) : top.length === 0 ? (
-            <p className="mt-5 text-[13px] text-muted-foreground">
-              Nobody has played a rated game yet. The first one is yours.
+            <p className="py-8 text-sm leading-relaxed text-muted-foreground">
+              No rated players yet. Finish a rated game to join the leaderboard.
             </p>
           ) : (
-            <>
-              <Podium
-                // One column in a 20rem aside: the 2 · 1 · 3 shape only makes
-                // sense across three columns, so the stack layout drops it.
-                layout="stack"
-                className="mt-5 sm:items-stretch"
-                entries={top.slice(0, 3).map((row) => ({
-                  rank: row.rank,
-                  name: row.username,
-                  rating: row.rating,
-                  avatarUrl: row.avatarUrl,
-                }))}
-                renderName={(entry) => (
+            <ol className="divide-y divide-border" aria-label="Top rated players">
+              {top.map((row) => (
+                <li key={row.playerId}>
                   <Link
                     prefetch={false}
-                    href={profileHref(entry.name)}
-                    className={cn(
-                      "inline-flex min-h-9 items-center rounded-sm px-2 hover:text-primary",
-                      focusRing,
-                    )}
+                    href={profileHref(row.username)}
+                    className={cn("group grid min-h-16 grid-cols-[2rem_minmax(0,1fr)_4.5rem] items-center gap-3 py-3 transition-colors hover:bg-secondary", focusRing)}
                   >
-                    {entry.name}
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">{String(row.rank).padStart(2, "0")}</span>
+                    <span className="flex min-w-0 items-center gap-3">
+                      <Avatar className="size-8 shrink-0">
+                        {row.avatarUrl ? <AvatarImage src={row.avatarUrl} alt="" /> : null}
+                        <AvatarFallback className="text-xs">{initials(row.username)}</AvatarFallback>
+                      </Avatar>
+                      <span className="truncate text-sm font-medium group-hover:text-primary">{row.username}</span>
+                    </span>
+                    <span className="text-right font-mono text-sm tabular-nums">{row.rating.toLocaleString("en-US")}</span>
                   </Link>
-                )}
-              />
-
-              {top.length > 3 ? (
-                <ol className="mt-4 divide-y divide-border border-t border-border">
-                  {top.slice(3).map((row) => (
-                    <li key={row.playerId} className="flex items-center gap-3 py-2.5">
-                      <span className="tabular w-4 shrink-0 font-mono text-[13px] text-muted-foreground">
-                        {row.rank}
-                      </span>
-                      <Link
-                        prefetch={false}
-                        href={profileHref(row.username)}
-                        className={cn(
-                          "flex min-h-9 min-w-0 flex-1 items-center rounded-sm hover:text-primary",
-                          focusRing,
-                        )}
-                      >
-                        <PlayerChip
-                          size="sm"
-                          name={row.username}
-                          avatarUrl={row.avatarUrl || null}
-                          rating={row.rating}
-                          className="min-w-0"
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
-              ) : null}
-            </>
+                </li>
+              ))}
+            </ol>
           )}
-
-          <Link
-            prefetch={false}
-            href="/leaderboard"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "lg" }),
-              "mt-5 h-10 w-full cursor-pointer px-4 transition-colors duration-(--dur-micro)",
-            )}
-          >
-            See the leaderboard
+          <Link prefetch={false} href="/leaderboard" className={cn("mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border text-sm font-medium transition-colors hover:text-primary", focusRing)}>
+            See the leaderboard <ArrowUpRight aria-hidden className="size-4" />
           </Link>
         </aside>
       </div>

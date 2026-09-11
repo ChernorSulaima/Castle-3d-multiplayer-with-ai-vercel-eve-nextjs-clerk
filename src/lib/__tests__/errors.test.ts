@@ -19,6 +19,9 @@ const CONVEX_DIR = fileURLToPath(new URL("../../../convex", import.meta.url));
 /** Directories inside `convex/` that are not part of the shipped function surface. */
 const SKIPPED_DIRS = new Set(["_generated", "__tests__", "node_modules"]);
 
+// Operator-only development fixtures have diagnostics rather than player-facing copy.
+const INTERNAL_FIXTURES = new Set(["seedPlayers.ts", "seedProfile.ts"]);
+
 function convexSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -43,6 +46,13 @@ function thrownCodes(): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const file of convexSourceFiles(CONVEX_DIR)) {
     const source = readFileSync(file, "utf8");
+    if (INTERNAL_FIXTURES.has(file.slice(CONVEX_DIR.length + 1))) {
+      // Fail if a fixture ever becomes a public endpoint instead of silently omitting it.
+      if (!source.includes("internalMutation(") || /export\s+const\s+\w+\s*=\s*(?:mutation|query|action)\s*\(/.test(source)) {
+        throw new Error("Only internal fixture functions may omit player-facing error copy.");
+      }
+      continue;
+    }
     for (const match of source.matchAll(pattern)) {
       const code = match[1];
       const where = file.slice(CONVEX_DIR.length + 1);

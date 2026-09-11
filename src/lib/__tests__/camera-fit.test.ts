@@ -377,10 +377,10 @@ describe("room tokens", () => {
     }
   });
 
-  it("gives the four HDRI-skybox rooms a sharp backdrop and Space none", () => {
+  it("gives photographic rooms a backdrop and procedural rooms none", () => {
     for (const id of ROOM_ORDER) {
       const room = ROOMS[id];
-      if (room.background === "hdri") expect(room.backdrop).toMatch(/^\/backdrops\/.+\.jpg$/);
+      if (room.background === "hdri") expect(room.backdrop).toMatch(/^\/backdrops\/.+\.(jpg|png|webp)$/);
       else expect(room.backdrop).toBeUndefined();
     }
     expect(ROOMS.space.backdrop).toBeUndefined();

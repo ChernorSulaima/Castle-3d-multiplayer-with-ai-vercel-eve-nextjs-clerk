@@ -2,35 +2,35 @@
 name: Castle
 description: An online 3D chess club — a lit board in a room you chose, an opponent who talks, people watching.
 colors:
-  espresso: "#120e0a"
-  walnut: "#1c1610"
-  cellar: "#0c0907"
-  ivory: "#f1e7d3"
-  parchment: "#b3a48c"
-  seam: "#2d241b"
-  brass: "#c9a24a"
-  brass-ink: "#1a130d"
+  espresso: "#151916"
+  walnut: "#1e2420"
+  cellar: "#101410"
+  ivory: "#f0f2e9"
+  parchment: "#b2b9ae"
+  seam: "#343c34"
+  brass: "#bcccad"
+  brass-ink: "#1d271f"
   baize: "#3f9b73"
-  ember: "#d4644a"
+  ember: "#df745e"
   board-light: "#d9b98a"
   board-dark: "#7a4a22"
   board-select: "#e0bb63"
   board-legal: "#3f9b73"
   board-capture: "#dd7256"
   board-check: "#c4402a"
-  light-ivory-ground: "#f3ecdd"
-  light-paper: "#fbf7ee"
-  light-vellum: "#e9e0cf"
-  light-espresso-ink: "#1a130d"
-  light-umber: "#5c503f"
-  light-seam: "#d9cdb7"
-  light-brass: "#806018"
+  light-ivory-ground: "#f5f4ef"
+  light-paper: "#fffefa"
+  light-vellum: "#e9eae2"
+  light-espresso-ink: "#1d271f"
+  light-umber: "#53614f"
+  light-seam: "#d0d5ca"
+  light-brass: "#496545"
   light-baize: "#1f6b4d"
   light-ember: "#a63d27"
 typography:
   display:
     fontFamily: "Fraunces, Georgia, serif"
-    fontSize: "clamp(3rem, 6vw, 4.5rem)"
+    fontSize: "5.5rem"
     fontWeight: 500
     lineHeight: 0.98
     letterSpacing: "-0.02em"
@@ -118,8 +118,8 @@ components:
     padding: "0 8px"
     height: "32px"
   button-danger:
-    backgroundColor: "{colors.ember}"
-    textColor: "{colors.ivory}"
+    backgroundColor: "{colors.walnut}"
+    textColor: "{colors.ember}"
     rounded: "{rounded.control}"
     padding: "0 10px"
     height: "32px"
@@ -160,59 +160,38 @@ components:
 
 **Creative North Star: "The Castle Games Room"**
 
-Castle is the games room of a great house: stone-cool shadows, timber warmth, a board already
-set under one good lamp. The interface borrows its materials from the rooms the player actually
-sits in — espresso grounds, ivory text, brass for anything you can press, baize green for
-anything live — and stays out of the way of the board. The mood is warm, unhurried and assured:
-a host who knows the game and does not need to raise their voice.
+Castle keeps the atmosphere of a private chess room: a real, lit 3D board, an elegant
+Fraunces headline and quiet, readable controls. The 2026-09-11 refinement preserves that
+character while replacing yellowed parchment, brown surfaces and mustard gold with pale
+stone, deep forest-charcoal and a restrained sage accent. The board's materials and room
+lighting remain independent from the interface palette.
 
-Density is generous on marketing surfaces and disciplined inside the app frame, where the board
-owns the viewport and every control sits in a labelled bar beneath it. Depth comes from tone
-(espresso, walnut, cellar) rather than from shadow; shadows belong only to things that float.
-The one bold gesture in the whole system is the live 3D board: on the landing page it plays a
-historic game in the room the visitor is pointing at, its glow anchored to the top-right corner
-and dissolving toward the headline. Everything around that moment is quiet on purpose.
-
-Confirmed rejections: blue-grey shadows and neutral greys (every neutral is warm), decorative
-gradients (the only gradient is the hero's light), and personality painted onto the chrome —
-character lives in the rooms, the personas and the type, not in ornament.
-
-**Key Characteristics:**
-- Palette taken from real materials: espresso, walnut, ivory, brass, baize, ember.
-- One accent (brass) for action; baize strictly for live/turn/success; ember strictly for danger/check.
-- Fraunces with its optical size and "wonk" axes for headlines only; Geist for UI; Geist Mono, tabular, for anything numeric or notational.
-- Tonal layering for depth; a single warm shadow reserved for floating layers.
-- The board is the hero and the controls are never hidden.
+The landing page keeps the cinematic 3D replay and its soft edge. Its scene spans the
+viewport; headline, actions and replay controls use a centered 1600px composition,
+wider than the 1280px lower sections. The headline has a broader measure than its
+supporting paragraph, with generous side space on ultrawide displays. The hero uses the ground token, while the sections below use the lighter elevated
+surface and a fine dividing rule. Product pages retain
+compact controls, readable game data and softly rounded surfaces. Avoid condensed sports
+lettering, oversized uppercase slogans, ornamental badges, and generic feature grids.
+The Top Rated preview is a single ordered ranking list, with consistent rows for all five
+players and enough room for names and ratings; it never uses stacked podium cards.
 
 ## Colors
 
-A warm, low-light palette in which brass is the only thing that asks for attention.
+Runtime ownership: `src/app/globals.css` defines the canonical light and dark CSS tokens.
+Its `@theme inline` block maps them to Tailwind and shadcn roles used throughout the app.
+The frontmatter records those exact values. Legacy material names are retained as aliases
+for existing consumers, not as instructions to restore the old brown-and-gold palette.
 
-### Primary
-- **Brass** (`{colors.brass}`): every primary action, the focus ring, selected states, the active tab rule, the last-move square, the italic word in a headline. It reads as the metal on the pieces' bases and the lamp's fitting. Text on brass is **Brass Ink** (`{colors.brass-ink}`).
-
-### Secondary
-- **Baize** (`{colors.baize}`): the tournament-table green. Live indicators, "to move" dots, success states, legal-move markers on the board. Never used for buttons.
-
-### Tertiary
-- **Ember** (`{colors.ember}`): resign, destructive confirmations, the check indicator, capture markers. Never decorative.
-
-### Neutral
-- **Espresso** (`{colors.espresso}`): the page ground.
-- **Walnut** (`{colors.walnut}`): cards, the sidebar, the header once it has scrolled, chat bubbles from the opponent.
-- **Cellar** (`{colors.cellar}`): sunken wells — the move list, the chat scroll area, inputs, code.
-- **Ivory** (`{colors.ivory}`): primary text and icons.
-- **Parchment** (`{colors.parchment}`): secondary text, labels, eyebrows, notation that is not the current move.
-- **Seam** (`{colors.seam}`): hairlines, borders, the player's own chat bubbles.
-- **Board Light / Board Dark** (`{colors.board-light}` / `{colors.board-dark}`): the squares in mini boards and illustrations; the 3D rooms carry their own square colours.
-- Light theme counterparts (`light-*`) keep the same roles on an ivory ground; nothing is designed light-first.
-
-### Named Rules
-**The One Metal Rule.** Brass is the only accent used for actions and emphasis, and it covers no more than a tenth of any screen. Its rarity is what makes a primary button read as primary.
-
-**The Live Green Rule.** Baize means "happening now": a live game, the side to move, a success. If it is not live, it is not green.
-
-**The Warm Neutral Rule.** No neutral is grey. Every background, border and muted text is a tint of espresso or ivory, so the chrome and the wooden rooms belong to the same world.
+- **Ground / elevated / sunken:** forest-charcoal in dark mode, stone and off-white in light.
+- **Foreground / muted:** soft ivory and desaturated sage-grey in dark; green-black and
+  muted olive in light. Reading contrast is tested across all three surfaces.
+- **Accent (`brass` alias):** muted sage in dark mode, forest green in light. Use sparingly
+  for primary actions, focus, selected controls and a single italic headline word.
+- **Live:** the existing brighter green for activity, success and legal moves, with labels
+  or markers that communicate the state independently of colour.
+- **Danger:** warm coral, adjusted to remain readable on the elevated dark surface.
+- **Board tokens:** unchanged. Mini-board squares and the 3D rooms retain their own materials.
 
 ## Typography
 
@@ -220,13 +199,13 @@ A warm, low-light palette in which brass is the only thing that asks for attenti
 **Body Font:** Geist (with system-ui, sans-serif)
 **Label/Mono Font:** Geist Mono (with ui-monospace, monospace)
 
-**Character:** An engraved serif with soft terminals set against a plain modern grotesk. Fraunces
+**Character:** An engraved serif with soft terminals set against a restrained modern grotesk. Fraunces
 at large optical sizes with the "wonk" axis on reads like lettering on a trophy; Geist keeps the
 interface neutral and legible; Geist Mono gives notation, ratings and clocks the tabular
 discipline of a scoresheet.
 
 ### Hierarchy
-- **Display** (500, clamp(3rem, 6vw, 4.5rem), 0.98): landing headline and result-dialog verdicts only; one italic word per headline at most, set in brass.
+- **Display** (500): the landing headline uses clamp(3rem, 5vw, 5.5rem) with 1.02 line height; result-dialog verdicts retain the shared display scale. One italic word per headline at most, set in the primary sage accent.
 - **Headline** (500, 2.5rem, 1.05): section titles on marketing pages, page titles in the app frame at a smaller size (1.25–2.25rem).
 - **Headline SM** (500, 2rem, 1.1): app-frame verdicts and overlays — the result dialog's verdict, the turn overlay, the promotion picker. One step under Headline, flat at every width because these sit over a board, not over a page.
 - **Title** (600, 1.25rem, 1.3): card titles, dialog titles, sidebar tab headings.
@@ -238,7 +217,7 @@ discipline of a scoresheet.
 ### Named Rules
 **The Scoresheet Rule.** Anything a player would write on a scoresheet — moves, ratings, clocks, coordinates — is set in Geist Mono with tabular figures, never in the UI face.
 
-**The One Italic Rule.** A display headline carries at most one italic word, and that word is brass.
+**The One Italic Rule.** A display headline carries at most one italic word, set in the shared accent.
 
 ## Layout
 
@@ -306,6 +285,7 @@ Things feel like well-made pieces you can pick up.
 - **Error / Disabled:** error hairline in ember with a one-line message beneath in ember; disabled drops to 50% opacity and keeps its label.
 
 ### Navigation
+- **Account navigation:** signed-in players can open their saved public profile from the main navigation or avatar menu. Clerk `Show` checks the `pro` plan: free members see “Upgrade to Pro”; members see a starred “Pro”. Both link to `/pro` for plan details and pricing.
 - **Header:** 56px, knight glyph plus the wordmark "Castle" in Geist 600, primary links in parchment turning ivory on hover with a walnut wash for the active route. Transparent with no border over the landing hero; walnut at 80% with blur and a seam hairline once scrolled. Hidden entirely in the game's focus (fullscreen) layout.
 - **Sidebar tabs (game):** three tabs with a brass underline on the active one; on mobile the same tabs sit in a bottom sheet opened at a 40% peek.
 

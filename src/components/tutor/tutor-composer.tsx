@@ -1,7 +1,7 @@
 "use client";
 // src/components/tutor/tutor-composer.tsx
-// Asking the tutor a question (docs/PRO_TUTOR.md §3.3/§3.4): four suggestions that
-// FILL the field rather than firing it, the context line that says which position
+// Asking the tutor a question: context-aware suggestions submit immediately,
+// with a context line that says which position
 // the answer will be about, and a field with a visible label — Enter sends,
 // Shift+Enter starts a new line.
 import { useId, useRef } from "react";
@@ -9,18 +9,11 @@ import { SendHorizontalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, focusRing } from "@/lib/ui";
 
-/** §3.3, verbatim and in this order. */
-export const TUTOR_SUGGESTIONS = [
-  "Why was that a mistake?",
-  "What's the plan here?",
-  "Show me the threats",
-  "Best move and why",
-] as const;
-
 export interface TutorComposerProps {
   value: string;
   onChange(value: string): void;
-  onSend(): void;
+  onSend(text?: string): void;
+  suggestions: readonly string[];
   /** "Live position · move 14" or "Reviewing move 8". */
   context: string;
   /** Non-null disables the field and says why, in words, next to it. */
@@ -32,6 +25,7 @@ export function TutorComposer({
   value,
   onChange,
   onSend,
+  suggestions,
   context,
   disabledReason,
   className,
@@ -49,14 +43,14 @@ export function TutorComposer({
       <p className="tabular font-mono text-[12px] text-muted-foreground">{context}</p>
 
       <div className="flex flex-wrap gap-1.5">
-        {TUTOR_SUGGESTIONS.map((suggestion) => (
+        {suggestions.map((suggestion) => (
           <button
             key={suggestion}
             type="button"
             aria-disabled={disabled || undefined}
             onClick={() => {
               if (disabled) return;
-              onChange(suggestion);
+              onSend(suggestion);
               field.current?.focus();
             }}
             // A GHOST pill: hairline, no fill, no tone dot. The annotation chips in
@@ -118,7 +112,7 @@ export function TutorComposer({
           aria-label="Send"
           disabled={disabled || empty}
           className="shrink-0 pointer-coarse:size-11"
-          onClick={onSend}
+          onClick={() => onSend()}
         >
           <SendHorizontalIcon aria-hidden />
         </Button>

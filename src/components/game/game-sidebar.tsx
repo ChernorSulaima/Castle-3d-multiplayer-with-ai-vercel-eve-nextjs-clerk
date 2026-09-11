@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GameChat, type ChatHintState, type ChatSystemChip } from "@/components/ai/game-chat";
+import { PlayerChat, type PlayerChatState } from "./player-chat";
 import type { ChatCommentaryRow } from "@/components/ai/chat-model";
 import { MoveList } from "@/components/ui-kit";
 import { PIECE_MODEL_CREDIT } from "@/lib/constants";
@@ -53,6 +54,7 @@ import { LivePositionNote } from "./game-status-pill";
 export type SidebarTab = "chat" | "moves" | "info";
 
 export interface GameSidebarProps {
+  playerChat?: PlayerChatState;
   view: GameView;
   mode: GameMode;
   seat: Colour | "both" | null;
@@ -454,11 +456,11 @@ function InfoTab({
           }}
         >
           <CopyIcon aria-hidden />
-          Copy PGN
+          Copy game moves
         </Button>
         <Button size="sm" variant="ghost" onClick={actions.downloadPgn}>
           <DownloadIcon aria-hidden />
-          Download PGN
+          Download game (.pgn)
         </Button>
         {onOpenRoom ? (
           <Button size="sm" variant="ghost" onClick={onOpenRoom}>
@@ -593,6 +595,7 @@ export function GameSheetPeek({
 /* ----------------------------------------------------------------- sidebar */
 
 export function GameSidebar({
+  playerChat,
   view,
   mode,
   seat,
@@ -677,7 +680,9 @@ export function GameSidebar({
         keepMounted
         className={cn("min-h-0 flex-1 flex-col", tab === "chat" ? "flex" : "hidden")}
       >
-        <GameChat
+        {mode === "online" && playerChat ? (
+          <PlayerChat chat={playerChat} name={chatName ?? "Opponent"} meta={chatMeta} status={finished ? "over" : chatTurn === "you" ? "your-move" : "their-move"} />
+        ) : <GameChat
           mode={mode}
           moves={game.moves}
           commentary={commentary}
@@ -692,7 +697,7 @@ export function GameSidebar({
           turn={chatTurn}
           spectating={seat === null}
           finished={finished}
-        />
+        />}
       </TabsContent>
 
       <TabsContent

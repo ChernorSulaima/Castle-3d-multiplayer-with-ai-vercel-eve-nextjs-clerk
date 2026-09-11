@@ -8,7 +8,7 @@ import type { SquareId } from "@/lib/types";
 export interface Square2DProps {
   square: SquareId;
   light: boolean;
-  /** Custom room colours (FR-21j); null falls back to the --board-* tokens. */
+  /** Room palette colours (FR-21j); null falls back to the --board-* tokens. */
   colour: string | null;
   selected: boolean;
   legal: boolean;
@@ -58,7 +58,10 @@ export function Square2D({
         !disabled && "cursor-pointer",
         "focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
       )}
-      style={colour === null ? undefined : { backgroundColor: colour }}
+      style={colour === null ? undefined : {
+        backgroundColor: colour,
+        color: readableCoordinateColor(colour),
+      }}
     >
       {/* last move (FR-16) */}
       {lastMove ? (
@@ -94,7 +97,7 @@ export function Square2D({
       {/* coordinates (FR-16) */}
       {rankLabel ? (
         <span
-          className="pointer-events-none absolute top-0.5 left-1 text-[clamp(7px,1.4vw,11px)] leading-none font-medium text-foreground/55 tabular-nums"
+          className="pointer-events-none absolute top-0.5 left-1 text-[clamp(7px,1.4vw,11px)] leading-none font-medium text-current tabular-nums"
           aria-hidden
         >
           {rankLabel}
@@ -102,7 +105,7 @@ export function Square2D({
       ) : null}
       {fileLabel ? (
         <span
-          className="pointer-events-none absolute right-1 bottom-0.5 text-[clamp(7px,1.4vw,11px)] leading-none font-medium text-foreground/55"
+          className="pointer-events-none absolute right-1 bottom-0.5 text-[clamp(7px,1.4vw,11px)] leading-none font-medium text-current"
           aria-hidden
         >
           {fileLabel}
@@ -110,4 +113,14 @@ export function Square2D({
       ) : null}
     </div>
   );
+}
+
+/** Coordinates need contrast on both the charcoal rooms and Minimal's grey squares. */
+function readableCoordinateColor(hex: string): string {
+  const channels = [1, 3, 5].map((i) => {
+    const value = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return luminance > 0.18 ? "#20242c" : "#f8f6f0";
 }

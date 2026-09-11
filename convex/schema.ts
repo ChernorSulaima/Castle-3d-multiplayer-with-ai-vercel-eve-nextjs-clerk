@@ -91,6 +91,7 @@ export default defineSchema({
     spectatorCount: v.optional(v.number()), // denormalised by the presence cron
 
     eveSessionId: v.optional(v.string()), // durable Eve session for this game (eve-agent.md §3.3)
+    playerChatThreadId: v.optional(v.string()), // private conversation between the two online players
 
     createdAt: v.number(),
     lastMoveAt: v.number(),

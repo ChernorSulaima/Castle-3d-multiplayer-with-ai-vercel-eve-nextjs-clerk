@@ -17,6 +17,9 @@ importers:
       '@clerk/nextjs':
         specifier: ^7.9.1
         version: 7.9.1(next@16.3.4(@babel/core@7.29.7(supports-color@7.2.0))(@playwright/test@1.63.0)(@types/node@24.13.3)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@convex-dev/agent':
+        specifier: 0.7.2
+        version: 0.7.2(@ai-sdk/provider-utils@5.0.38(zod@4.5.4))(@ai-sdk/provider@4.0.12)(ai@7.0.95(zod@4.5.4))(convex-helpers@0.1.124(@standard-schema/spec@1.1.0)(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(hono@4.13.7)(react@19.2.8)(typescript@5.9.3)(zod@4.5.4))(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(react@19.2.8)
       '@react-three/drei':
         specifier: ^10.7.8
         version: 10.7.8(@react-three/fiber@9.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1))(@types/react@19.2.18)(@types/three@0.185.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1)
@@ -390,6 +393,20 @@ packages:
       '@playwright/test':
         optional: true
       cypress:
+        optional: true
+
+  '@convex-dev/agent@0.7.2':
+    resolution: {integrity: sha512-TdsOfQ6znHz2Ha+6z5iNFa9qBPF+vi0GNYECQpjLBFbPWSmVNd51y6a8zMUspBnvHd5TTCWHpycr5xgjtjs3tw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@ai-sdk/provider': ^4.0.0
+      '@ai-sdk/provider-utils': ^5.0.0
+      ai: ^7.0.0
+      convex: ^1.24.8
+      convex-helpers: ^0.1.103
+      react: ^18.3.1 || ^19.0.0
+    peerDependenciesMeta:
+      react:
         optional: true
 
   '@dimforge/rapier3d-compat@0.12.0':
@@ -1322,6 +1339,9 @@ packages:
     resolution: {integrity: sha512-BoC8PiO4Hkdo0TVJh9Ntxr5MxPDI7/oFsrygN5ADelFSeXG/qgNuucIGA+L5Z6JpPTE/uRfcTWtscjbUaufepQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
+  '@ungap/structured-clone@1.4.0':
+    resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
+
   '@unrs/resolver-binding-android-arm-eabi@1.12.2':
     resolution: {integrity: sha512-g5T90pqg1bo/7mytQx6F4iBNC0Wsh9cu+z9veDbFjc7HjpesJFWD7QMS0NGStXM075+7dJPPVvBbpZlnrdpi/w==}
     cpu: [arm]
@@ -1763,6 +1783,28 @@ packages:
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
+
+  convex-helpers@0.1.124:
+    resolution: {integrity: sha512-Gbu/jq6I3x5Y51cXP5c7+CI3t15vX5Xi2G0tOym3rxpBtYqrI+qWwxkqZgJYrHHccY42wZudB8h6kS3fak8Aeg==}
+    hasBin: true
+    peerDependencies:
+      '@standard-schema/spec': ^1.0.0
+      convex: ^1.43.0
+      hono: ^4.0.5
+      react: ^17.0.2 || ^18.0.0 || ^19.0.0
+      typescript: ^5.5 || ^6.0.0 || ^7.0.0
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      '@standard-schema/spec':
+        optional: true
+      hono:
+        optional: true
+      react:
+        optional: true
+      typescript:
+        optional: true
+      zod:
+        optional: true
 
   convex-test@0.0.56:
     resolution: {integrity: sha512-dLYXlQjKFoGqvjAmPzyLgb2HsYI7iLo1iuNTU2DZmSrMRLWosYk94erjSU67GG5ovfP6+MjX8RJO+ebhmL6QYA==}
@@ -4451,6 +4493,17 @@ snapshots:
       - react
       - react-dom
 
+  '@convex-dev/agent@0.7.2(@ai-sdk/provider-utils@5.0.38(zod@4.5.4))(@ai-sdk/provider@4.0.12)(ai@7.0.95(zod@4.5.4))(convex-helpers@0.1.124(@standard-schema/spec@1.1.0)(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(hono@4.13.7)(react@19.2.8)(typescript@5.9.3)(zod@4.5.4))(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.12
+      '@ai-sdk/provider-utils': 5.0.38(zod@4.5.4)
+      ai: 7.0.95(zod@4.5.4)
+      convex: 1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
+      convex-helpers: 0.1.124(@standard-schema/spec@1.1.0)(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(hono@4.13.7)(react@19.2.8)(typescript@5.9.3)(zod@4.5.4)
+    optionalDependencies:
+      '@ungap/structured-clone': 1.4.0
+      react: 19.2.8
+
   '@dimforge/rapier3d-compat@0.12.0': {}
 
   '@dotenvx/dotenvx@1.75.1':
@@ -5230,6 +5283,9 @@ snapshots:
       '@typescript-eslint/types': 8.70.0
       eslint-visitor-keys: 5.0.1
 
+  '@ungap/structured-clone@1.4.0':
+    optional: true
+
   '@unrs/resolver-binding-android-arm-eabi@1.12.2':
     optional: true
 
@@ -5620,6 +5676,16 @@ snapshots:
   content-type@2.1.0: {}
 
   convert-source-map@2.0.0: {}
+
+  convex-helpers@0.1.124(@standard-schema/spec@1.1.0)(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))(hono@4.13.7)(react@19.2.8)(typescript@5.9.3)(zod@4.5.4):
+    dependencies:
+      convex: 1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
+    optionalDependencies:
+      '@standard-schema/spec': 1.1.0
+      hono: 4.13.7
+      react: 19.2.8
+      typescript: 5.9.3
+      zod: 4.5.4
 
   convex-test@0.0.56(convex@1.45.0(@clerk/react@6.15.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)):
     dependencies:

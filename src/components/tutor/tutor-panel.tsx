@@ -6,7 +6,7 @@
 //
 // The panel is the only writer of `useTutorStore`: it decides which drawing is on
 // the board, and both boards read that store through `BoardViewProps.annotations`.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PanelLeftCloseIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +23,7 @@ import {
   type TutorDrawing,
 } from "@/lib/tutor/overlay";
 import type { TutorUIMessage } from "@/lib/tutor/tools";
+import { tutorSuggestions } from "@/lib/tutor/position-context";
 import { cn } from "@/lib/ui";
 import type { ChatStatus } from "ai";
 import { useTutorAccess } from "./access";
@@ -168,18 +169,20 @@ export function TutorPanelView({
     latest === null
       ? null
       : `${latest.messageId}:${latest.drawings.filter((d) => d.state === "drawn").length}`;
-  const applied = useRef<string | null>(null);
   useEffect(() => {
-    if (latest === null || latestKey === null || applied.current === latestKey) return;
-    applied.current = latestKey;
+    if (latest === null || latestKey === null) return;
     // ONE resolver decides what a source id puts on the board — the pure, unit-tested
     // `annotationsForSource` — rather than this effect merging inline and the reducer
     // being tested beside it. A message id means "everything that answer drew"; a
     // drawing id means that one chip.
     const annotations = annotationsForSource(messages, latest.messageId);
     if (annotations === null) return;
-    useTutorStore.getState().setAnnotations(annotations, latest.messageId);
-  }, [latest, latestKey, messages]);
+    const answer = messages.find((message) => message.id === latest.messageId);
+    const origin = moves.slice(0, answer?.metadata?.ply ?? ply);
+    useTutorStore.getState().showAutomatic(annotations, latest.messageId, `${gameId}:${latestKey}`, origin, moves);
+  }, [latest, latestKey, messages, gameId, moves, ply]);
+
+  const suggestions = useMemo(() => tutorSuggestions(moves, ply, messages), [moves, ply, messages]);
 
   const toggleDrawing = useCallback(
     (drawing: TutorDrawing) => {
@@ -191,9 +194,9 @@ export function TutorPanelView({
         return;
       }
       const annotations = annotationsForSource(messages, drawing.id);
-      if (annotations !== null) store.setAnnotations(annotations, drawing.id);
+      if (annotations !== null) store.setAnnotations(annotations, drawing.id, moves.slice(0, ply));
     },
-    [messages],
+    [messages, moves, ply],
   );
 
   /* --------------------------------------------------------------- states */
@@ -219,12 +222,12 @@ export function TutorPanelView({
           ? COPY.answering
           : null;
 
-  const send = useCallback(() => {
-    const question = draft.trim();
-    if (question.length === 0) return;
+  const send = useCallback((text = draft) => {
+    const question = text.trim();
+    if (question.length === 0 || disabledReason !== null || hasTutor !== true) return;
     setDraft("");
     onSend(question);
-  }, [draft, onSend]);
+  }, [draft, onSend, disabledReason, hasTutor]);
 
   /* ---------------------------------------------------------------- shell */
 
@@ -338,6 +341,7 @@ export function TutorPanelView({
           value={draft}
           onChange={setDraft}
           onSend={send}
+          suggestions={suggestions}
           context={context}
           disabledReason={disabledReason}
         />

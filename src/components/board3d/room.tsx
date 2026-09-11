@@ -1,11 +1,13 @@
 // src/components/board3d/room.tsx
 // FR-21h..FR-21n: every visual difference between rooms comes from `src/lib/rooms.ts`.
-// Adding a room = one entry there plus an .hdr in public/hdri — no change in this file.
+// Photographic backdrops and optional procedural surroundings share the same lighting rig.
 "use client";
-import { Suspense, useCallback, useEffect } from "react";
-import { Backdrop, Environment, Grid, Sparkles, Stars, useTexture } from "@react-three/drei";
+import { Suspense, useCallback, useEffect, useMemo } from "react";
+import { Backdrop, Environment, Grid, Sparkles, Stars, useTexture, useEnvironment } from "@react-three/drei";
 import { EquirectangularReflectionMapping, SRGBColorSpace, type Texture } from "three";
+import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import type { LightRig, RoomPreset } from "@/lib/rooms";
+import { NeonStage, SpaceSky } from "./room-scenery";
 import { PLINTH_HEIGHT, PLINTH_TOP_Y, TABLE_FOOT_Y } from "./layout";
 
 /** Blurred photo backdrop for a player-uploaded room image (FR-21k, v1 scope in §I-16). */
@@ -31,31 +33,8 @@ function ImageBackdrop({ url }: { url: string }) {
   );
 }
 
-/**
- * THE SKYBOX THE VISITOR ACTUALLY LOOKS AT.
- *
- * The room's `.hdr` is a 1k light probe: 1024x512 of HDR data, which is ample for
- * irradiance and reflections and nowhere near enough to fill a hero canvas. Showing it
- * raw put visible pixels on screen, which is why every room carried a
- * `backgroundBlurriness` — the blur was there to hide the resolution, and it is the
- * reason the background looked like a smear. This attaches Poly Haven's TONEMAPPED JPG
- * of the same shot (4096x2048, sRGB, see docs/research/assets.md §A2b) to
- * `scene.background` instead: sixteen times the pixels and no blur at all. The .hdr goes
- * on lighting the board, so nothing about the room's light or its reflections changes.
- *
- * It rides on drei's own `<Environment map background="only">` rather than writing
- * `scene.background` by hand, deliberately: drei restores the previous skybox from a
- * dependency-less layout effect (see the ordering note below), and the only safe way to
- * take part in that dance is to be inside it. `background="only"` leaves
- * `scene.environment` alone, so the HDRI above keeps the IBL.
- *
- * Every one of the five scene properties has to be re-stated here even though only two
- * of them are ours: `setEnvProps` fills the ones it was not given with three's defaults
- * and applies all five, so a backdrop that mentioned only the background would silently
- * reset the room's `environmentIntensity` and `environmentRotation` to 1 and 0 — and
- * relight the whole room — every time it rendered.
- */
-function RoomBackdrop({ url, lights }: { url: string; lights: LightRig }) {
+/** Sharp colour panorama, kept separate from the small HDR lighting probe. */
+function RoomBackdrop({ url, lights, ground }: { url: string; lights: LightRig; ground: boolean }) {
   const configure = useCallback((texture: Texture) => {
     // An equirectangular photo, and a colour one: without these three lines the skybox
     // is drawn as a flat quad in the wrong colour space.
@@ -64,28 +43,32 @@ function RoomBackdrop({ url, lights }: { url: string; lights: LightRig }) {
   }, []);
   const texture = useTexture(url, configure);
 
-  // A room swap unmounts this. Drop the GPU upload AND drei's loader-cache entry
-  // together: a disposed texture left in the cache would be handed to the next mount as
-  // a dead handle.
-  useEffect(
-    () => () => {
-      texture.dispose();
-      useTexture.clear(url);
-    },
-    [texture, url],
-  );
+  // useTexture is shared with preloads and other canvases. The consumer must not
+  // dispose that shared texture on room switches (or Strict Mode effect replay).
 
   return (
-    <Environment
-      map={texture}
-      background="only"
-      backgroundBlurriness={0}
-      backgroundIntensity={lights.bgIntensity}
-      backgroundRotation={[0, lights.envYaw, 0]}
-      environmentIntensity={lights.envIntensity}
-      environmentRotation={[0, lights.envYaw, 0]}
-    />
+    <>
+      <Environment
+        map={texture}
+        background="only"
+        backgroundBlurriness={0}
+        backgroundIntensity={lights.bgIntensity}
+        backgroundRotation={[0, lights.envYaw, 0]}
+        environmentIntensity={lights.envIntensity}
+        environmentRotation={[0, lights.envYaw, 0]}
+      />
+      {ground && <PanoramaGround texture={texture} yaw={lights.envYaw} />}
+    </>
   );
+}
+
+function PanoramaGround({ texture, yaw }: { texture: Texture; yaw: number }) {
+  const skybox = useMemo(() => new GroundedSkybox(texture, 6, 100, 64), [texture]);
+  useEffect(() => () => {
+    skybox.geometry.dispose();
+    skybox.material.dispose();
+  }, [skybox]);
+  return <primitive object={skybox} position={[0, 6, 0]} rotation={[0, yaw, 0]} raycast={() => null} />;
 }
 
 export interface RoomProps {
@@ -96,6 +79,7 @@ export interface RoomProps {
 
 export function Room({ room, imageUrl }: RoomProps) {
   const { lights, floor, extras } = room;
+  const lighting = useEnvironment({ files: room.hdri });
   const showHdriBackground = room.background === "hdri" && !imageUrl;
   // A room that paints its own floor has to paint it under the TABLE's feet, not under
   // the board's: leave it where the plinth used to rest and the legs would go through it.
@@ -110,14 +94,13 @@ export function Room({ room, imageUrl }: RoomProps) {
           lost its configured blur — and `blur` was applied to the THREE.Scene as a stray
           property instead. */}
       <Environment
-        files={room.hdri}
+        map={lighting}
         background={showHdriBackground}
         backgroundBlurriness={lights.backgroundBlur}
         backgroundIntensity={lights.bgIntensity}
         environmentIntensity={lights.envIntensity}
         environmentRotation={[0, lights.envYaw, 0]}
         backgroundRotation={[0, lights.envYaw, 0]}
-        ground={floor.kind === "ground" ? { radius: 40, height: 6, scale: 100 } : false}
       />
 
       {/* MUST stay after <Environment>. drei restores the previous skybox from a
@@ -133,14 +116,23 @@ export function Room({ room, imageUrl }: RoomProps) {
       {/* The 1k HDRI above is the skybox only until this lands, which is exactly the
           fallback we want: the room is lit and backed the moment the .hdr is in, and the
           sharp photograph takes over a beat later without a blank frame in between. Its
-          own boundary so a 1.5 MB JPEG never holds the lighting up. */}
+          own boundary so the visible image never holds the lighting up. */}
       {showHdriBackground && room.backdrop && (
         <Suspense fallback={null}>
-          <RoomBackdrop url={room.backdrop} lights={lights} />
+          <RoomBackdrop url={room.backdrop} lights={lights} ground={floor.kind === "ground"} />
         </Suspense>
       )}
 
       {imageUrl && <ImageBackdrop url={imageUrl} />}
+
+      {!imageUrl && room.id === "space" && <SpaceSky />}
+      {!imageUrl && room.id === "arcade" && <NeonStage />}
+      {room.id === "space" && (
+        <>
+          <hemisphereLight args={["#d5edff", "#52618b", 1.25]} />
+          <directionalLight position={[6, 5, 7]} intensity={1.8} color="#d2eaff" />
+        </>
+      )}
 
       {extras.stars && (
         <Stars

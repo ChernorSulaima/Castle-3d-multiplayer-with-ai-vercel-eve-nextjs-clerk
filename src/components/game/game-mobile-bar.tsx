@@ -349,12 +349,12 @@ export function GameMobileBar({
             <p className="eyebrow pt-2">More</p>
             <MoreItem
               icon={CopyIcon}
-              label="Copy PGN"
+              label="Copy game moves"
               onClick={() => {
                 void actions.copyPgn();
               }}
             />
-            <MoreItem icon={DownloadIcon} label="Download PGN" onClick={actions.downloadPgn} />
+            <MoreItem icon={DownloadIcon} label="Download game (.pgn)" onClick={actions.downloadPgn} />
             {/* §4.8 item 6: "Room" is the one name for the room action, in the
                 desktop bar and here. */}
             <MoreItem icon={SettingsIcon} label="Room" onClick={onOpenRoom} />

@@ -110,21 +110,21 @@
 
 :root {
   /* ------------------------------------------------- study tokens (light) */
-  --bg: #f3ecdd;
-  --bg-elevated: #fbf7ee;
-  --bg-sunken: #e9e0cf;
-  --fg: #1a130d;
-  --fg-muted: #5c503f;
-  --line: #d9cdb7;
-  /* retuned from #8a6a1f: that value was 4.29:1 on --bg, below the 4.5 floor */
-  --accent: #806018;
-  --accent-fg: #fbf7ee;
+  --bg: #f5f4ef;
+  --bg-elevated: #fffefa;
+  --bg-sunken: #e9eae2;
+  --fg: #1d271f;
+  --fg-muted: #53614f;
+  --line: #d0d5ca;
+  /* Restrained forest accent; all text pairings are covered by contrast tests. */
+  --accent: #496545;
+  --accent-fg: #fffefa;
   --live: #1f6b4d;
   --danger: #a63d27;
 
   /* derived surfaces — same palette, one step of warmth apart */
-  --surface-2: #ece3d1;
-  --surface-3: #e4d9c2;
+  --surface-2: #e9ece4;
+  --surface-3: #dee3d8;
 
   /* ------------------------------------------------------- shadcn (light) */
   --background: var(--bg);
@@ -185,20 +185,20 @@
 
 .dark {
   /* -------------------------------------------------- study tokens (dark) */
-  --bg: #120e0a;
-  --bg-elevated: #1c1610;
-  --bg-sunken: #0c0907;
-  --fg: #f1e7d3;
-  --fg-muted: #b3a48c;
-  --line: #2d241b;
-  --accent: #c9a24a;
-  --accent-fg: #1a130d;
+  --bg: #151916;
+  --bg-elevated: #1e2420;
+  --bg-sunken: #101410;
+  --fg: #f0f2e9;
+  --fg-muted: #b2b9ae;
+  --line: #343c34;
+  --accent: #bcccad;
+  --accent-fg: #1d271f;
   --live: #3f9b73;
-  /* retuned from #c4533a: that value was 4.25:1 on --bg, below the 4.5 floor */
-  --danger: #d4644a;
+  /* Lifted for AA contrast on the refreshed elevated surface. */
+  --danger: #df745e;
 
-  --surface-2: #241c14;
-  --surface-3: #2d241b;
+  --surface-2: #293129;
+  --surface-3: #343c34;
 
   /* -------------------------------------------------------- shadcn (dark) */
   --secondary: var(--surface-2);

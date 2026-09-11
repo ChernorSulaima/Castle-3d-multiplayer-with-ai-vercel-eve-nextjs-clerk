@@ -2,16 +2,8 @@
 // Convex push (the CLI skips entry points containing more than one dot) and
 // vitest's default test discovery.
 //
-// `import.meta.glob` is a Vite feature. The documented `/// <reference
-// types="vite/client" />` cannot be used here: pnpm does not hoist `vite` to the
-// top-level `node_modules`, so the reference fails to resolve with TS2688 (and the
-// Convex guidelines warn against papering over that with a `types` allowlist).
-// Declaring the one member we use keeps `tsc -p convex/tsconfig.json` clean.
-declare global {
-  interface ImportMeta {
-    glob(pattern: string): Record<string, () => Promise<unknown>>;
-  }
-}
+// The Agent component's official test helper supplies Vite's ImportMeta types.
+// Do not redeclare `glob`: it conflicts with that helper's `vite/client` reference.
 
 import { Chess } from "chess.js";
 import { convexTest } from "convex-test";
