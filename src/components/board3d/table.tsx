@@ -14,9 +14,12 @@ import {
   TABLE_APRON_HEIGHT,
   TABLE_APRON_INSET,
   TABLE_FOOT_Y,
-  TABLE_LEG_INSET,
+  TABLE_LEG_INSET_X,
+  TABLE_LEG_INSET_Z,
   TABLE_LEG_RADIUS,
-  TABLE_SIZE,
+  TABLE_PEDESTAL_RADIUS,
+  TABLE_SIZE_X,
+  TABLE_SIZE_Z,
   TABLE_THICKNESS,
   TABLE_TOP_Y,
 } from "./layout";
@@ -24,7 +27,8 @@ import {
 /** Underside of the top — where the apron starts. */
 const APRON_TOP_Y = TABLE_TOP_Y - TABLE_THICKNESS;
 const APRON_BOTTOM_Y = APRON_TOP_Y - TABLE_APRON_HEIGHT;
-const APRON_SIZE = TABLE_SIZE - TABLE_APRON_INSET * 2;
+const APRON_SIZE_X = TABLE_SIZE_X - TABLE_APRON_INSET * 2;
+const APRON_SIZE_Z = TABLE_SIZE_Z - TABLE_APRON_INSET * 2;
 /** How far a leg has to reach from the apron down to the floor. */
 const LEG_HEIGHT = APRON_BOTTOM_Y - TABLE_FOOT_Y;
 
@@ -78,7 +82,7 @@ const PEDESTAL_PROFILE: readonly [number, number][] = [
 const LATHE_SEGMENTS = { low: 8, high: 14 } as const;
 
 /** Per-finish PBR. Nothing here is a texture; the room's HDRI does the work. */
-const FINISHES = {
+export const TABLE_FINISHES = {
   wood: { roughness: 0.62, metalness: 0.04 },
   gloss: { roughness: 0.09, metalness: 0.25 },
   metal: { roughness: 0.38, metalness: 0.92 },
@@ -122,14 +126,14 @@ export function Board3DTable({ table, lowDetail }: Board3DTableProps) {
   const legGeometry = useLathe(LEG_PROFILE, TABLE_LEG_RADIUS, LEG_HEIGHT, segments);
   const pedestalGeometry = useLathe(
     PEDESTAL_PROFILE,
-    1,
+    TABLE_PEDESTAL_RADIUS,
     APRON_BOTTOM_Y - TABLE_FOOT_Y + TABLE_APRON_HEIGHT,
     segments + 4,
   );
 
   if (table.kind === "none") return null;
 
-  const finish = FINISHES[table.kind];
+  const finish = TABLE_FINISHES[table.kind];
   const emissive = table.emissive ?? 0;
 
   return (
@@ -138,7 +142,7 @@ export function Board3DTable({ table, lowDetail }: Board3DTableProps) {
           the band below, and a bevelled extrusion here would cost ten times the
           triangles to round a corner nobody is looking at. */}
       <mesh position={[0, TABLE_TOP_Y - TABLE_THICKNESS / 2, 0]} castShadow receiveShadow raycast={() => null}>
-        <boxGeometry args={[TABLE_SIZE, TABLE_THICKNESS, TABLE_SIZE]} />
+        <boxGeometry args={[TABLE_SIZE_X, TABLE_THICKNESS, TABLE_SIZE_Z]} />
         <meshStandardMaterial
           color={table.color}
           roughness={finish.roughness}
@@ -149,7 +153,11 @@ export function Board3DTable({ table, lowDetail }: Board3DTableProps) {
       {table.edgeColor && (
         <mesh position={[0, TABLE_TOP_Y - TABLE_THICKNESS * 0.55, 0]} raycast={() => null}>
           <boxGeometry
-            args={[TABLE_SIZE + EDGE_OVERHANG * 2, EDGE_THICKNESS, TABLE_SIZE + EDGE_OVERHANG * 2]}
+            args={[
+              TABLE_SIZE_X + EDGE_OVERHANG * 2,
+              EDGE_THICKNESS,
+              TABLE_SIZE_Z + EDGE_OVERHANG * 2,
+            ]}
           />
           <meshStandardMaterial
             color={table.edgeColor}
@@ -172,7 +180,7 @@ export function Board3DTable({ table, lowDetail }: Board3DTableProps) {
         receiveShadow
         raycast={() => null}
       >
-        <boxGeometry args={[APRON_SIZE, TABLE_APRON_HEIGHT, APRON_SIZE]} />
+        <boxGeometry args={[APRON_SIZE_X, TABLE_APRON_HEIGHT, APRON_SIZE_Z]} />
         <meshStandardMaterial
           color={table.color}
           roughness={Math.min(1, finish.roughness + 0.12)}
@@ -182,10 +190,10 @@ export function Board3DTable({ table, lowDetail }: Board3DTableProps) {
 
       {legs &&
         ([
-          [-TABLE_LEG_INSET, -TABLE_LEG_INSET],
-          [-TABLE_LEG_INSET, TABLE_LEG_INSET],
-          [TABLE_LEG_INSET, -TABLE_LEG_INSET],
-          [TABLE_LEG_INSET, TABLE_LEG_INSET],
+          [-TABLE_LEG_INSET_X, -TABLE_LEG_INSET_Z],
+          [-TABLE_LEG_INSET_X, TABLE_LEG_INSET_Z],
+          [TABLE_LEG_INSET_X, -TABLE_LEG_INSET_Z],
+          [TABLE_LEG_INSET_X, TABLE_LEG_INSET_Z],
         ] as const).map(([x, z]) => (
           <mesh
             key={`${x},${z}`}

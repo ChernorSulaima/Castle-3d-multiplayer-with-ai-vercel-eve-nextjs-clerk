@@ -87,6 +87,14 @@ export interface TableFinish {
   color: string;
   /** A band around the edge of the top: brass inlay, or the arcade's neon strip. */
   edgeColor?: string;
+  /**
+   * The felt in the bottom of the two captured-piece trays that stand on this top
+   * (`src/components/board3d/trays.tsx`). Baize where the room is a club room, and the
+   * room's own darkness everywhere else — it is a surface the eye should read as cloth
+   * and then stop reading, so every value here is well under the pieces standing on it.
+   * Omit it and the tray gets a warm studio grey.
+   */
+  feltColor?: string;
   /** Emissive strength of that band. Absent or 0 = an inlay, not a light. */
   emissive?: number;
   /**
@@ -167,36 +175,17 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
   study: {
     id: "study",
     label: "Classic Study",
-    // No fire: `combination_room` has none, and a room card that promises one would be
-    // the only untrue line in this file. What it does have is the rest of the sentence.
-    description: "Warm lamplight, polished parquet, and a settee nobody sits on.",
+    description: "Walnut bookshelves, soft daylight, and a quiet seat at the table.",
     hdri: "/hdri/study.hdr", // polyhaven `combination_room`, CC0, Sergej Majboroda
-    backdrop: "/backdrops/study.jpg",
+    backdrop: "/backdrops/study-library.png",
     background: "hdri",
     lights: {
-      // `combination_room` is a DAYLIT room, where `fireplace` was a night one, so the
-      // panorama arrives brighter and cooler than the room card promises. The key goes up
-      // and warm, the env and the background come down: what the visitor sees is a gold
-      // room at the wrong end of the afternoon rather than a photograph at noon.
       key: { position: [4, 8, 5], intensity: 2.4, color: "#ffd9a8" },
       ambientIntensity: 0.11,
       envIntensity: 0.72,
-      bgIntensity: 0.8,
+      bgIntensity: 1.1,
       backgroundBlur: 0.25,
-      /**
-       * 4.05 rad seats both players in the good two-thirds of the room.
-       *
-       * A seat camera sits at y 7.5 and sees a band 20-60 deg BELOW the panorama's
-       * horizon — the lower wall and the floor, and nothing else (assets.md §A2c). In
-       * `combination_room` that band is an inlaid parquet floor the whole way round,
-       * with a buttoned settee, a gilt armchair and a marble side table standing on it —
-       * and, for about 1.4 rad of it (u ~ 0.49-0.76, yaw 1.5-3.2), a bay window blown
-       * to white. The two seats are half a turn apart, so the yaw has to keep BOTH out
-       * of that window: only yaw 3.15-4.89 does. 4.05 is the middle of it, and it hands
-       * white the armchair, the marble table and the parquet, and black the gold damask
-       * wall with the settee under it.
-       */
-      envYaw: 4.05,
+      envYaw: 0,
     },
     board: {
       lightSquare: "#e8d3ac",
@@ -215,19 +204,17 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     },
     floor: { kind: "none" },
     // Walnut with a thin brass inlay round the edge — the study's own two materials.
-    table: { kind: "wood", color: "#3c2718", edgeColor: "#c9a24a", base: "legs" },
-    /**
-     * -0.85 rad: the hero swings between the settee and the gilt armchair, and the bay
-     * window is 1.5 rad outside the far end of the arc.
-     *
-     * The white seat is the middle of what the ROOM will allow (see `envYaw`), not the
-     * middle of what is worth looking at; the idle camera is free of that constraint and
-     * takes the better half. At the -1.80 rad end it faces yaw 5.85 — the settee, seen
-     * across the darkest, warmest stretch of the parquet — and at the +0.10 rad end it
-     * is all but back in the white seat, so the view a player will sit in is still in
-     * the sweep. See docs/research/assets.md §A2d.
-     */
-    orbit: { centerAzimuth: -0.85, halfArc: 0.95 },
+    table: {
+      kind: "wood",
+      color: "#3c2718",
+      edgeColor: "#c9a24a",
+      // DESIGN.md's baize (#3f9b73), taken a long way down: this room's key light is
+      // 2.4 and warm, and the token's own value rendered as a snooker table.
+      feltColor: "#163d2e",
+      base: "legs",
+    },
+    // The library panorama surrounds the whole table.
+    orbit: { centerAzimuth: 0, halfArc: 0.95 },
     extras: {},
     highlight: HIGHLIGHT_DEFAULT,
     glow: "#ffd9a8",
@@ -236,27 +223,25 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
   space: {
     id: "space",
     label: "Space",
-    description: "A board adrift under the Milky Way.",
+    description: "Luminous nebulae, silver pieces, and an endless field of stars.",
     hdri: "/hdri/space.hdr", // polyhaven `qwantani_night_puresky`, CC0 — IBL only
-    // The 1k night HDRI has a grey horizon glow that reads as overcast from the seat
-    // camera, so the skybox is a near-black colour and the `extras.stars` layer supplies
-    // the starfield; the HDRI still lights and reflects in the pieces (FR-21i "Space").
+    // The night probe supplies reflections; a seam-free nebula shader supplies the sky.
     background: "colour",
-    backgroundColor: "#04060d",
+    backgroundColor: "#152641",
     lights: {
-      key: { position: [-5, 9, -3], intensity: 1.6, color: "#bcd4ff" },
-      ambientIntensity: 0.08,
-      envIntensity: 0.6,
+      key: { position: [-5, 9, -3], intensity: 2.4, color: "#bcd4ff" },
+      ambientIntensity: 0.35,
+      envIntensity: 1.1,
       bgIntensity: 0.7, // keep the horizon glow from reading as dawn (assets.md §A2)
       backgroundBlur: 0.0,
       envYaw: 0.6,
     },
     board: {
       lightSquare: "#c9d6ef",
-      darkSquare: "#232a45",
-      squareMetalness: 0.6,
+      darkSquare: "#374967",
+      squareMetalness: 0.25,
       squareRoughness: 0.2,
-      frameColor: "#0d1120",
+      frameColor: "#263954",
       reflector: {
         blur: [120, 60], mixBlur: 0.8, mixStrength: 1.6, mixContrast: 1.2,
         mirror: 0.75, metalness: 0.8, roughness: 0.15, color: "#0a0e1c",
@@ -264,16 +249,22 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     },
     pieces: {
       white: { color: "#dce7ff", metalness: 0.35, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.3 },
-      black: { color: "#151a2e", metalness: 0.7, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.15, envMapIntensity: 1.3 },
+      black: { color: "#364666", metalness: 0.25, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.15, envMapIntensity: 1.3 },
     },
     floor: { kind: "none" },
     // One brushed pedestal, not four legs: adrift, the board should look moored rather
     // than furnished, and a table's worth of legs would fight the starfield behind it.
-    table: { kind: "metal", color: "#2b3243", edgeColor: "#8fa6d8", base: "pedestal" },
-    // Nothing to face: the background is a flat colour and a procedural starfield, so
-    // every azimuth is the same azimuth. Symmetric about the white seat.
+    table: {
+      kind: "metal",
+      color: "#2b3243",
+      edgeColor: "#8fa6d8",
+      // Near-black, with the blue the rest of this room is lit by.
+      feltColor: "#0d1119",
+      base: "pedestal",
+    },
+    // Nebula and stars surround both seats and the full cinematic sweep.
     orbit: { centerAzimuth: 0, halfArc: 0.95 },
-    extras: { stars: { radius: 90, depth: 45, count: 4000, factor: 3.5, speed: 0.4 } },
+    extras: { stars: { radius: 90, depth: 45, count: 5000, factor: 5, speed: 0.4 } },
     highlight: { ...HIGHLIGHT_DEFAULT, legal: "#5ad1ff", last: "#8f9bff" },
     glow: "#bcd4ff",
   },
@@ -283,7 +274,7 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     label: "Park",
     description: "A summer meadow, a table, and nothing to do but play.",
     hdri: "/hdri/park.hdr", // polyhaven `meadow_2`, CC0
-    backdrop: "/backdrops/park.jpg",
+    backdrop: "/backdrops/park-8k.jpg",
     background: "hdri",
     lights: {
       key: { position: [6, 10, 4], intensity: 2.6, color: "#fff4e0" },
@@ -316,7 +307,14 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     // Weathered oak, and no legs: this room's ground is projected at y = 0, which is the
     // height of the board itself, so a leg would stand in mid-air over the grass (see
     // `TableFinish.base`). A thick garden slab is the honest reading of that geometry.
-    table: { kind: "wood", color: "#8b7350", base: "none" },
+    table: {
+      kind: "wood",
+      color: "#8b7350",
+      // Baize again, a shade lighter than the study's — this one is under open sky,
+      // not a lamp, so it needs less taking down.
+      feltColor: "#1d5440",
+      base: "none",
+    },
     // `meadow_2` is grass and trees the whole way round and `floor: ground` projects the
     // meadow under the board, so the sweep barely changes what is behind it — verified at
     // 5 samples across a full swing. Symmetric about the white seat.
@@ -329,37 +327,24 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
   arcade: {
     id: "arcade",
     label: "Neon Arcade",
-    description: "Black gloss, magenta and cyan, and a bass line you can feel.",
+    description: "A luminous pavilion of cyan, rose light, and midnight gloss.",
     hdri: "/hdri/arcade.hdr", // polyhaven `ferndale_studio_06`, CC0
-    backdrop: "/backdrops/arcade.jpg",
-    background: "hdri",
+    background: "colour",
+    backgroundColor: "#191d30",
     lights: {
-      /**
-       * The one room whose key light is NOT its dominant colour. The panorama is
-       * magenta from wall to wall, so a magenta key on top of it left every piece the
-       * same pink and the white army stopped reading as white. The room's own cyan —
-       * the same token the sparkles and the legal-move highlight use — comes in from
-       * the other side instead, and the two of them are the "magenta and cyan" the
-       * room card promises. `glow` below stays magenta: that is what the page sees.
-       */
-      key: { position: [-4, 7, 4], intensity: 1.7, color: "#7cf7ff" },
-      ambientIntensity: 0.1,
-      envIntensity: 0.9,
+      // Neutral light preserves piece identity; cyan and pink light the surrounding room.
+      key: { position: [-4, 7, 4], intensity: 2.5, color: "#e6f4ff" },
+      ambientIntensity: 0.4,
+      envIntensity: 0.3,
       bgIntensity: 0.85,
       backgroundBlur: 0.3,
-      /**
-       * 2.83 rad faces the white seat at the wash just right of the studio's big
-       * magenta globe lamp: a clean gradient from a hot centre to black in the corners,
-       * with the lamp itself, its stand, the floor cable and the bench all outside the
-       * frame. See docs/research/assets.md §A2c.
-       */
       envYaw: 2.83,
     },
     board: {
       lightSquare: "#dfe9ff",
-      darkSquare: "#191326",
-      squareMetalness: 0.75,
-      squareRoughness: 0.14,
+      darkSquare: "#303149",
+      squareMetalness: 0.2,
+      squareRoughness: 0.32,
       frameColor: "#0b0810",
       reflector: {
         blur: [80, 40], mixBlur: 0.6, mixStrength: 2, mixContrast: 1.3,
@@ -367,22 +352,20 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
       },
     },
     pieces: {
-      white: { color: "#f2f7ff", metalness: 0.5, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.5 },
-      black: { color: "#120d1c", metalness: 0.85, roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.5 },
+      white: { color: "#f2f7ff", metalness: 0.15, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.5 },
+      black: { color: "#34354f", metalness: 0.25, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.5 },
     },
     floor: { kind: "none" },
     // Black acrylic with the room's own magenta running round the edge, lit.
-    table: { kind: "gloss", color: "#0b0810", edgeColor: "#ff6ad5", emissive: 1.6, base: "legs" },
-    /**
-     * Symmetric, because `envYaw` already did this job: 2.83 was chosen as the middle of
-     * `ferndale_studio_06`'s ~140 deg of clean gradient, and a 110 deg sweep centred on
-     * the white seat fits inside it with 15 deg to spare either side.
-     *
-     * Shifting it was tried and is worse both ways (assets.md §A2d): -1.2 rad brings the
-     * spider of floor cables over the doorway into three frames of five, and +1.2 rad
-     * reaches the quadrant with the practical lamp in it, where the board's metalness-0.75
-     * squares blow to white.
-     */
+    table: {
+      kind: "gloss",
+      color: "#0b0810",
+      edgeColor: "#ff6ad5",
+      // A magenta so dark it is only a colour where the neon edge reaches it.
+      feltColor: "#2a0b22",
+      base: "legs",
+    },
+    // The geometric light pavilion is finished on both sides.
     orbit: { centerAzimuth: 0, halfArc: 0.95 },
     extras: { sparkles: { count: 40, scale: 12, size: 2, speed: 0.3, color: "#7cf7ff" } },
     highlight: { select: "#ff6ad5", legal: "#7cf7ff", capture: "#ffb347", last: "#ff6ad5", check: "#ff2d55" },
@@ -396,8 +379,8 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     label: "Minimal White",
     description: "A clean studio. Nothing but the game.",
     hdri: "/hdri/minimal.hdr", // polyhaven `white_studio_06`, CC0
-    backdrop: "/backdrops/minimal.jpg",
-    background: "hdri",
+    background: "colour",
+    backgroundColor: "#e7e9ed",
     lights: {
       key: { position: [3, 9, 3], intensity: 1.4, color: "#ffffff" },
       ambientIntensity: 0.4,
@@ -413,7 +396,7 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
     },
     board: {
       lightSquare: "#ffffff",
-      darkSquare: "#b9bec7",
+      darkSquare: "#9ba7b8",
       squareMetalness: 0.0,
       squareRoughness: 0.35,
       frameColor: "#e6e8ec",
@@ -426,9 +409,15 @@ export const ROOMS: Record<Exclude<RoomPresetId, "custom">, RoomPreset> = {
       white: { color: "#fbfbfd", metalness: 0.0, roughness: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.2, sheen: 0.2, envMapIntensity: 1.0 },
       black: { color: "#2a2d33", metalness: 0.0, roughness: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.0 },
     },
-    floor: { kind: "backdrop", color: "#f4f5f7" },
+    floor: { kind: "backdrop", color: "#e1e5eb" },
     // White lacquer on white lacquer; the only edge is the shadow under the top.
-    table: { kind: "lacquer", color: "#eceef2", base: "legs" },
+    table: {
+      kind: "lacquer",
+      color: "#eceef2",
+      // Warm grey: the one soft thing in a room made of white lacquer and cyclorama.
+      feltColor: "#b4ada2",
+      base: "legs",
+    },
     // Symmetric for the same reason the yaw is 0: drei's `<Backdrop>` cyclorama fills the
     // frame at every azimuth of the sweep (verified at 5 samples), so the studio behind it
     // is never on screen and there is nothing to aim at.

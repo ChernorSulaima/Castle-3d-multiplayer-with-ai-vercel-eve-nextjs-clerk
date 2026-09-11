@@ -19,6 +19,7 @@ import { Room } from "./room";
 import { Squares } from "./squares";
 import { TutorAnnotations } from "./tutor-annotations";
 import { Board3DTable } from "./table";
+import { CapturedTrayFurniture } from "./trays";
 import { CONTACT_SHADOW_Y, PLINTH_SIZE } from "./layout";
 
 export interface SceneProps {
@@ -119,6 +120,9 @@ export function Scene({
           reader of this file meets. `lowDetail` reads the reflector because that is the
           one tier flag that is off on Low and on everywhere else (see camera.ts). */}
       <Board3DTable table={room.table} lowDetail={!quality.reflector.enabled} />
+      {/* ...and the two trays standing on it, which is what stops a captured piece
+          hanging in mid-air beside the plinth. */}
+      <CapturedTrayFurniture table={room.table} lowDetail={!quality.reflector.enabled} />
 
       <BoardSurface3D room={room} quality={quality} />
 
