@@ -171,10 +171,6 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const game = view?.game ?? null;
 
   // Observe committed moves even while the tutor is hidden or in another layout.
-  const tutorMoves = game?.moves;
-  useEffect(() => {
-    if (tutorMoves) useTutorStore.getState().reconcileMoves(tutorMoves);
-  }, [tutorMoves]);
 
   const boardView = useUiStore((s) => s.boardView);
   const webglAvailable = useUiStore((s) => s.webglAvailable);
