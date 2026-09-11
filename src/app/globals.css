@@ -485,23 +485,3 @@
   mask-size: 100% 100%;
 }
 
-/* UI_UPGRADE_2 §4.2: in the game the canvas is no longer the board square — it fills
-   the whole board column, so the mask can be a real dissolve instead of the polite 5%
-   hem above. 12% left and right, 8% top and 14% bottom (the ground is warmer under the
-   board than over it, and the action bar wants a softer hand-off than the nameplate).
-   Because the canvas now extends far past the board, none of these stops ever reaches
-   a corner square. `.board-canvas-feather` stays for the lobby preview, where the
-   canvas IS the board square. */
-.board-canvas-dissolve {
-  --board-mask:
-    linear-gradient(to bottom, transparent 0%, #000 8%, #000 86%, transparent 100%),
-    linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
-  -webkit-mask-image: var(--board-mask);
-  mask-image: var(--board-mask);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-}

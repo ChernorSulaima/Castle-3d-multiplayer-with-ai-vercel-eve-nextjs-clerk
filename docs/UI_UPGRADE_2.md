@@ -309,7 +309,12 @@ shouldn't be boxed off like this"). Fix it structurally, not by fading harder:
    continues to the column's edges, under the plates and up to the sidebar hairline. The square
    `aspect-square h-[min(100cqw,100cqh)]` constraint moves into the 2D branch only (the 2D board
    stays a centred square with square corners).
-2. **The edges dissolve into a matching ground.** The column paints a room-tinted ground behind
+2. ~~**The edges dissolve into a matching ground.**~~ **Retired 2026-09-11 (owner: "Don't blur
+   this background with the vignette").** With the canvas filling the column, its edges sit on
+   the nameplates and the sidebar hairline, so no mask and no tinted ground are needed; the
+   dissolve smeared the backdrop into a brown halo on the light theme. `.board-canvas-dissolve`
+   is gone; `.board-canvas-feather` remains for the lobby preview only. Original text kept below
+   for the record: The column paints a room-tinted ground behind
    the canvas: `--room-glow` set inline from the room's key-light colour (`ROOMS[id].lights.key
    .color`, e.g. study `#ffd9a8`, space `#bcd4ff`, park `#fff4e0`, arcade `#ff6ad5`; custom rooms
    use their floor colour) and a background of

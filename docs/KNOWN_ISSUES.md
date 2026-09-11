@@ -384,6 +384,10 @@ the scene work (exact camera fit, sharp backdrops, table, curated rooms). None b
    stays "Ask for a hint · N left" everywhere. Flip lives in the More sheet on phones so five
    buttons fit 390 px without truncating.
 
+8. **No vignette on the game canvas.** The §4.2 dissolve mask and room-tinted ground were
+   removed on 2026-09-11 at the owner's request; the 3D canvas now meets the nameplates and the
+   sidebar hairline with a clean edge, in both themes. The landing hero keeps its own blend.
+
 ## 8. Castle Pro and the tutor (2026-09-11)
 
 Shipped per `docs/PRO_TUTOR.md`; verified end to end (Clerk checkout with the test card, a real

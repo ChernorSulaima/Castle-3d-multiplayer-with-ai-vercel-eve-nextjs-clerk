@@ -81,14 +81,14 @@ export function BoardSurface(props: BoardViewProps) {
       // canvas taller than its own frame and `overflow-hidden` sliced the bottom rank
       // off the board. The board decides nothing about its size here: the square does.
       // DESIGN.md: "Don't frame the 3D board with a border, card or box; its light
-      // is its edge." UI_UPGRADE_2 §4.2 finishes the job: the canvas is no longer
-      // the board square, it fills the whole board column (the shell drops the
-      // square constraint for this branch), so `.board-canvas-dissolve` can be a
-      // real dissolve — 12% left/right, 8% top, 14% bottom — that never touches a
-      // corner square, over a ground the column tints from the room's own key
-      // light. The 2D branch below keeps the square and stays unmasked: its outer
-      // files and ranks are information, not atmosphere.
-      <div className="board-canvas-dissolve size-full overflow-hidden [&>*]:min-h-0">
+      // is its edge." UI_UPGRADE_2 §4.2: the canvas is not the board square, it
+      // fills the whole board column, so its edges land on the column's own seams
+      // (the nameplates above and below, the sidebar hairline) and the room reads as
+      // the column's background. No mask: the owner asked for the room to stay
+      // sharp to the edge (2026-09-11) — the earlier dissolve smeared the backdrop
+      // into a brown halo, worst on the ivory ground of the light theme. The 2D
+      // branch below keeps the square: its outer files and ranks are information.
+      <div className="size-full overflow-hidden [&>*]:min-h-0">
         {/* §5.1 puts White / Black / Top / Orbit / Reset in the shell's own action
             bar (and in the mobile "More" sheet and the focus HUD), so the in-canvas
             copy of the same five buttons is redundant here and sits over the bottom

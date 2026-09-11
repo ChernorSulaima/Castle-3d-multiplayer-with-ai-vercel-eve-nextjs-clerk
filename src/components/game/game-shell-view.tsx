@@ -11,7 +11,7 @@
 // Layout, in one place so nothing remounts when it changes (§5.2): the board box
 // is the SAME element in the default and focus layouts, only its classes differ.
 // Remounting it would tear down the WebGL context and re-download the room.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDownIcon,
   EyeIcon,
@@ -45,7 +45,6 @@ import { useFullscreen } from "@/hooks/use-fullscreen";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { formatGameResult, pgnResult } from "@/lib/format";
-import { resolveRoom } from "@/lib/rooms";
 import { useTutorStore } from "@/lib/stores/tutor-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/ui";
@@ -171,20 +170,20 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
   const { view, board, actions } = controller;
   const game = view?.game ?? null;
 
+  // Observe committed moves even while the tutor is hidden or in another layout.
+  const tutorMoves = game?.moves;
+  useEffect(() => {
+    if (tutorMoves) useTutorStore.getState().reconcileMoves(tutorMoves);
+  }, [tutorMoves]);
+
   const boardView = useUiStore((s) => s.boardView);
   const webglAvailable = useUiStore((s) => s.webglAvailable);
-  const roomPreset = useUiStore((s) => s.roomPreset);
-  const roomColors = useUiStore((s) => s.roomColors);
-  // True when the column is showing the room, which is the only time the ground
-  // behind it should be tinted by one.
+  // True when the column is showing the room: the canvas then fills the column and
+  // the square constraint belongs to the 2D branch only (§4.2).
   const boardIs3d = boardView === "3d" && webglAvailable !== false;
   // The room's key light — study is a warm lamp, space a cold one, arcade magenta.
   // A custom room has no key light of its own (it borrows Minimal's), so it uses the
   // glow derived from its own squares instead.
-  const roomGlow = useMemo(() => {
-    const room = resolveRoom(roomPreset, roomColors);
-    return roomPreset === "custom" ? room.glow : room.lights.key.color;
-  }, [roomPreset, roomColors]);
   const layoutMode = useUiStore((s) => s.layoutMode);
   const settingsDrawerOpen = useUiStore((s) => s.settingsDrawerOpen);
   const setSettingsDrawerOpen = useUiStore((s) => s.setSettingsDrawerOpen);
@@ -691,24 +690,14 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
               The desk keeps its 8px margin, the phone gives it to the hero. */}
           <div
             className={cn(
-              "relative grid min-h-0 flex-1 place-items-center p-0 [container-type:size] lg:p-2",
+              "relative grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 place-items-center p-0 [container-type:size]",
+              // The 2D square keeps the desk's 8px margin; the room runs to the
+              // column's edges (§4.2), so in 3D there is no gutter to frame it.
+              boardIs3d ? "p-0" : "lg:p-2",
               // The cap that turns the leftover height into space the group can
               // centre in, rather than a box that grows past the square.
               focus || boardIs3d ? null : "max-lg:max-h-[100vw]",
             )}
-            // §4.2 item 2: the ground the canvas dissolves INTO, tinted by the room
-            // the player is actually sitting in, so the edge of the render is not an
-            // edge you can see. No new colour: `--room-glow` is the room's own key
-            // light, mixed 18% into the page ground.
-            style={
-              boardIs3d
-                ? ({
-                    "--room-glow": roomGlow,
-                    background:
-                      "radial-gradient(ellipse 70% 60% at 50% 45%, color-mix(in oklab, var(--room-glow) 18%, var(--bg)), var(--bg) 75%)",
-                  } as React.CSSProperties)
-                : undefined
-            }
           >
             <div
               className={cn(
@@ -756,7 +745,10 @@ export function GameShellView({ controller, viewerRole, meta }: GameShellViewPro
                   // the HUD, so it lives outside the fading layer alongside
                   // anything still waiting on an answer.
                   <div className="flex flex-col items-center gap-2">
-                    {statusPill}
+                    {/* Floating over the room: a plate and the soft shadow, no
+                        hairline. Over a bright backdrop the bare tinted pill was
+                        unreadable in the light theme. */}
+                    <div className="rounded-full bg-card p-1 shadow-soft">{statusPill}</div>
                     {drawOfferOpen ? drawOffer : null}
                   </div>
                 }
