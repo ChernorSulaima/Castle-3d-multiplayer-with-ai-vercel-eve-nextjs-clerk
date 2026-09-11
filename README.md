@@ -710,8 +710,8 @@ The Convex Agent component maintains its own message/thread storage. Uploaded ro
 Clone the public repository and open its root:
 
 ```bash
-git clone https://github.com/sonnysangha/castle3dmultiplayerchess.git
-cd castle3dmultiplayerchess
+git clone https://github.com/sonnysangha/Castle-3d-multiplayer-with-ai-vercel-eve-nextjs-clerk.git
+cd Castle-3d-multiplayer-with-ai-vercel-eve-nextjs-clerk
 pnpm install
 cp .env.example .env.local
 ```
