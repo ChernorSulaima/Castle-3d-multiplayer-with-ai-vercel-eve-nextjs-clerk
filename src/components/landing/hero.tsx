@@ -50,7 +50,7 @@ export function Hero() {
       className="landing-hero relative isolate overflow-hidden lg:-mt-14 lg:pt-14"
     >
       <div className="mx-auto w-full max-w-[100rem] px-5 sm:px-8 lg:px-12">
-        <div className="grid items-center gap-8 pt-8 pb-10 sm:pt-10 lg:grid-cols-12 lg:gap-8 lg:pt-10 lg:pb-12">
+        <div className="grid items-center gap-8 pt-8 pb-10 sm:pt-10 lg:grid-cols-12 lg:gap-8 lg:pt-6 lg:pb-10">
           <div className="max-w-[38rem] lg:col-span-5">
             <Display level={1} id="hero-heading" className="hero-editorial-title">
               Chess you can <em>walk</em> around.
@@ -59,8 +59,8 @@ export function Hero() {
             {/* The title step (1.25rem) of the ramp, at body weight: the one line
                 that has to carry from the headline to the buttons. */}
             <p className="mt-6 max-w-[42ch] text-[1.125rem] leading-relaxed text-pretty text-muted-foreground">
-              Sit at a board in a room you chose. Play people near your rating, or an opponent
-              that tells you what it thinks.
+              Choose your room, take a seat, and play. Face someone near your rating or an AI
+              opponent with a personality of its own.
             </p>
 
             <HeroCtas className="mt-7" />
@@ -71,7 +71,7 @@ export function Hero() {
             {/* Reserves the board's height on desktop; the canvas itself is the
                 absolutely positioned layer below, so it can touch the top and the
                 right edge of the viewport instead of stopping at the grid. */}
-            <div aria-hidden className="hidden lg:block lg:h-[min(64vh,640px)]" />
+            <div aria-hidden className="hidden lg:block lg:h-[min(56vh,560px)]" />
             <div
               ref={boardRef}
               // Mobile: in flow, full width. Desktop: pinned to the section's top
@@ -87,7 +87,7 @@ export function Hero() {
               <HeroBoard game={game} room={preview ?? room} tier={tier} />
             </div>
 
-            <div className="relative z-10">
+            <div className="landing-hero-controls relative z-10">
               <NotationStrip moves={game.moves} ply={game.ply} className="mt-3 -ml-4" />
 
               <div className="mt-1 flex items-center gap-1.5">

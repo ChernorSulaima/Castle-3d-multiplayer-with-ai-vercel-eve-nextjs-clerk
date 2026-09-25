@@ -134,3 +134,16 @@
   background-color: var(--bg);
   border-bottom: 1px solid var(--line);
 }
+
+/* Keep the replay controls legible over bright room backdrops. On a stacked
+   layout they return to the page ground so the board still feels unframed. */
+@media (min-width: 1024px) {
+  .landing-hero-controls {
+    margin: -0.5rem -1rem 0;
+    padding: 0.5rem 1rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(14px);
+  }
+}

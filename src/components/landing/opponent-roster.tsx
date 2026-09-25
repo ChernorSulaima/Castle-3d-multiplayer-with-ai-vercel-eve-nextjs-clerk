@@ -6,16 +6,16 @@ import { SAMPLE_LINE } from "./sample-lines";
 
 export function OpponentRoster() {
   return (
-    <Section id="opponents" padding="none" className="scroll-mt-20 py-8 sm:py-12">
+    <Section id="opponents" padding="none" className="scroll-mt-20 border-y border-border bg-background py-14 sm:py-20">
       <Display level={3} as="h2">Five opponents, five opinions.</Display>
       <p className="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-muted-foreground">
         From your first game to your toughest. Each opponent makes its move, then explains the thinking.
       </p>
-      <ul className="mt-10 grid border-t border-border sm:grid-cols-2 lg:grid-cols-5">
+      <ul className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {DIFFICULTY_ORDER.map((id, index) => {
           const config = DIFFICULTIES[id];
           return (
-            <li key={id} className="min-w-0 border-b border-border py-7 sm:px-5 lg:border-b-0 lg:border-r lg:first:pl-0 lg:last:border-r-0 lg:last:pr-0">
+            <li key={id} className="min-w-0 rounded-xl border border-border bg-card/60 p-5 transition-colors duration-(--dur-micro) hover:border-primary/40 hover:bg-card">
               <div className="mb-6 flex items-center justify-between gap-3">
                 <div aria-hidden className="flex gap-1.5">
                   {DIFFICULTY_ORDER.map((level, step) => (

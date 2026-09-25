@@ -64,7 +64,7 @@ export function LiveNow() {
     <Section
       id="live-now"
       padding="none"
-      className="scroll-mt-20 py-8 sm:py-12"
+      className="scroll-mt-20 py-14 sm:py-20"
       aria-labelledby="live-now-heading"
     >
       <Display level={3} as="h2" id="live-now-heading">
@@ -84,9 +84,19 @@ export function LiveNow() {
               ))}
             </ul>
           ) : games.length === 0 ? (
-            <p className="flex min-h-48 items-center border-y border-border py-8 text-sm leading-relaxed text-muted-foreground">
-              No live games right now. Start one and it will show up here.
-            </p>
+            <div className="flex min-h-56 flex-col items-start justify-center rounded-xl border border-dashed border-border bg-card/40 p-6 sm:p-8">
+              <p className="font-display text-2xl text-foreground">The first board is yours.</p>
+              <p className="mt-2 max-w-[36ch] text-sm leading-relaxed text-muted-foreground">
+                No games are live yet. Start a match and it will appear here for the club to watch.
+              </p>
+              <Link
+                prefetch={false}
+                href="/play"
+                className={cn(buttonVariants({ variant: "outline", size: "lg" }), "mt-5 h-10 gap-2 px-4", focusRing)}
+              >
+                Start a game <ArrowUpRight aria-hidden className="size-4" />
+              </Link>
+            </div>
           ) : (
             <ul className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
               {games.map((game) => (

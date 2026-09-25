@@ -76,7 +76,7 @@ function LedgerRow({ way, index }: { way: Way; index: number }) {
       onBlurCapture={() => setActive(false)}
     >
       <Reveal delayIndex={index}>
-        <div className="grid grid-cols-1 gap-6 py-8 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4 lg:py-10">
+        <div className="grid grid-cols-1 gap-6 rounded-xl px-4 py-8 transition-colors duration-(--dur-micro) hover:bg-card/60 sm:px-6 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4 lg:py-10">
           <h3 className="order-1 lg:order-1 lg:col-span-6 lg:col-start-1 lg:row-start-1">
             <Link
               prefetch={false}
@@ -117,7 +117,7 @@ export function WaysToSit() {
   return (
     // 96px between sections on desktop, 64 on mobile (§2): the band owns half
     // of each gap, so two adjacent bands add up to the figure in the brief.
-    <Section id="modes" padding="none" className="scroll-mt-20 py-8 sm:py-12">
+    <Section id="modes" padding="none" className="scroll-mt-20 py-14 sm:py-20">
       <Display level={3} as="h2">
         Three ways to sit down.
       </Display>
